@@ -87,7 +87,12 @@ impl EventStore for SqliteEventStore {
 
         if !update_events.is_empty() {
             // Make sure events exist
-            ids_in_database(&*self.pool, update_events.iter().map(|e| e.id.as_str())).await?;
+            ids_in_table(
+                &*self.pool,
+                "events",
+                update_events.iter().map(|e| e.id.as_str()),
+            )
+            .await?;
         }
 
         let mut tx = self
@@ -97,17 +102,31 @@ impl EventStore for SqliteEventStore {
             .map_err(|e| StoreError::TransactionStartError(e))?;
 
         let mut output_events = Vec::new();
-        for mut event in insert_events.into_iter() {
-            let id = uuid_to_string(Uuid::now_v7());
-            sqlx::query("INSERT INTO events(id, name) VALUES (?, ?);")
-                .bind(&id)
-                .bind(&event.name)
+        if !insert_events.is_empty() {
+            let mut events_with_ids = insert_events
+                .into_iter()
+                .map(|mut e| {
+                    let id = Uuid::now_v7();
+                    e.id = uuid_to_string(id);
+                    e
+                })
+                .collect::<Vec<_>>();
+
+            let values_clause: String =
+                itertools::Itertools::intersperse(events_with_ids.iter().map(|_| "(?, ?)"), ", ")
+                    .collect();
+
+            let query = format!("INSERT INTO events(id, name) VALUES {}", values_clause);
+            let mut query_builder = sqlx::query(&query);
+            for event in events_with_ids.iter() {
+                query_builder = query_builder.bind(&event.id).bind(&event.name);
+            }
+
+            query_builder
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| StoreError::InsertionError(e))?;
-
-            event.id = id;
-            output_events.push(event);
+            output_events.append(&mut events_with_ids);
         }
 
         for event in update_events.into_iter() {
@@ -173,31 +192,12 @@ impl EventStore for SqliteEventStore {
     }
 
     async fn delete_events(&self, event_ids: &Vec<String>) -> Result<(), StoreError> {
-        ids_in_database(&*self.pool, event_ids.iter().map(|id| id.as_str())).await?;
-
-        let select_where_clause: String =
-            itertools::Itertools::intersperse(event_ids.iter().map(|_| "(?)"), ",").collect();
-
-        let query = format!("WITH valid_ids AS (SELECT column1 FROM ( VALUES {} )) SELECT column1 FROM valid_ids LEFT JOIN events ON events.id = valid_ids.column1 WHERE events.id IS NULL", select_where_clause);
-
-        let mut select_query_builder = sqlx::query_as(&query);
-
-        for id in event_ids.iter() {
-            select_query_builder = select_query_builder.bind(id)
-        }
-
-        let missing_ids: Vec<(Vec<u8>,)> = select_query_builder
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| StoreError::DeleteError(e))?;
-
-        if !missing_ids.is_empty() {
-            let id = uuid_to_string(
-                Uuid::from_slice(missing_ids[0].0.as_slice())
-                    .map_err(|_| StoreError::ColumnParseError("id".to_owned()))?,
-            );
-            return Err(StoreError::IdDoesNotExist(id));
-        };
+        ids_in_table(
+            &*self.pool,
+            "events",
+            event_ids.iter().map(|id| id.as_str()),
+        )
+        .await?;
 
         let where_clause: String =
             itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ").collect();
@@ -218,14 +218,18 @@ impl EventStore for SqliteEventStore {
     }
 }
 
-async fn ids_in_database<'a, Iter>(pool: &SqlitePool, ids: Iter) -> Result<(), StoreError>
+async fn ids_in_table<'a, Iter>(
+    pool: &SqlitePool,
+    table: &'static str,
+    ids: Iter,
+) -> Result<(), StoreError>
 where
     Iter: IntoIterator<Item = &'a str> + Clone,
 {
     let select_where_clause: String =
         itertools::Itertools::intersperse(ids.clone().into_iter().map(|_| "(?)"), ",").collect();
 
-    let query = format!("WITH valid_ids AS (SELECT column1 FROM ( VALUES {} )) SELECT column1 FROM valid_ids LEFT JOIN events ON events.id = valid_ids.column1 WHERE events.id IS NULL", select_where_clause);
+    let query = format!("WITH valid_ids AS (SELECT column1 FROM ( VALUES {0} )) SELECT column1 FROM valid_ids LEFT JOIN {1} ON {1}.id = valid_ids.column1 WHERE {1}.id IS NULL", select_where_clause, table);
 
     let mut select_query_builder = sqlx::query_as(&query);
 

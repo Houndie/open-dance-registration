@@ -1,13 +1,13 @@
 CREATE TABLE events
 (
-	id   BLOB PRIMARY_KEY NOT NULL,
+	id   TEXT PRIMARY_KEY NOT NULL,
 	name TEXT             NOT NULL
 );
 
 CREATE TABLE registration_schema_items
 (
-	id                         BLOB PRIMARY_KEY                                                                         NOT NULL,
-	event                      BLOB                                                                                     NOT NULL,
+	id                         TEXT PRIMARY_KEY                                                                         NOT NULL,
+	event                      TEXT                                                                                     NOT NULL,
 	idx                        INTEGER                                                                                  NOT NULL,
 	name                       TEXT                                                                                     NOT NULL,
 	item_type                  TEXT CHECK( item_type IN ("TextType", "CheckboxType", "SelectType", "MultiSelectType") ) NOT NULL,

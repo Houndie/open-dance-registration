@@ -47,17 +47,14 @@ fn uuid_to_string(id: Uuid) -> String {
 
 #[derive(sqlx::FromRow)]
 struct EventRow {
-    id: Vec<u8>,
+    id: String,
     name: String,
 }
 
 impl EventRow {
     fn to_event(self) -> Result<Event, StoreError> {
         Ok(Event {
-            id: uuid_to_string(
-                Uuid::from_slice(self.id.as_slice())
-                    .map_err(|_| StoreError::ColumnParseError("id".to_owned()))?,
-            ),
+            id: self.id,
             name: self.name,
             registration_schema: None,
         })
@@ -88,18 +85,9 @@ impl EventStore for SqliteEventStore {
         let (insert_events, update_events): (Vec<_>, Vec<_>) =
             events.into_iter().partition(|e| e.id == "");
 
-        let update_events_with_ids = update_events
-            .into_iter()
-            .map(|e| {
-                let id =
-                    Uuid::parse_str(&e.id).map_err(|_| StoreError::IdDoesNotExist(e.id.clone()))?;
-                Ok((id, e))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        if !update_events_with_ids.is_empty() {
+        if !update_events.is_empty() {
             // Make sure events exist
-            ids_in_database(&*self.pool, update_events_with_ids.iter().map(|(id, _)| id)).await?;
+            ids_in_database(&*self.pool, update_events.iter().map(|e| e.id.as_str())).await?;
         }
 
         let mut tx = self
@@ -110,27 +98,26 @@ impl EventStore for SqliteEventStore {
 
         let mut output_events = Vec::new();
         for mut event in insert_events.into_iter() {
-            let id = Uuid::now_v7();
+            let id = uuid_to_string(Uuid::now_v7());
             sqlx::query("INSERT INTO events(id, name) VALUES (?, ?);")
-                .bind(Into::<Vec<_>>::into(id.as_bytes()))
+                .bind(&id)
                 .bind(&event.name)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| StoreError::InsertionError(e))?;
 
-            event.id = uuid_to_string(id);
+            event.id = id;
             output_events.push(event);
         }
 
-        for (id, mut event) in update_events_with_ids.into_iter() {
+        for event in update_events.into_iter() {
             sqlx::query("UPDATE events SET name = ? WHERE id = ?")
                 .bind(&event.name)
-                .bind(Into::<Vec<_>>::into(id.as_bytes()))
+                .bind(&event.id)
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| StoreError::UpdateError(e))?;
 
-            event.id = uuid_to_string(id);
             output_events.push(event);
         }
 
@@ -148,20 +135,15 @@ impl EventStore for SqliteEventStore {
                 .await
                 .map_err(|e| StoreError::FetchError(e))?
         } else {
-            let valid_ids = event_ids
-                .iter()
-                .map(|id| Uuid::parse_str(id).map_err(|_| StoreError::IdDoesNotExist(id.clone())))
-                .collect::<Result<HashSet<Uuid>, _>>()?;
-
             let where_clause: String =
-                itertools::Itertools::intersperse(valid_ids.iter().map(|_| "id = ?"), " OR ")
+                itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ")
                     .collect();
             let query = format!("SELECT id, name FROM events WHERE {}", where_clause);
 
             let mut query_builder = sqlx::query_as(&query);
 
-            for id in valid_ids.iter() {
-                query_builder = query_builder.bind(Into::<Vec<_>>::into(id.as_bytes()))
+            for id in event_ids.iter() {
+                query_builder = query_builder.bind(id)
             }
 
             let rows: Vec<EventRow> = query_builder
@@ -169,17 +151,14 @@ impl EventStore for SqliteEventStore {
                 .await
                 .map_err(|e| StoreError::FetchError(e))?;
 
-            if rows.len() < valid_ids.len() {
-                let found_ids = rows
-                    .iter()
-                    .map(|row| {
-                        Ok(Uuid::from_slice(row.id.as_slice())
-                            .map_err(|_| StoreError::ColumnParseError("id".to_owned()))?)
-                    })
-                    .collect::<Result<HashSet<_>, _>>()?;
+            if rows.len() < event_ids.len() {
+                let found_ids = rows.into_iter().map(|row| row.id).collect::<HashSet<_>>();
 
-                let first_missing = valid_ids.iter().find(|id| !found_ids.contains(id)).unwrap();
-                return Err(StoreError::IdDoesNotExist(uuid_to_string(*first_missing)));
+                let first_missing = event_ids
+                    .iter()
+                    .find(|id| !found_ids.contains(*id))
+                    .unwrap();
+                return Err(StoreError::IdDoesNotExist(first_missing.clone()));
             };
 
             rows
@@ -194,22 +173,17 @@ impl EventStore for SqliteEventStore {
     }
 
     async fn delete_events(&self, event_ids: &Vec<String>) -> Result<(), StoreError> {
-        let valid_ids = event_ids
-            .iter()
-            .map(|id| Uuid::parse_str(id).map_err(|_| StoreError::IdDoesNotExist(id.clone())))
-            .collect::<Result<HashSet<Uuid>, _>>()?;
-
-        ids_in_database(&*self.pool, valid_ids.iter()).await?;
+        ids_in_database(&*self.pool, event_ids.iter().map(|id| id.as_str())).await?;
 
         let select_where_clause: String =
-            itertools::Itertools::intersperse(valid_ids.iter().map(|_| "(?)"), ",").collect();
+            itertools::Itertools::intersperse(event_ids.iter().map(|_| "(?)"), ",").collect();
 
         let query = format!("WITH valid_ids AS (SELECT column1 FROM ( VALUES {} )) SELECT column1 FROM valid_ids LEFT JOIN events ON events.id = valid_ids.column1 WHERE events.id IS NULL", select_where_clause);
 
         let mut select_query_builder = sqlx::query_as(&query);
 
-        for id in valid_ids.iter() {
-            select_query_builder = select_query_builder.bind(Into::<Vec<_>>::into(id.as_bytes()))
+        for id in event_ids.iter() {
+            select_query_builder = select_query_builder.bind(id)
         }
 
         let missing_ids: Vec<(Vec<u8>,)> = select_query_builder
@@ -226,13 +200,13 @@ impl EventStore for SqliteEventStore {
         };
 
         let where_clause: String =
-            itertools::Itertools::intersperse(valid_ids.iter().map(|_| "id = ?"), " OR ").collect();
+            itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ").collect();
         let query = format!("DELETE FROM events WHERE {}", where_clause);
 
         let mut query_builder = sqlx::query(&query);
 
-        for id in valid_ids.iter() {
-            query_builder = query_builder.bind(Into::<Vec<_>>::into(id.as_bytes()))
+        for id in event_ids.iter() {
+            query_builder = query_builder.bind(id);
         }
 
         query_builder
@@ -246,7 +220,7 @@ impl EventStore for SqliteEventStore {
 
 async fn ids_in_database<'a, Iter>(pool: &SqlitePool, ids: Iter) -> Result<(), StoreError>
 where
-    Iter: IntoIterator<Item = &'a Uuid> + Clone,
+    Iter: IntoIterator<Item = &'a str> + Clone,
 {
     let select_where_clause: String =
         itertools::Itertools::intersperse(ids.clone().into_iter().map(|_| "(?)"), ",").collect();
@@ -256,20 +230,16 @@ where
     let mut select_query_builder = sqlx::query_as(&query);
 
     for id in ids.into_iter() {
-        select_query_builder = select_query_builder.bind(Into::<Vec<_>>::into(id.as_bytes()))
+        select_query_builder = select_query_builder.bind(id);
     }
 
-    let missing_ids: Vec<(Vec<u8>,)> = select_query_builder
+    let missing_ids: Vec<(String,)> = select_query_builder
         .fetch_all(pool)
         .await
         .map_err(|e| StoreError::CheckExistsError(e))?;
 
     if !missing_ids.is_empty() {
-        let id = uuid_to_string(
-            Uuid::from_slice(missing_ids[0].0.as_slice())
-                .map_err(|_| StoreError::ColumnParseError("id".to_owned()))?,
-        );
-        return Err(StoreError::IdDoesNotExist(id));
+        return Err(StoreError::IdDoesNotExist(missing_ids[0].0.clone()));
     };
 
     Ok(())
@@ -330,10 +300,10 @@ mod tests {
     #[tokio::test]
     async fn update() {
         let db = Arc::new(init_db().await);
-        let id = Uuid::now_v7();
+        let id = uuid_to_string(Uuid::now_v7());
         let name = "Event 1";
         sqlx::query("INSERT INTO events(id, name) VALUES (?, ?);")
-            .bind(Into::<Vec<_>>::into(id.as_bytes()))
+            .bind(&id)
             .bind(&name)
             .execute(&*db)
             .await
@@ -346,7 +316,7 @@ mod tests {
 
         let event = Event {
             name: "Event 2".to_owned(),
-            id: uuid_to_string(id),
+            id,
             registration_schema: None,
         };
 
@@ -383,10 +353,11 @@ mod tests {
             registration_schema: None,
         };
 
-        match store.upsert_events(vec![event.clone()]).await {
+        let result = store.upsert_events(vec![event.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, uuid_to_string(id)),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         };
     }
 
@@ -406,24 +377,25 @@ mod tests {
             registration_schema: None,
         };
 
-        match store.upsert_events(vec![event.clone()]).await {
+        let result = store.upsert_events(vec![event.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         };
     }
 
     #[tokio::test]
     async fn list_all() {
         let db = Arc::new(init_db().await);
-        let id_1 = Uuid::now_v7();
+        let id_1 = uuid_to_string(Uuid::now_v7());
         let name_1 = "Event 1";
-        let id_2 = Uuid::now_v7();
+        let id_2 = uuid_to_string(Uuid::now_v7());
         let name_2 = "Event 2";
         sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
-            .bind(Into::<Vec<_>>::into(id_1.as_bytes()))
+            .bind(&id_1)
             .bind(&name_1)
-            .bind(Into::<Vec<_>>::into(id_2.as_bytes()))
+            .bind(&id_2)
             .bind(&name_2)
             .execute(&*db)
             .await
@@ -438,18 +410,12 @@ mod tests {
 
         assert_eq!(returned_events.len(), 2);
 
-        match returned_events
-            .iter()
-            .find(|e| e.id == uuid_to_string(id_1))
-        {
+        match returned_events.iter().find(|e| e.id == id_1) {
             Some(event) => assert_eq!(event.name, name_1),
             None => panic!("id 1 not found in result"),
         };
 
-        match returned_events
-            .iter()
-            .find(|e| e.id == uuid_to_string(id_2))
-        {
+        match returned_events.iter().find(|e| e.id == id_2) {
             Some(event) => assert_eq!(event.name, name_2),
             None => panic!("id 2 not found in result"),
         };
@@ -458,18 +424,18 @@ mod tests {
     #[tokio::test]
     async fn list_some() {
         let db = Arc::new(init_db().await);
-        let id_1 = Uuid::now_v7();
+        let id_1 = uuid_to_string(Uuid::now_v7());
         let name_1 = "Event 1";
-        let id_2 = Uuid::now_v7();
+        let id_2 = uuid_to_string(Uuid::now_v7());
         let name_2 = "Event 2";
-        let id_3 = Uuid::now_v7();
+        let id_3 = uuid_to_string(Uuid::now_v7());
         let name_3 = "Event 2";
         sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?), (?, ?);")
-            .bind(Into::<Vec<_>>::into(id_1.as_bytes()))
+            .bind(&id_1)
             .bind(&name_1)
-            .bind(Into::<Vec<_>>::into(id_2.as_bytes()))
+            .bind(&id_2)
             .bind(&name_2)
-            .bind(Into::<Vec<_>>::into(id_3.as_bytes()))
+            .bind(&id_3)
             .bind(&name_3)
             .execute(&*db)
             .await
@@ -481,24 +447,18 @@ mod tests {
         };
 
         let returned_events = store
-            .list_events(&vec![uuid_to_string(id_1), uuid_to_string(id_2)])
+            .list_events(&vec![id_1.clone(), id_2.clone()])
             .await
             .unwrap();
 
         assert_eq!(returned_events.len(), 2);
 
-        match returned_events
-            .iter()
-            .find(|e| e.id == uuid_to_string(id_1))
-        {
+        match returned_events.iter().find(|e| e.id == id_1) {
             Some(event) => assert_eq!(event.name, name_1),
             None => panic!("id 1 not found in result"),
         };
 
-        match returned_events
-            .iter()
-            .find(|e| e.id == uuid_to_string(id_2))
-        {
+        match returned_events.iter().find(|e| e.id == id_2) {
             Some(event) => assert_eq!(event.name, name_2),
             None => panic!("id 2 not found in result"),
         };
@@ -514,10 +474,11 @@ mod tests {
         };
 
         let id = "notauuid".to_owned();
-        match store.list_events(&vec![id.clone()]).await {
+        let result = store.list_events(&vec![id.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         }
     }
 
@@ -531,24 +492,25 @@ mod tests {
         };
 
         let id = uuid_to_string(Uuid::now_v7());
-        match store.list_events(&vec![id.clone()]).await {
+        let result = store.list_events(&vec![id.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         }
     }
 
     #[tokio::test]
     async fn delete_one() {
         let db = Arc::new(init_db().await);
-        let id_1 = Uuid::now_v7();
+        let id_1 = uuid_to_string(Uuid::now_v7());
         let name_1 = "Event 1";
-        let id_2 = Uuid::now_v7();
+        let id_2 = uuid_to_string(Uuid::now_v7());
         let name_2 = "Event 2";
         sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
-            .bind(Into::<Vec<_>>::into(id_1.as_bytes()))
+            .bind(&id_1)
             .bind(&name_1)
-            .bind(Into::<Vec<_>>::into(id_2.as_bytes()))
+            .bind(&id_2)
             .bind(&name_2)
             .execute(&*db)
             .await
@@ -559,10 +521,7 @@ mod tests {
             SqliteEventStore::new(db)
         };
 
-        store
-            .delete_events(&vec![uuid_to_string(id_1)])
-            .await
-            .unwrap();
+        store.delete_events(&vec![id_1]).await.unwrap();
 
         let mut store_row: Vec<EventRow> = sqlx::query_as("SELECT id, name FROM events")
             .fetch_all(&*db)
@@ -573,7 +532,7 @@ mod tests {
 
         let store_event = store_row.pop().unwrap().to_event().unwrap();
         assert_eq!(store_event.name, name_2);
-        assert_eq!(store_event.id, uuid_to_string(id_2));
+        assert_eq!(store_event.id, id_2);
     }
 
     #[tokio::test]
@@ -585,10 +544,11 @@ mod tests {
         };
 
         let id = "notauuid".to_owned();
-        match store.delete_events(&vec![id.clone()]).await {
+        let result = store.delete_events(&vec![id.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         }
     }
 
@@ -601,10 +561,11 @@ mod tests {
         };
 
         let id = uuid_to_string(Uuid::now_v7());
-        match store.delete_events(&vec![id.clone()]).await {
+        let result = store.delete_events(&vec![id.clone()]).await;
+        match result {
             Ok(_) => panic!("no error returned"),
             Err(StoreError::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type"),
+            _ => panic!("incorrect error type: {:?}", result),
         }
     }
 }

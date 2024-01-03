@@ -28,10 +28,12 @@ impl<EventStoreType: EventStore> EventService<EventStoreType> {
 
 fn store_error_to_status(err: StoreError) -> Status {
     let code = match err {
-        StoreError::IDDoesNotExist(_) => Code::NotFound,
+        StoreError::IdDoesNotExist(_) | StoreError::SomeIdDoesNotExist => Code::NotFound,
         StoreError::InsertionError(_)
         | StoreError::FetchError(_)
         | StoreError::UpdateError(_)
+        | StoreError::DeleteError(_)
+        | StoreError::CheckExistsError(_)
         | StoreError::TransactionStartError(_)
         | StoreError::TransactionFailed(_)
         | StoreError::ColumnParseError(_) => Code::Internal,
@@ -60,14 +62,24 @@ impl<EventStoreType: EventStore> proto::event_service_server::EventService
         &self,
         request: Request<ListEventsRequest>,
     ) -> Result<Response<ListEventsResponse>, Status> {
-        Ok(Response::new(ListEventsResponse::default()))
+        let events = self
+            .store
+            .list_events(&request.into_inner().ids)
+            .await
+            .map_err(|e| store_error_to_status(e))?;
+        Ok(Response::new(ListEventsResponse { events }))
     }
 
     async fn delete_events(
         &self,
         request: Request<proto::DeleteEventsRequest>,
     ) -> Result<Response<DeleteEventsResponse>, Status> {
-        Ok(Response::new(DeleteEventsResponse::default()))
+        self.store
+            .delete_events(&request.into_inner().ids)
+            .await
+            .map_err(|e| store_error_to_status(e))?;
+
+        Ok(Response::new(DeleteEventsResponse {}))
     }
 }
 

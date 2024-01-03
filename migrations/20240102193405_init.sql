@@ -1,12 +1,12 @@
 CREATE TABLE events
 (
-	id   TEXT PRIMARY_KEY NOT NULL,
-	name TEXT             NOT NULL
+	id   TEXT NOT NULL PRIMARY KEY,
+	name TEXT NOT NULL
 );
 
-CREATE TABLE registration_schema_items
+CREATE TABLE items
 (
-	id                         TEXT PRIMARY_KEY                                                                         NOT NULL,
+	id                         TEXT                                                                                     NOT NULL PRIMARY KEY,
 	event                      TEXT                                                                                     NOT NULL,
 	idx                        INTEGER                                                                                  NOT NULL,
 	name                       TEXT                                                                                     NOT NULL,
@@ -19,5 +19,6 @@ CREATE TABLE registration_schema_items
 	select_type_options        BLOB,
 	multi_select_type_defaults BLOB,
 	multi_select_type_display  TEXT CHECK( multi_select_type_display IN ("CHECKBOXES", "MULTISELECT_BOX") ),
-	multi_select_type_options  BLOB
+	multi_select_type_options  BLOB,
+	FOREIGN KEY (event) REFERENCES events (id) ON DELETE CASCADE
 );

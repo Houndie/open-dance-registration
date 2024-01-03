@@ -16,7 +16,15 @@
   in
   {
     devShell.${system} = pkgs.mkShell {
-      nativeBuildInputs = with pkgs; [rust-bin.stable.latest.default protobuf_23];
+      packages = with pkgs; [
+        rust-bin.stable.latest.default 
+        protobuf_23 
+        sqlx-cli 
+	(pkgs.writeShellScriptBin ",grpcui" "${grpcui}/bin/grpcui -plaintext localhost:50051")
+	sqlitebrowser
+      ];
+      PROTOC = "${pkgs.protobuf_23}/bin/protoc";
+      PROTOC_INCLUDE = "${pkgs.protobuf_23}/include";
     };
   };
 }

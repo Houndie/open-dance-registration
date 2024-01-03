@@ -1,4 +1,5 @@
-syntax = "proto3"
+syntax = "proto3";
+package event;
 
 service EventService {
 	rpc UpsertEvents(UpsertEventsRequest) returns (UpsertEventsResponse) {}
@@ -31,7 +32,7 @@ message DeleteEventsResponse {};
 message Event {
 	string id = 1;
 	string name = 2;
-	RegistrationSchema registration_schema = 1;
+	RegistrationSchema registration_schema = 3;
 }
 
 message RegistrationSchema {
@@ -45,7 +46,7 @@ message RegistrationSchemaItem {
 }
 
 message RegistrationSchemaItemType {
-	oneof {
+	oneof type {
 		TextType text = 1;
 		CheckboxType checkbox = 2;
 		SelectType select = 3;

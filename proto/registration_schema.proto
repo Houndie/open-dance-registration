@@ -1,0 +1,90 @@
+syntax = "proto3";
+package registration_schema;
+
+service RegistrationSchemaService {
+	rpc UpsertRegistrationSchemas(UpsertRegistrationSchemasRequest) returns (UpsertRegistrationSchemasResponse) {}
+	rpc ListRegistrationSchemas(ListRegistrationSchemasRequest) returns (ListRegistrationSchemasResponse) {}
+	rpc DeleteRegistrationSchemas(DeleteRegistrationSchemasRequest) returns (DeleteRegistrationSchemasResponse) {}
+}
+
+message UpsertRegistrationSchemasRequest {
+	repeated RegistrationSchema registration_schemas = 1;
+}
+
+message UpsertRegistrationSchemasResponse {
+	repeated RegistrationSchema registration_schemas = 1;
+}
+
+message ListRegistrationSchemasRequest {
+	repeated string ids = 1;
+}
+
+message ListRegistrationSchemasResponse {
+	repeated RegistrationSchema registration_schemas = 1;
+}
+
+message DeleteRegistrationSchemasRequest {
+	repeated string ids = 1;
+}
+
+message DeleteRegistrationSchemasResponse {};
+
+message RegistrationSchema {
+	repeated RegistrationSchemaItem items = 1;
+}
+
+message RegistrationSchemaItem {
+	string id = 1;
+	string name = 2;
+	RegistrationSchemaItemType type = 3;
+}
+
+message RegistrationSchemaItemType {
+	oneof type {
+		TextType text = 1;
+		CheckboxType checkbox = 2;
+		SelectType select = 3;
+		MultiSelectType multi_select = 4;
+	}
+}
+
+message TextType {
+	enum Display {
+		SMALL = 0;
+		LARGE = 1;
+	}
+
+	string default = 1;
+	Display display = 2;
+}
+
+message CheckboxType {
+	bool default = 1;
+}
+
+message SelectType {
+	enum Display {
+		RADIO = 0;
+		DROPDOWN = 1;
+	}
+
+	int32 default = 1;
+	Display display = 2;
+	repeated SelectOption options = 3;
+}
+
+message SelectOption {
+	string name = 1;
+	string product_id = 2;
+}
+
+message MultiSelectType {
+	enum Display {
+		CHECKBOXES = 0;
+		MUTISELECT_BOX = 1;
+	}
+
+	repeated int32 defaults = 1;
+	Display display = 2;
+	repeated SelectOption options = 3;
+}

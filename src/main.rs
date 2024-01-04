@@ -5,45 +5,49 @@ use proto::{
     UpsertEventsResponse,
 };
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use store::{EventStore, SqliteEventStore, StoreError};
+use store::{
+    event::{SqliteStore, Store},
+    Error,
+};
 use tonic::{transport::Server, Code, Request, Response, Status};
 
 pub mod store;
 
 mod proto {
     tonic::include_proto!("event");
-    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("event_descriptor");
+    tonic::include_proto!("registration_schema");
+    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("descriptors");
 }
 
 #[derive(Debug)]
-struct EventService<EventStoreType: EventStore> {
+struct EventService<EventStoreType: Store> {
     store: Arc<EventStoreType>,
 }
 
-impl<EventStoreType: EventStore> EventService<EventStoreType> {
+impl<EventStoreType: Store> EventService<EventStoreType> {
     fn new(store: Arc<EventStoreType>) -> Self {
         EventService { store }
     }
 }
 
-fn store_error_to_status(err: StoreError) -> Status {
+fn store_error_to_status(err: Error) -> Status {
     let code = match err {
-        StoreError::IdDoesNotExist(_) | StoreError::SomeIdDoesNotExist => Code::NotFound,
-        StoreError::InsertionError(_)
-        | StoreError::FetchError(_)
-        | StoreError::UpdateError(_)
-        | StoreError::DeleteError(_)
-        | StoreError::CheckExistsError(_)
-        | StoreError::TransactionStartError(_)
-        | StoreError::TransactionFailed(_)
-        | StoreError::ColumnParseError(_) => Code::Internal,
+        Error::IdDoesNotExist(_) | Error::SomeIdDoesNotExist => Code::NotFound,
+        Error::InsertionError(_)
+        | Error::FetchError(_)
+        | Error::UpdateError(_)
+        | Error::DeleteError(_)
+        | Error::CheckExistsError(_)
+        | Error::TransactionStartError(_)
+        | Error::TransactionFailed(_)
+        | Error::ColumnParseError(_) => Code::Internal,
     };
 
     Status::new(code, format!("{}", err))
 }
 
 #[tonic::async_trait]
-impl<EventStoreType: EventStore> proto::event_service_server::EventService
+impl<EventStoreType: Store> proto::event_service_server::EventService
     for EventService<EventStoreType>
 {
     async fn upsert_events(
@@ -52,7 +56,7 @@ impl<EventStoreType: EventStore> proto::event_service_server::EventService
     ) -> Result<Response<UpsertEventsResponse>, Status> {
         let events = self
             .store
-            .upsert_events(request.into_inner().events)
+            .upsert(request.into_inner().events)
             .await
             .map_err(|e| store_error_to_status(e))?;
         Ok(Response::new(UpsertEventsResponse { events }))
@@ -64,7 +68,7 @@ impl<EventStoreType: EventStore> proto::event_service_server::EventService
     ) -> Result<Response<ListEventsResponse>, Status> {
         let events = self
             .store
-            .list_events(&request.into_inner().ids)
+            .list(&request.into_inner().ids)
             .await
             .map_err(|e| store_error_to_status(e))?;
         Ok(Response::new(ListEventsResponse { events }))
@@ -75,7 +79,7 @@ impl<EventStoreType: EventStore> proto::event_service_server::EventService
         request: Request<proto::DeleteEventsRequest>,
     ) -> Result<Response<DeleteEventsResponse>, Status> {
         self.store
-            .delete_events(&request.into_inner().ids)
+            .delete(&request.into_inner().ids)
             .await
             .map_err(|e| store_error_to_status(e))?;
 
@@ -97,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Arc::new(SqlitePool::connect(&db_url).await?);
     sqlx::migrate!().run(&(*db)).await?;
 
-    let event_store = Arc::new(SqliteEventStore::new(db));
+    let event_store = Arc::new(SqliteStore::new(db));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));

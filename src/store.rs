@@ -82,7 +82,7 @@ impl SqliteEventStore {
 #[tonic::async_trait]
 impl EventStore for SqliteEventStore {
     async fn upsert_events(&self, events: Vec<Event>) -> Result<Vec<Event>, StoreError> {
-        let (insert_events, update_events): (Vec<_>, Vec<_>) =
+        let (insert_events, mut update_events): (Vec<_>, Vec<_>) =
             events.into_iter().partition(|e| e.id == "");
 
         if !update_events.is_empty() {
@@ -129,15 +129,26 @@ impl EventStore for SqliteEventStore {
             output_events.append(&mut events_with_ids);
         }
 
-        for event in update_events.into_iter() {
-            sqlx::query("UPDATE events SET name = ? WHERE id = ?")
-                .bind(&event.name)
-                .bind(&event.id)
+        if !update_events.is_empty() {
+            let values_clause: String =
+                itertools::Itertools::intersperse(update_events.iter().map(|_| "(?, ?)"), ", ")
+                    .collect();
+
+            let query = format!(
+                "WITH mydata(id, name) AS (VALUES {}) UPDATE events SET name = mydata.name FROM mydata WHERE events.id = mydata.id",
+                values_clause
+            );
+            let mut query_builder = sqlx::query(&query);
+            for event in update_events.iter() {
+                query_builder = query_builder.bind(&event.id).bind(&event.name);
+            }
+
+            query_builder
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| StoreError::UpdateError(e))?;
 
-            output_events.push(event);
+            output_events.append(&mut update_events);
         }
 
         tx.commit()
@@ -304,11 +315,15 @@ mod tests {
     #[tokio::test]
     async fn update() {
         let db = Arc::new(init_db().await);
-        let id = uuid_to_string(Uuid::now_v7());
-        let name = "Event 1";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?);")
-            .bind(&id)
-            .bind(&name)
+        let id_1 = uuid_to_string(Uuid::now_v7());
+        let name_1 = "Event 1";
+        let id_2 = uuid_to_string(Uuid::now_v7());
+        let name_2 = "Event 2";
+        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
+            .bind(&id_1)
+            .bind(&name_1)
+            .bind(&id_2)
+            .bind(&name_2)
             .execute(&*db)
             .await
             .unwrap();
@@ -319,8 +334,8 @@ mod tests {
         };
 
         let event = Event {
-            name: "Event 2".to_owned(),
-            id,
+            name: "Event 3".to_owned(),
+            id: id_1,
             registration_schema: None,
         };
 
@@ -328,17 +343,29 @@ mod tests {
 
         assert_eq!(returned_events.len(), 1);
         assert_eq!(event.name, returned_events[0].name);
+        assert_eq!(event.id, returned_events[0].id);
 
-        let mut store_row: Vec<EventRow> = sqlx::query_as("SELECT id, name FROM events")
-            .fetch_all(&*db)
-            .await
-            .unwrap();
+        let changed_store_row: Vec<EventRow> =
+            sqlx::query_as("SELECT id, name FROM events WHERE id = ?")
+                .bind(&event.id)
+                .fetch_all(&*db)
+                .await
+                .unwrap();
 
-        assert_eq!(store_row.len(), 1);
+        assert_eq!(changed_store_row.len(), 1);
+        assert_eq!(changed_store_row[0].name, event.name);
+        assert_eq!(changed_store_row[0].id, event.id);
 
-        let store_event = store_row.pop().unwrap().to_event().unwrap();
-        assert_eq!(store_event.name, event.name);
-        assert_eq!(store_event.id, returned_events[0].id);
+        let unchanged_store_row: Vec<EventRow> =
+            sqlx::query_as("SELECT id, name FROM events WHERE id = ?")
+                .bind(&id_2)
+                .fetch_all(&*db)
+                .await
+                .unwrap();
+
+        assert_eq!(unchanged_store_row.len(), 1);
+        assert_eq!(unchanged_store_row[0].name, name_2);
+        assert_eq!(unchanged_store_row[0].id, id_2);
     }
 
     #[tokio::test]

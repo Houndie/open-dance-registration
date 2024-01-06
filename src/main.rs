@@ -32,7 +32,7 @@ impl<EventStoreType: Store> EventService<EventStoreType> {
 
 fn store_error_to_status(err: Error) -> Status {
     let code = match err {
-        Error::IdDoesNotExist(_) | Error::SomeIdDoesNotExist => Code::NotFound,
+        Error::IdDoesNotExist(_) | Error::SomeIdDoesNotExist | Error::UnknownEnum => Code::NotFound,
         Error::InsertionError(_)
         | Error::FetchError(_)
         | Error::UpdateError(_)
@@ -40,6 +40,7 @@ fn store_error_to_status(err: Error) -> Status {
         | Error::CheckExistsError(_)
         | Error::TransactionStartError(_)
         | Error::TransactionFailed(_)
+        | Error::TooManyItems(_)
         | Error::ColumnParseError(_) => Code::Internal,
     };
 

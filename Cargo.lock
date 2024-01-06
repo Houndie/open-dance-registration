@@ -940,6 +940,7 @@ name = "open-dance-registration"
 version = "0.1.0"
 dependencies = [
  "itertools 0.12.0",
+ "log",
  "prost",
  "sqlx",
  "thiserror",

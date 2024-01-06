@@ -1,5 +1,6 @@
 mod common;
 pub mod event;
+pub mod registration_schema;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -31,5 +32,11 @@ pub enum Error {
     TransactionStartError(#[source] sqlx::Error),
 
     #[error("unable to parse column {0}")]
-    ColumnParseError(String),
+    ColumnParseError(&'static str),
+
+    #[error("too many ({0}) items provided")]
+    TooManyItems(usize),
+
+    #[error("unknown enum variant")]
+    UnknownEnum,
 }

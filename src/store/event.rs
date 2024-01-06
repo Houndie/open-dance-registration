@@ -4,7 +4,10 @@ use sqlx::SqlitePool;
 
 use crate::proto::Event;
 
-use super::{common::new_id, Error};
+use super::{
+    common::{ids_in_table, new_id},
+    Error,
+};
 
 #[derive(sqlx::FromRow)]
 struct EventRow {
@@ -186,43 +189,11 @@ impl Store for SqliteStore {
     }
 }
 
-async fn ids_in_table<'a, Iter>(
-    pool: &SqlitePool,
-    table: &'static str,
-    ids: Iter,
-) -> Result<(), Error>
-where
-    Iter: IntoIterator<Item = &'a str> + Clone,
-{
-    let select_where_clause: String =
-        itertools::Itertools::intersperse(ids.clone().into_iter().map(|_| "(?)"), ",").collect();
-
-    let query = format!("WITH valid_ids AS (SELECT column1 FROM ( VALUES {0} )) SELECT column1 FROM valid_ids LEFT JOIN {1} ON {1}.id = valid_ids.column1 WHERE {1}.id IS NULL", select_where_clause, table);
-
-    let mut select_query_builder = sqlx::query_as(&query);
-
-    for id in ids.into_iter() {
-        select_query_builder = select_query_builder.bind(id);
-    }
-
-    let missing_ids: Vec<(String,)> = select_query_builder
-        .fetch_all(pool)
-        .await
-        .map_err(|e| Error::CheckExistsError(e))?;
-
-    if !missing_ids.is_empty() {
-        return Err(Error::IdDoesNotExist(missing_ids[0].0.clone()));
-    };
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-    use uuid::Uuid;
 
     use crate::{proto::Event, store::common::new_id};
 
@@ -332,7 +303,6 @@ mod tests {
             SqliteStore::new(db)
         };
 
-        let id = Uuid::now_v7();
         let event = Event {
             name: "Event 1".to_owned(),
             id: new_id(),
@@ -341,7 +311,7 @@ mod tests {
         let result = store.upsert(vec![event.clone()]).await;
         match result {
             Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, new_id()),
+            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, event.id),
             _ => panic!("incorrect error type: {:?}", result),
         };
     }

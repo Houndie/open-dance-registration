@@ -30,7 +30,8 @@ message DeleteRegistrationSchemasRequest {
 message DeleteRegistrationSchemasResponse {};
 
 message RegistrationSchema {
-	repeated RegistrationSchemaItem items = 1;
+	string event_id = 1;
+	repeated RegistrationSchemaItem items = 2;
 }
 
 message RegistrationSchemaItem {
@@ -68,23 +69,24 @@ message SelectType {
 		DROPDOWN = 1;
 	}
 
-	int32 default = 1;
+	uint32 default = 1;
 	Display display = 2;
 	repeated SelectOption options = 3;
 }
 
 message SelectOption {
-	string name = 1;
-	string product_id = 2;
+	string id = 1;
+	string name = 2;
+	string product_id = 3;
 }
 
 message MultiSelectType {
 	enum Display {
 		CHECKBOXES = 0;
-		MUTISELECT_BOX = 1;
+		MULTISELECT_BOX = 1;
 	}
 
-	repeated int32 defaults = 1;
+	repeated uint32 defaults = 1;
 	Display display = 2;
 	repeated SelectOption options = 3;
 }

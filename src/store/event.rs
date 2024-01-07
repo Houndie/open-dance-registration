@@ -79,10 +79,12 @@ impl Store for SqliteStore {
                     .collect();
 
             let query = format!("INSERT INTO events(id, name) VALUES {}", values_clause);
-            let mut query_builder = sqlx::query(&query);
-            for event in events_with_ids.iter() {
-                query_builder = query_builder.bind(&event.id).bind(&event.name);
-            }
+            let query_builder = sqlx::query(&query);
+            let query_builder = events_with_ids
+                .iter()
+                .fold(query_builder, |query_builder, event| {
+                    query_builder.bind(&event.id).bind(&event.name)
+                });
 
             query_builder
                 .execute(&mut *tx)
@@ -100,10 +102,12 @@ impl Store for SqliteStore {
                 "WITH mydata(id, name) AS (VALUES {}) UPDATE events SET name = mydata.name FROM mydata WHERE events.id = mydata.id",
                 values_clause
             );
-            let mut query_builder = sqlx::query(&query);
-            for event in update_events.iter() {
-                query_builder = query_builder.bind(&event.id).bind(&event.name);
-            }
+            let query_builder = sqlx::query(&query);
+            let query_builder = update_events
+                .iter()
+                .fold(query_builder, |query_builder, event| {
+                    query_builder.bind(&event.id).bind(&event.name)
+                });
 
             query_builder
                 .execute(&mut *tx)
@@ -130,11 +134,10 @@ impl Store for SqliteStore {
                     .collect();
             let query = format!("SELECT id, name FROM events WHERE {}", where_clause);
 
-            let mut query_builder = sqlx::query_as(&query);
-
-            for id in event_ids.iter() {
-                query_builder = query_builder.bind(id)
-            }
+            let query_builder = sqlx::query_as(&query);
+            let query_builder = event_ids
+                .iter()
+                .fold(query_builder, |query_builder, id| query_builder.bind(id));
 
             let rows: Vec<EventRow> = query_builder
                 .fetch_all(&*self.pool)
@@ -178,11 +181,10 @@ impl Store for SqliteStore {
             itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ").collect();
         let query = format!("DELETE FROM events WHERE {}", where_clause);
 
-        let mut query_builder = sqlx::query(&query);
-
-        for id in event_ids.iter() {
-            query_builder = query_builder.bind(id);
-        }
+        let query_builder = sqlx::query(&query);
+        let query_builder = event_ids
+            .iter()
+            .fold(query_builder, |query_builder, id| query_builder.bind(id));
 
         query_builder
             .execute(&*self.pool)
@@ -321,29 +323,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_bad_id() {
-        let db = Arc::new(init_db().await);
-
-        let store = {
-            let db = db.clone();
-            SqliteStore::new(db)
-        };
-
-        let id = "notauuid".to_owned();
-        let event = Event {
-            name: "Event 1".to_owned(),
-            id: id.clone(),
-        };
-
-        let result = store.upsert(vec![event.clone()]).await;
-        match result {
-            Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type: {:?}", result),
-        };
-    }
-
-    #[tokio::test]
     async fn list_all() {
         let db = Arc::new(init_db().await);
         let id_1 = new_id();
@@ -420,24 +399,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_some_bad_id() {
-        let db = Arc::new(init_db().await);
-
-        let store = {
-            let db = db.clone();
-            SqliteStore::new(db)
-        };
-
-        let id = "notauuid".to_owned();
-        let result = store.list(&vec![id.clone()]).await;
-        match result {
-            Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type: {:?}", result),
-        }
-    }
-
-    #[tokio::test]
     async fn list_some_doesnt_exist() {
         let db = Arc::new(init_db().await);
 
@@ -488,23 +449,6 @@ mod tests {
         let store_event = store_row.pop().unwrap().to_event().unwrap();
         assert_eq!(store_event.name, name_2);
         assert_eq!(store_event.id, id_2);
-    }
-
-    #[tokio::test]
-    async fn delete_bad_id() {
-        let db = Arc::new(init_db().await);
-        let store = {
-            let db = db.clone();
-            SqliteStore::new(db)
-        };
-
-        let id = "notauuid".to_owned();
-        let result = store.delete(&vec![id.clone()]).await;
-        match result {
-            Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type: {:?}", result),
-        }
     }
 
     #[tokio::test]

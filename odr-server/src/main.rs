@@ -1,18 +1,13 @@
 use std::{env, sync::Arc};
 
 use api::{event::Service as EventService, registration_schema::Service as SchemaService};
+use common::proto;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use store::{event::SqliteStore as EventStore, registration_schema::SqliteStore as SchemaStore};
 use tonic::transport::Server;
 
 pub mod api;
 pub mod store;
-
-mod proto {
-    tonic::include_proto!("event");
-    tonic::include_proto!("registration_schema");
-    pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("descriptors");
-}
 
 fn db_url() -> String {
     format!("sqlite://{}/odr-sqlite.db", env::temp_dir().display())

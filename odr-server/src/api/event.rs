@@ -2,12 +2,10 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use crate::{
-    proto::{
-        self, DeleteEventsResponse, ListEventsRequest, ListEventsResponse, UpsertEventsRequest,
-        UpsertEventsResponse,
-    },
-    store::event::Store,
+use crate::store::event::Store;
+use common::proto::{
+    self, DeleteEventsResponse, ListEventsRequest, ListEventsResponse, UpsertEventsRequest,
+    UpsertEventsResponse,
 };
 
 use super::store_error_to_status;

@@ -2,7 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use sqlx::SqlitePool;
 
-use crate::proto::Event;
+use common::proto::Event;
 
 use super::{
     common::{ids_in_table, new_id},

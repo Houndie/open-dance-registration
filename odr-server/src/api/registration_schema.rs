@@ -2,13 +2,11 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use crate::{
-    proto::{
-        self, DeleteRegistrationSchemasResponse, ListRegistrationSchemasRequest,
-        ListRegistrationSchemasResponse, UpsertRegistrationSchemasRequest,
-        UpsertRegistrationSchemasResponse,
-    },
-    store::registration_schema::Store,
+use crate::store::registration_schema::Store;
+use common::proto::{
+    self, DeleteRegistrationSchemasResponse, ListRegistrationSchemasRequest,
+    ListRegistrationSchemasResponse, UpsertRegistrationSchemasRequest,
+    UpsertRegistrationSchemasResponse,
 };
 
 use super::store_error_to_status;

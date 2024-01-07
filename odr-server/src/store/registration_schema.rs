@@ -5,7 +5,7 @@ use std::{
 
 use sqlx::SqlitePool;
 
-use crate::proto::{
+use common::proto::{
     multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
     CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
     RegistrationSchemaItemType, SelectOption, SelectType, TextType,

@@ -692,8 +692,6 @@ impl Store for SqliteStore {
     }
 
     async fn list(&self, ids: Vec<String>) -> Result<Vec<RegistrationSchema>, Error> {
-        ids_in_table(&*self.pool, "events", ids.iter().map(|id| id.as_str())).await?;
-
         let base_query = "SELECT id, 
             event,
             idx,
@@ -734,6 +732,8 @@ impl Store for SqliteStore {
             return Ok(items_to_schema(items, options));
         }
 
+        ids_in_table(&*self.pool, "events", ids.iter().map(|id| id.as_str())).await?;
+
         let items = {
             let where_clause: String =
                 itertools::Itertools::intersperse(ids.iter().map(|_| "event = ?"), " OR ")
@@ -756,16 +756,18 @@ impl Store for SqliteStore {
         };
 
         let options = {
+            let select_items = items
+                .iter()
+                .filter(|(_, _, item)| {
+                    match item.r#type.as_ref().unwrap().r#type.as_ref().unwrap() {
+                        ItemType::Select(_) | ItemType::MultiSelect(_) => true,
+                        _ => false,
+                    }
+                })
+                .collect::<Vec<_>>();
+
             let where_clause: String = itertools::Itertools::intersperse(
-                items
-                    .iter()
-                    .filter(|(_, _, item)| {
-                        match item.r#type.as_ref().unwrap().r#type.as_ref().unwrap() {
-                            ItemType::Select(_) | ItemType::MultiSelect(_) => true,
-                            _ => false,
-                        }
-                    })
-                    .map(|_| "schema_item = ?"),
+                select_items.iter().map(|_| "schema_item = ?"),
                 " OR ",
             )
             .collect();
@@ -773,7 +775,7 @@ impl Store for SqliteStore {
             let query = format!("{} WHERE {}", base_options_query, where_clause);
 
             let query_builder = sqlx::query_as(&query);
-            let query_builder = items
+            let query_builder = select_items
                 .iter()
                 .fold(query_builder, |query_builder, (_, _, item)| {
                     query_builder.bind(&item.id)
@@ -806,6 +808,10 @@ impl Store for SqliteStore {
     }
 
     async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error> {
+        if event_ids.is_empty() {
+            return Ok(());
+        }
+
         ids_in_table(
             &*self.pool,
             "events",
@@ -814,7 +820,7 @@ impl Store for SqliteStore {
         .await?;
 
         let where_clause: String =
-            itertools::Itertools::intersperse(event_ids.iter().map(|_| "event_id = ?"), " OR ")
+            itertools::Itertools::intersperse(event_ids.iter().map(|_| "event = ?"), " OR ")
                 .collect();
         let query = format!(
             "DELETE FROM registration_schema_items WHERE {}",
@@ -853,10 +859,13 @@ mod tests {
         store::{
             common::new_id,
             registration_schema::{OptionRow, Store},
+            Error,
         },
     };
 
     use super::{items_to_schema, ItemRow, SqliteStore};
+
+    use test_case::test_case;
 
     struct Init {
         event_1: String,
@@ -897,11 +906,232 @@ mod tests {
         }
     }
 
+    async fn test_data(init: &Init) -> Vec<RegistrationSchema> {
+        let item1_id = new_id();
+        let item1_name = "item 1";
+        let item2_id = new_id();
+        let item2_name = "item 2";
+        let item3_id = new_id();
+        let item3_name = "item 3";
+        let item4_id = new_id();
+        let item4_name = "item 4";
+        let text_default = "text default";
+        let text_display = ("LARGE", text_type::Display::Large);
+        let checkbox_default = true;
+        let select_default = 1;
+        let select_display = ("DROPDOWN", select_type::Display::Dropdown);
+        let select_option1_id = new_id();
+        let select_option1_name = "option 1";
+        let select_option1_product_id = "product 1";
+        let select_option2_id = new_id();
+        let select_option2_name = "option 2";
+        let select_option2_product_id = "product 2";
+        let select_option3_id = new_id();
+        let select_option3_name = "option 3";
+        let select_option3_product_id = "product 3";
+        let text_default_4 = "text default";
+        let text_display_4 = ("SMALL", text_type::Display::Small);
+
+        {
+            let query = sqlx::query(
+                "INSERT INTO registration_schema_items(id, 
+                    event, 
+                    idx, 
+                    name, 
+                    item_type, 
+                    text_type_default, 
+                    text_type_display, 
+                    checkbox_type_default, 
+                    select_type_default,
+                    select_type_display, 
+                    multi_select_type_defaults, 
+                    multi_select_type_display 
+                ) VALUES 
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            );
+
+            // item 1
+            let query = query
+                .bind(&item1_id)
+                .bind(&init.event_1)
+                .bind(0)
+                .bind(item1_name)
+                .bind("TextType")
+                .bind(text_default)
+                .bind(text_display.0)
+                .bind::<Option<i32>>(None)
+                .bind::<Option<i32>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None);
+
+            // item 2
+            let query = query
+                .bind(&item2_id)
+                .bind(&init.event_1)
+                .bind(1)
+                .bind(item2_name)
+                .bind("CheckboxType")
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None)
+                .bind(checkbox_default as i32)
+                .bind::<Option<i32>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None);
+
+            // item 3
+            let query = query
+                .bind(&item3_id)
+                .bind(&init.event_1)
+                .bind(2)
+                .bind(item3_name)
+                .bind("SelectType")
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<i32>>(None)
+                .bind(select_default)
+                .bind(select_display.0)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None);
+
+            // item 4
+            let query = query
+                .bind(&item4_id)
+                .bind(&init.event_2)
+                .bind(0)
+                .bind(item4_name)
+                .bind("TextType")
+                .bind(text_default_4)
+                .bind(text_display_4.0)
+                .bind::<Option<i32>>(None)
+                .bind::<Option<i32>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None)
+                .bind::<Option<String>>(None);
+
+            query.execute(&init.db).await.unwrap();
+        }
+        {
+            let query = sqlx::query(
+                "INSERT INTO registration_schema_select_options(id, 
+                    schema_item,
+                    idx,
+                    name,
+                    product_id
+                ) VALUES 
+                    (?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?),
+                    (?, ?, ?, ?, ?)",
+            );
+
+            // option 1
+            let query = query
+                .bind(&select_option1_id)
+                .bind(&item3_id)
+                .bind(0)
+                .bind(select_option1_name)
+                .bind(select_option1_product_id);
+
+            // option 2
+            let query = query
+                .bind(&select_option2_id)
+                .bind(&item3_id)
+                .bind(1)
+                .bind(select_option2_name)
+                .bind(select_option2_product_id);
+
+            // option 3
+            let query = query
+                .bind(&select_option3_id)
+                .bind(&item3_id)
+                .bind(2)
+                .bind(select_option3_name)
+                .bind(select_option3_product_id);
+
+            query.execute(&init.db).await.unwrap();
+        }
+
+        let schemas = vec![
+            RegistrationSchema {
+                event_id: init.event_1.clone(),
+                items: vec![
+                    RegistrationSchemaItem {
+                        id: item1_id,
+                        name: item1_name.to_owned(),
+                        r#type: Some(RegistrationSchemaItemType {
+                            r#type: Some(ItemType::Text(TextType {
+                                default: text_default.to_owned(),
+                                display: text_display.1 as i32,
+                            })),
+                        }),
+                    },
+                    RegistrationSchemaItem {
+                        id: item2_id,
+                        name: item2_name.to_owned(),
+                        r#type: Some(RegistrationSchemaItemType {
+                            r#type: Some(ItemType::Checkbox(CheckboxType {
+                                default: checkbox_default,
+                            })),
+                        }),
+                    },
+                    RegistrationSchemaItem {
+                        id: item3_id,
+                        name: item3_name.to_owned(),
+                        r#type: Some(RegistrationSchemaItemType {
+                            r#type: Some(ItemType::Select(SelectType {
+                                default: select_default,
+                                display: select_display.1 as i32,
+                                options: vec![
+                                    SelectOption {
+                                        id: select_option1_id,
+                                        name: select_option1_name.to_owned(),
+                                        product_id: select_option1_product_id.to_owned(),
+                                    },
+                                    SelectOption {
+                                        id: select_option2_id,
+                                        name: select_option2_name.to_owned(),
+                                        product_id: select_option2_product_id.to_owned(),
+                                    },
+                                    SelectOption {
+                                        id: select_option3_id,
+                                        name: select_option3_name.to_owned(),
+                                        product_id: select_option3_product_id.to_owned(),
+                                    },
+                                ],
+                            })),
+                        }),
+                    },
+                ],
+            },
+            RegistrationSchema {
+                event_id: init.event_2.clone(),
+                items: vec![RegistrationSchemaItem {
+                    id: item4_id,
+                    name: item4_name.to_owned(),
+                    r#type: Some(RegistrationSchemaItemType {
+                        r#type: Some(ItemType::Text(TextType {
+                            default: text_default_4.to_owned(),
+                            display: text_display_4.1 as i32,
+                        })),
+                    }),
+                }],
+            },
+        ];
+
+        schemas
+    }
+
     #[tokio::test]
     async fn insert() {
         let init = init_db().await;
 
-        let store = SqliteStore::new(Arc::new(init.db.clone()));
+        let db_ptr = Arc::new(init.db);
+
+        let store = SqliteStore::new(db_ptr.clone());
 
         let mut schemas = vec![
             RegistrationSchema {
@@ -1043,13 +1273,13 @@ mod tests {
         }
 
         let store_row: Vec<ItemRow> = sqlx::query_as("SELECT * FROM registration_schema_items")
-            .fetch_all(&init.db)
+            .fetch_all(&*db_ptr)
             .await
             .unwrap();
 
         let store_options_row: Vec<OptionRow> =
             sqlx::query_as("SELECT * FROM registration_schema_select_options")
-                .fetch_all(&init.db)
+                .fetch_all(&*db_ptr)
                 .await
                 .unwrap();
 
@@ -1077,187 +1307,7 @@ mod tests {
     async fn update() {
         let init = init_db().await;
 
-        let store = SqliteStore::new(Arc::new(init.db.clone()));
-
-        let item1_id = new_id();
-        let item1_name = "item 1";
-        let item2_id = new_id();
-        let item2_name = "item 2";
-        let item3_id = new_id();
-        let item3_name = "item 3";
-        let text_default = "text default";
-        let text_display = ("LARGE", text_type::Display::Large);
-        let checkbox_default = true;
-        let select_default = 1;
-        let select_display = ("DROPDOWN", select_type::Display::Dropdown);
-        let select_option1_id = new_id();
-        let select_option1_name = "option 1";
-        let select_option1_product_id = "product 1";
-        let select_option2_id = new_id();
-        let select_option2_name = "option 2";
-        let select_option2_product_id = "product 2";
-        let select_option3_id = new_id();
-        let select_option3_name = "option 3";
-        let select_option3_product_id = "product 3";
-
-        {
-            let query = sqlx::query(
-                "INSERT INTO registration_schema_items(id, 
-                    event, 
-                    idx, 
-                    name, 
-                    item_type, 
-                    text_type_default, 
-                    text_type_display, 
-                    checkbox_type_default, 
-                    select_type_default,
-                    select_type_display, 
-                    multi_select_type_defaults, 
-                    multi_select_type_display 
-                ) VALUES 
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
-                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            );
-
-            // item 1
-            let query = query
-                .bind(&item1_id)
-                .bind(&init.event_1)
-                .bind(0)
-                .bind(item1_name)
-                .bind("TextType")
-                .bind(text_default)
-                .bind(text_display.0)
-                .bind::<Option<i32>>(None)
-                .bind::<Option<i32>>(None)
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None);
-
-            // item 2
-            let query = query
-                .bind(&item2_id)
-                .bind(&init.event_1)
-                .bind(1)
-                .bind(item2_name)
-                .bind("CheckboxType")
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None)
-                .bind(checkbox_default as i32)
-                .bind::<Option<i32>>(None)
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None);
-
-            // item 3
-            let query = query
-                .bind(&item3_id)
-                .bind(&init.event_1)
-                .bind(2)
-                .bind(item3_name)
-                .bind("SelectType")
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None)
-                .bind::<Option<i32>>(None)
-                .bind(select_default)
-                .bind(select_display.0)
-                .bind::<Option<String>>(None)
-                .bind::<Option<String>>(None);
-
-            query.execute(&init.db).await.unwrap();
-        }
-        {
-            let query = sqlx::query(
-                "INSERT INTO registration_schema_select_options(id, 
-                    schema_item,
-                    idx,
-                    name,
-                    product_id
-                ) VALUES 
-                    (?, ?, ?, ?, ?),
-                    (?, ?, ?, ?, ?),
-                    (?, ?, ?, ?, ?)",
-            );
-
-            // option 1
-            let query = query
-                .bind(&select_option1_id)
-                .bind(&item3_id)
-                .bind(0)
-                .bind(select_option1_name)
-                .bind(select_option1_product_id);
-
-            // option 2
-            let query = query
-                .bind(&select_option2_id)
-                .bind(&item3_id)
-                .bind(1)
-                .bind(select_option2_name)
-                .bind(select_option2_product_id);
-
-            // option 3
-            let query = query
-                .bind(&select_option3_id)
-                .bind(&item3_id)
-                .bind(2)
-                .bind(select_option3_name)
-                .bind(select_option3_product_id);
-
-            query.execute(&init.db).await.unwrap();
-        }
-
-        let mut schemas = vec![RegistrationSchema {
-            event_id: init.event_1,
-            items: vec![
-                RegistrationSchemaItem {
-                    id: item1_id,
-                    name: item1_name.to_owned(),
-                    r#type: Some(RegistrationSchemaItemType {
-                        r#type: Some(ItemType::Text(TextType {
-                            default: text_default.to_owned(),
-                            display: text_display.1 as i32,
-                        })),
-                    }),
-                },
-                RegistrationSchemaItem {
-                    id: item2_id,
-                    name: item2_name.to_owned(),
-                    r#type: Some(RegistrationSchemaItemType {
-                        r#type: Some(ItemType::Checkbox(CheckboxType {
-                            default: checkbox_default,
-                        })),
-                    }),
-                },
-                RegistrationSchemaItem {
-                    id: item3_id,
-                    name: item3_name.to_owned(),
-                    r#type: Some(RegistrationSchemaItemType {
-                        r#type: Some(ItemType::Select(SelectType {
-                            default: select_default,
-                            display: select_display.1 as i32,
-                            options: vec![
-                                SelectOption {
-                                    id: select_option1_id,
-                                    name: select_option1_name.to_owned(),
-                                    product_id: select_option1_product_id.to_owned(),
-                                },
-                                SelectOption {
-                                    id: select_option2_id,
-                                    name: select_option2_name.to_owned(),
-                                    product_id: select_option2_product_id.to_owned(),
-                                },
-                                SelectOption {
-                                    id: select_option3_id,
-                                    name: select_option3_name.to_owned(),
-                                    product_id: select_option3_product_id.to_owned(),
-                                },
-                            ],
-                        })),
-                    }),
-                },
-            ],
-        }];
+        let mut schemas = test_data(&init).await;
 
         schemas[0].items.swap(0, 1);
 
@@ -1303,6 +1353,9 @@ mod tests {
             _ => panic!("{:?}", schemas[0].items[2]),
         }
 
+        let db_ptr = Arc::new(init.db);
+        let store = SqliteStore::new(db_ptr.clone());
+
         let returned_schemas = store.upsert(schemas.clone()).await.unwrap();
 
         assert_eq!(schemas.len(), returned_schemas.len());
@@ -1317,13 +1370,13 @@ mod tests {
         }
 
         let store_row: Vec<ItemRow> = sqlx::query_as("SELECT * FROM registration_schema_items")
-            .fetch_all(&init.db)
+            .fetch_all(&*db_ptr)
             .await
             .unwrap();
 
         let store_options_row: Vec<OptionRow> =
             sqlx::query_as("SELECT * FROM registration_schema_select_options")
-                .fetch_all(&init.db)
+                .fetch_all(&*db_ptr)
                 .await
                 .unwrap();
 
@@ -1345,5 +1398,140 @@ mod tests {
             let store_schema = store_schema_map.get(&schema.event_id).unwrap();
             assert_eq!(schema, store_schema);
         }
+    }
+
+    enum UpdateDoesNotExistTests {
+        BadEventId,
+        BadItemId,
+        BadOptionId,
+    }
+    #[test_case(UpdateDoesNotExistTests::BadEventId ; "bad event id")]
+    #[test_case(UpdateDoesNotExistTests::BadItemId ; "bad item id")]
+    #[test_case(UpdateDoesNotExistTests::BadOptionId ; "bad option id")]
+    #[tokio::test]
+    async fn update_does_not_exist(test_name: UpdateDoesNotExistTests) {
+        let init = init_db().await;
+        let test_data = test_data(&init).await;
+
+        struct TestCase {
+            id: String,
+            schema: RegistrationSchema,
+        }
+        let tc = match test_name {
+            UpdateDoesNotExistTests::BadEventId => {
+                let id = new_id();
+                TestCase {
+                    id: id.clone(),
+                    schema: RegistrationSchema {
+                        event_id: id.clone(),
+                        items: Vec::new(),
+                    },
+                }
+            }
+            UpdateDoesNotExistTests::BadItemId => {
+                let id = new_id();
+                let mut schema = test_data[0].clone();
+                schema.items[0].id = id.clone();
+                TestCase { id, schema }
+            }
+            UpdateDoesNotExistTests::BadOptionId => {
+                let id = new_id();
+                let mut schema = test_data[0].clone();
+                match schema.items[2]
+                    .r#type
+                    .as_mut()
+                    .unwrap()
+                    .r#type
+                    .as_mut()
+                    .unwrap()
+                {
+                    ItemType::Select(select) => select.options[0].id = id.clone(),
+                    _ => panic!(),
+                }
+                TestCase { id, schema }
+            }
+        };
+
+        let store = SqliteStore::new(Arc::new(init.db));
+        let result = store.upsert(vec![tc.schema]).await;
+        match result {
+            Ok(_) => panic!("no error returned"),
+            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, tc.id),
+            _ => panic!("incorrect error type: {:?}", result),
+        };
+    }
+
+    #[tokio::test]
+    async fn list_all() {
+        let init = init_db().await;
+        let schemas = test_data(&init).await;
+        let store = SqliteStore::new(Arc::new(init.db));
+        let returned_schemas = store.list(Vec::new()).await.unwrap();
+        let returned_schema_map = returned_schemas
+            .into_iter()
+            .map(|schema| (schema.event_id.clone(), schema))
+            .collect::<HashMap<_, _>>();
+
+        for schema in schemas.iter() {
+            let returned_schema = returned_schema_map.get(&schema.event_id).unwrap();
+            assert_eq!(schema, returned_schema);
+        }
+    }
+
+    #[tokio::test]
+    async fn list_some() {
+        let init = init_db().await;
+        let schemas = test_data(&init).await;
+
+        let store = SqliteStore::new(Arc::new(init.db));
+
+        let returned_schemas = store.list(vec![init.event_1]).await.unwrap();
+
+        assert_eq!(returned_schemas.len(), 1);
+        assert_eq!(schemas[0], returned_schemas[0]);
+    }
+
+    #[tokio::test]
+    async fn list_does_not_exist() {
+        let init = init_db().await;
+        let _ = test_data(&init).await;
+
+        let store = SqliteStore::new(Arc::new(init.db));
+
+        let id = new_id();
+        let result = store.list(vec![id.clone()]).await;
+        match result {
+            Ok(_) => panic!("no error returned"),
+            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
+            _ => panic!("incorrect error type: {:?}", result),
+        };
+    }
+
+    #[tokio::test]
+    async fn delete_one() {
+        let init = init_db().await;
+        let _ = test_data(&init).await;
+
+        let db_ptr = Arc::new(init.db);
+        let store = SqliteStore::new(db_ptr.clone());
+
+        store.delete(&vec![init.event_1]).await.unwrap();
+
+        let event_ids: Vec<(String,)> =
+            sqlx::query_as("SELECT DISTINCT event FROM registration_schema_items")
+                .fetch_all(&*db_ptr)
+                .await
+                .unwrap();
+
+        assert_eq!(event_ids.len(), 1);
+        assert_eq!(event_ids[0].0, init.event_2);
+
+        let (object_count,): (u32,) =
+            sqlx::query_as("SELECT COUNT(*) FROM registration_schema_select_options")
+                .fetch_one(&*db_ptr)
+                .await
+                .unwrap();
+
+        assert_eq!(object_count, 0);
     }
 }

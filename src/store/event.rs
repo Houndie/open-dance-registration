@@ -163,6 +163,10 @@ impl Store for SqliteStore {
     }
 
     async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error> {
+        if event_ids.is_empty() {
+            return Ok(());
+        }
+
         ids_in_table(
             &*self.pool,
             "events",

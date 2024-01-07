@@ -1,8 +1,8 @@
 use std::{env, sync::Arc};
 
-use api::event::EventService;
+use api::{event::Service as EventService, registration_schema::Service as SchemaService};
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use store::event::SqliteStore;
+use store::{event::SqliteStore as EventStore, registration_schema::SqliteStore as SchemaStore};
 use tonic::transport::Server;
 
 pub mod api;
@@ -28,18 +28,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db = Arc::new(SqlitePool::connect(&db_url).await?);
     sqlx::migrate!().run(&(*db)).await?;
 
-    let event_store = Arc::new(SqliteStore::new(db));
+    let event_store = Arc::new(EventStore::new(db.clone()));
+    let schema_store = Arc::new(SchemaStore::new(db.clone()));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));
 
-    let event_reflection_service = tonic_reflection::server::Builder::configure()
+    let schema_service =
+        proto::registration_schema_service_server::RegistrationSchemaServiceServer::new(
+            SchemaService::new(schema_store),
+        );
+
+    let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build()?;
 
     Server::builder()
         .add_service(event_service)
-        .add_service(event_reflection_service)
+        .add_service(schema_service)
+        .add_service(reflection_service)
         .serve("[::1]:50051".parse()?)
         .await?;
 

@@ -13,20 +13,18 @@ use crate::{
 use super::store_error_to_status;
 
 #[derive(Debug)]
-pub struct EventService<EventStoreType: Store> {
-    store: Arc<EventStoreType>,
+pub struct Service<StoreType: Store> {
+    store: Arc<StoreType>,
 }
 
-impl<EventStoreType: Store> EventService<EventStoreType> {
-    pub fn new(store: Arc<EventStoreType>) -> Self {
-        EventService { store }
+impl<StoreType: Store> Service<StoreType> {
+    pub fn new(store: Arc<StoreType>) -> Self {
+        Service { store }
     }
 }
 
 #[tonic::async_trait]
-impl<EventStoreType: Store> proto::event_service_server::EventService
-    for EventService<EventStoreType>
-{
+impl<StoreType: Store> proto::event_service_server::EventService for Service<StoreType> {
     async fn upsert_events(
         &self,
         request: Request<UpsertEventsRequest>,

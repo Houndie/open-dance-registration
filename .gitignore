@@ -1,3 +1,4 @@
 /target
 /odr-server/target
 /.direnv
+/odr-admin/dist

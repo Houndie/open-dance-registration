@@ -39,9 +39,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     Server::builder()
-        .add_service(event_service)
-        .add_service(schema_service)
-        .add_service(reflection_service)
+        .accept_http1(true)
+        .add_service(tonic_web::enable(event_service))
+        .add_service(tonic_web::enable(schema_service))
+        .add_service(tonic_web::enable(reflection_service))
         .serve("[::1]:50051".parse()?)
         .await?;
 

@@ -16,7 +16,5 @@ tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
 tonic = "0.10.2"
 tonic-reflection = "0.10.2"
 uuid = { version = "1.6.1", features = ["v7"] }
-common = { path = "../common" }
-
-[build-dependencies]
-tonic-build = "0.10.2"
+common = { path = "../common", features = ["transport"] }
+tonic-web = "0.10.2"

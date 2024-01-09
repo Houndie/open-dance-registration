@@ -1,6 +1,7 @@
 use common::proto::{self, ListEventsRequest, UpsertEventsRequest};
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
+use tonic::Status;
 
 use crate::{
     hooks::{use_grpc_client, use_grpc_client_provider, EventsClient},
@@ -12,23 +13,27 @@ pub fn Page(cx: Scope) -> Element {
 
     let events_client = use_grpc_client::<EventsClient>(cx);
 
-    let events = use_future(cx, (), |_| {
-        to_owned!(events_client);
+    let events = use_ref(cx, || Vec::new());
+
+    let rsp: &UseFuture<Result<(), Status>> = use_future(cx, (), |_| {
+        to_owned!(events_client, events);
         async move {
             if let Some(client) = events_client {
                 let response = client
                     .lock()
                     .unwrap()
                     .list_events(tonic::Request::new(ListEventsRequest { ids: Vec::new() }))
-                    .await
-                    .unwrap();
+                    .await?;
 
-                return response.into_inner().events;
+                events.with_mut(|events| *events = response.into_inner().events);
             }
-
-            Vec::new()
+            Ok(())
         }
     });
+
+    if let Some(err) = rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
+        log::error!("Error occurred while fetching events: {}", err);
+    };
 
     let show_event_modal = use_state(cx, || false);
 
@@ -54,32 +59,30 @@ pub fn Page(cx: Scope) -> Element {
                     }
                 }
                 tbody {
-                    match events.value() {
-                        Some(events) => rsx! {
-                            events.iter().map(|e| rsx!{
-                                tr {
-                                    key: "{e.id}",
-                                    td{
-                                        class: "col-auto",
-                                        e.name.clone()
-                                    }
-                                    td {
-                                        style: "width: 1px; white-space: nowrap;",
-                                        button {
-                                            class: "btn btn-primary",
-                                            onclick: |_| {
-                                                nav.push(Routes::EventPage{
-                                                    id: e.id.clone(),
-                                                });
-                                            },
-                                            "Edit Event"
-                                        }
+                    events.read().iter().map(|e|{
+                        let id = e.id.clone();
+                        rsx!{
+                            tr {
+                                key: "{e.id}",
+                                td{
+                                    class: "col-auto",
+                                    e.name.clone()
+                                }
+                                td {
+                                    style: "width: 1px; white-space: nowrap;",
+                                    button {
+                                        class: "btn btn-primary",
+                                        onclick: move |_| {
+                                            nav.push(Routes::EventPage{
+                                                id: id.clone(),
+                                            });
+                                        },
+                                        "Edit Event"
                                     }
                                 }
-                            })
-                        },
-                        None => rsx! { tr{} },
-                    }
+                            }
+                        }
+                    })
                 }
             }
             button {
@@ -89,9 +92,9 @@ pub fn Page(cx: Scope) -> Element {
             }
         }
         if **show_event_modal { rsx!(EventModal {
-            do_submit: || {
+            do_submit: |event| {
                 show_event_modal.set(false);
-                events.restart();
+                events.with_mut(|events| events.push(event));
             },
             do_close: || show_event_modal.set(false),
         }) }
@@ -171,18 +174,23 @@ fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
 }
 
 #[component]
-fn EventModal<DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
+fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
     let event_name = use_state(cx, || "".to_owned());
     let submitted = use_state(cx, || false);
-    let created = use_state(cx, || false);
+    let created = use_ref(cx, || None);
     let client = use_grpc_client::<EventsClient>(cx);
 
-    if **created {
-        do_submit()
+    {
+        let mut created_mut = created.write_silent();
+        if let Some(event) = created_mut.as_mut() {
+            created.needs_update();
+            let event = std::mem::take::<proto::Event>(event);
+            do_submit(event);
+        }
     }
 
     cx.render(rsx! {
@@ -192,13 +200,13 @@ fn EventModal<DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
                     submitted.set(true);
                     to_owned!(client, event_name, created);
                     async move {
-                        client.unwrap().lock().unwrap().upsert_events(UpsertEventsRequest{
+                        let rsp = client.unwrap().lock().unwrap().upsert_events(UpsertEventsRequest{
                             events: vec![proto::Event{
                                 id: "".to_owned(),
                                 name: event_name.current().as_ref().clone(),
                             }],
                         }).await.unwrap();
-                        created.set(true);
+                        created.set(Some(rsp.into_inner().events.remove(0)));
                     }
                 })
             },

@@ -1,8 +1,12 @@
 use common::proto::ListEventsRequest;
 use dioxus::prelude::*;
+use dioxus_router::prelude::*;
 use tonic::Request;
 
-use crate::hooks::{use_grpc_client, use_grpc_client_provider, EventsClient};
+use crate::{
+    hooks::{use_grpc_client, use_grpc_client_provider, EventsClient},
+    pages::Routes,
+};
 
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
@@ -29,6 +33,8 @@ pub fn Page(cx: Scope, id: String) -> Element {
         }
     });
 
+    let nav = use_navigator(cx);
+
     match event.value().map(Option::as_ref).flatten() {
         Some(e) => cx.render(rsx! {
             div {
@@ -42,7 +48,12 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         class: "col",
                         button {
                             class: "btn btn-primary",
-                            "Edit Registration Schemas",
+                            onclick: |_| {
+                                nav.push(Routes::RegistrationSchemaPage {
+                                    id: id.clone(),
+                                });
+                            },
+                            "Modify Registration Schema",
                         }
                     }
                 }

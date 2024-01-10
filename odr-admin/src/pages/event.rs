@@ -4,6 +4,7 @@ use dioxus_router::prelude::*;
 use tonic::Request;
 
 use crate::{
+    components::page::Page as GenericPage,
     hooks::{use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
@@ -37,11 +38,8 @@ pub fn Page(cx: Scope, id: String) -> Element {
 
     match event.value().map(Option::as_ref).flatten() {
         Some(e) => cx.render(rsx! {
-            div {
-                class: "container",
-                h2{
-                    "{e.name}"
-                }
+            GenericPage {
+                title: e.name.clone(),
                 div {
                     class: "row",
                     div {

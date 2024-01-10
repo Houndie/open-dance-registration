@@ -4,6 +4,7 @@ use dioxus_router::prelude::*;
 use log::LevelFilter;
 use pages::Routes;
 
+pub mod components;
 pub mod hooks;
 pub mod pages;
 

@@ -4,6 +4,7 @@ use dioxus_router::prelude::*;
 use tonic::Status;
 
 use crate::{
+    components::page::Page as GenericPage,
     hooks::{use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
@@ -39,12 +40,8 @@ pub fn Page(cx: Scope) -> Element {
 
     let nav = use_navigator(cx);
     cx.render(rsx! {
-        div {
-            class: "container",
-            h2 {
-                "My Events"
-            }
-
+        GenericPage {
+            title: "My Events".to_owned(),
             table {
                 class: "table table-striped",
                 thead {

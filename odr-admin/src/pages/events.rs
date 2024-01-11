@@ -1,39 +1,39 @@
 use common::proto::{self, ListEventsRequest, UpsertEventsRequest};
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
-use tonic::Status;
 
 use crate::{
     components::page::Page as GenericPage,
-    hooks::{use_grpc_client, use_grpc_client_provider, EventsClient},
+    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
 
 pub fn Page(cx: Scope) -> Element {
     use_grpc_client_provider::<EventsClient>(cx);
 
-    let events_client = use_grpc_client::<EventsClient>(cx);
+    let events_client = use_grpc_client::<EventsClient>(cx).unwrap();
+
+    let toast_manager = use_toasts(cx).unwrap();
 
     let events = use_ref(cx, || Vec::new());
 
-    let rsp: &UseFuture<Result<(), Status>> = use_future(cx, (), |_| {
+    let rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
         to_owned!(events_client, events);
         async move {
-            if let Some(client) = events_client {
-                let response = client
-                    .lock()
-                    .unwrap()
-                    .list_events(tonic::Request::new(ListEventsRequest { ids: Vec::new() }))
-                    .await?;
+            let response = events_client
+                .lock()
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                .list_events(tonic::Request::new(ListEventsRequest { ids: Vec::new() }))
+                .await
+                .map_err(|e| anyhow::Error::new(e))?;
 
-                events.with_mut(|events| *events = response.into_inner().events);
-            }
+            events.with_mut(|events| *events = response.into_inner().events);
             Ok(())
         }
     });
 
     if let Some(err) = rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
-        log::error!("Error occurred while fetching events: {}", err);
+        toast_manager.borrow_mut().new_error(err.to_string());
     };
 
     let show_event_modal = use_state(cx, || false);
@@ -179,7 +179,8 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
     let event_name = use_state(cx, || "".to_owned());
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
-    let client = use_grpc_client::<EventsClient>(cx);
+    let client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let toast_manager = use_toasts(cx).unwrap();
 
     {
         let mut created_mut = created.write_silent();
@@ -195,15 +196,37 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
             do_submit: move || {
                 cx.spawn({
                     submitted.set(true);
-                    to_owned!(client, event_name, created);
+                    to_owned!(client, event_name, created, toast_manager);
                     async move {
-                        let rsp = client.unwrap().lock().unwrap().upsert_events(UpsertEventsRequest{
-                            events: vec![proto::Event{
-                                id: "".to_owned(),
-                                name: event_name.current().as_ref().clone(),
-                            }],
-                        }).await.unwrap();
-                        created.set(Some(rsp.into_inner().events.remove(0)));
+                        let rsp = {
+                            let lock = client.lock();
+                            match lock {
+                                Ok(mut unlocked) => {
+                                    let rsp = unlocked.upsert_events(UpsertEventsRequest{
+                                        events: vec![proto::Event{
+                                            id: "".to_owned(),
+                                            name: event_name.current().as_ref().clone(),
+                                        }],
+                                    }).await;
+
+                                    match rsp {
+                                        Ok(rsp) => Some(rsp),
+                                        Err(e) => {
+                                            toast_manager.borrow_mut().new_error(e.to_string());
+                                            None
+                                        },
+                                    }
+                                },
+                                Err(e) =>  {
+                                    toast_manager.borrow_mut().new_error(e.to_string());
+                                    None
+                                },
+                            }
+
+                        };
+                        if let Some(rsp) = rsp {
+                            created.set(Some(rsp.into_inner().events.remove(0)));
+                        };
                     }
                 })
             },

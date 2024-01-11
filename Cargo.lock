@@ -1605,6 +1605,7 @@ dependencies = [
 name = "odr-admin"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "common",
  "dioxus",
  "dioxus-logger",

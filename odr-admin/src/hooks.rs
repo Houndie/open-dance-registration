@@ -3,6 +3,8 @@ use std::sync::{Arc, Mutex};
 use common::proto::event_service_client::EventServiceClient;
 use dioxus::prelude::*;
 
+pub mod toasts;
+
 pub struct ClientContext<Client>(Arc<Mutex<Client>>);
 
 pub struct EventsClient;

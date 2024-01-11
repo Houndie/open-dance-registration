@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 
 use crate::{
-    components::page::Page as GenericPage,
+    components::{modal::Modal, page::Page as GenericPage},
     hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
@@ -99,78 +99,6 @@ pub fn Page(cx: Scope) -> Element {
 }
 
 #[component]
-fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
-    cx: Scope,
-    do_submit: DoSubmit,
-    do_close: DoClose,
-    title: &'a str,
-    disableSubmit: bool,
-    children: Element<'a>,
-) -> Element {
-    cx.render(rsx! {
-        div {
-            style: "position: fixed; z-index: 1; padding-top: 100px; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgb(0,0,0); background-color: rgba(0,0,0,0.4);",
-            div {
-                style: "margin: auto; width: 80%",
-                div {
-                    class: "card",
-                    div {
-                        div {
-                            class: "card-header",
-                            div {
-                                class: "row",
-                                div {
-                                    class: "col",
-                                    h5 {
-                                        class: "card-title",
-                                        "{title}"
-                                    }
-                                }
-                                div {
-                                    class: "col-1 d-flex justify-content-end",
-                                    button {
-                                        class: "btn-close",
-                                        onclick: |_| do_close(),
-                                    }
-                                }
-                            }
-                        }
-                        div {
-                            class: "card-body",
-                            &children,
-
-                            div {
-                                class: "d-flex flex-row-reverse",
-                                div {
-                                    class: "p-1 flex-shrink-1",
-                                    button {
-                                        class: "btn btn-primary",
-                                        disabled: *disableSubmit,
-                                        onclick: |_| {
-                                            log::info!("HI");
-                                            do_submit()
-                                        },
-                                        "Create"
-                                    }
-                                }
-                                div {
-                                    class: "p-1 flex-shrink-1",
-                                    button {
-                                        class: "btn btn-secondary",
-                                        onclick: |_| do_close(),
-                                        "Cancel"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    })
-}
-
-#[component]
 fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
     do_submit: DoSubmit,
@@ -231,7 +159,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
                 })
             },
             do_close: || do_close(),
-            disableSubmit: **submitted,
+            disable_submit: **submitted,
             title: "Create new Event",
             form {
                 div {

@@ -1,10 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::hooks::toasts::{use_toasts, use_toasts_provider};
+use crate::hooks::toasts::use_toasts;
 
 #[component]
 pub fn Page<'a>(cx: Scope, title: String, children: Element<'a>) -> Element {
-    use_toasts_provider(cx);
     let toast_manager = use_toasts(cx).unwrap();
 
     cx.render(rsx!(

@@ -1,7 +1,8 @@
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
 use common::proto::{
-    registration_item, Registration, RegistrationItem, RegistrationQuery, RepeatedUint32,
+    compound_registration_query, event_id_query, registration_item, registration_query,
+    Registration, RegistrationItem, RegistrationQuery, RepeatedUint32,
 };
 use sqlx::SqlitePool;
 
@@ -103,6 +104,13 @@ type QueryBuilder<'q> = sqlx::query::Query<
     <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
 >;
 
+type QueryAsBuilder<'q> = sqlx::query::QueryAs<
+    'q,
+    sqlx::Sqlite,
+    RegistrationRow,
+    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
+>;
+
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, registrations: Vec<Registration>) -> Result<Vec<Registration>, Error>;
@@ -141,6 +149,45 @@ fn bind_item<'q>(
     };
 
     query_builder
+}
+
+fn query_where_clause(query: &RegistrationQuery) -> String {
+    match query.query.as_ref().unwrap() {
+        registration_query::Query::EventId(event_id_query) => {
+            match event_id_query.operator.as_ref().unwrap() {
+                event_id_query::Operator::Equals(_) => "event = ?".to_owned(),
+                event_id_query::Operator::NotEquals(_) => "event != ?".to_owned(),
+            }
+        }
+        registration_query::Query::Compound(compound) => {
+            let left = query_where_clause(compound.left.as_ref().unwrap());
+            let right = query_where_clause(compound.right.as_ref().unwrap());
+            let operator = compound_registration_query::Operator::try_from(compound.operator)
+                .unwrap()
+                .as_str_name();
+
+            format!("({}) {} ({})", left, operator, right)
+        }
+    }
+}
+
+fn bind_query<'q>(
+    query_builder: QueryAsBuilder<'q>,
+    query: &'q RegistrationQuery,
+) -> QueryAsBuilder<'q> {
+    match query.query.as_ref().unwrap() {
+        registration_query::Query::EventId(event_id_query) => {
+            match event_id_query.operator.as_ref().unwrap() {
+                event_id_query::Operator::Equals(equals) => query_builder.bind(equals),
+                event_id_query::Operator::NotEquals(not_equals) => query_builder.bind(not_equals),
+            }
+        }
+        registration_query::Query::Compound(compound) => {
+            let query_builder = bind_query(query_builder, compound.left.as_ref().unwrap());
+            let query_builder = bind_query(query_builder, compound.right.as_ref().unwrap());
+            query_builder
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -406,13 +453,177 @@ impl Store for SqliteStore {
 
         Ok(outputs)
     }
+
     async fn query(&self, query: RegistrationQuery) -> Result<Vec<Registration>, Error> {
-        Ok(Vec::new())
+        let registrations = {
+            let query_string = format!(
+                "SELECT id, event FROM registrations WHERE {}",
+                query_where_clause(&query)
+            );
+            let query_builder = sqlx::query_as(&query_string);
+            let query_builder = bind_query(query_builder, &query);
+            let rows: Vec<RegistrationRow> = query_builder
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            rows.into_iter()
+                .map(|row| row.to_registration())
+                .collect::<Vec<_>>()
+        };
+
+        let items = {
+            let where_clause: String = itertools::Itertools::intersperse(
+                registrations.iter().map(|_| "registration = ?"),
+                " OR ",
+            )
+            .collect();
+
+            let query = format!(
+                "SELECT id, registration, schema_item, value_type, value FROM registration_items WHERE {}",
+                where_clause
+            );
+
+            let query_builder = sqlx::query_as(&query);
+            let query_builder = registrations
+                .iter()
+                .fold(query_builder, |query_builder, r| query_builder.bind(&r.id));
+
+            let rows: Vec<RegistrationItemRow> = query_builder
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            rows.into_iter()
+                .map(|row| row.to_registration_item())
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        let registrations = attach_items(registrations.into_iter(), items.into_iter());
+
+        Ok(registrations)
     }
+
     async fn list(&self, ids: Vec<String>) -> Result<Vec<Registration>, Error> {
-        Ok(Vec::new())
+        let base_query = "SELECT id, event FROM registrations";
+        let base_items_query =
+            "SELECT id, registration, schema_item, value_type, value FROM registration_items";
+
+        if ids.is_empty() {
+            let registrations: Vec<RegistrationRow> = sqlx::query_as(base_query)
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            let items: Vec<RegistrationItemRow> = sqlx::query_as(base_items_query)
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            let registrations = attach_items(
+                registrations.into_iter().map(|row| row.to_registration()),
+                items
+                    .into_iter()
+                    .map(|row| row.to_registration_item())
+                    .collect::<Result<Vec<_>, _>>()?,
+            );
+
+            return Ok(registrations);
+        }
+
+        ids_in_table(
+            &*self.pool,
+            "registrations",
+            ids.iter().map(|id| id.as_str()),
+        )
+        .await?;
+
+        let registrations = {
+            let where_clause: String =
+                itertools::Itertools::intersperse(ids.iter().map(|_| "id = ?"), " OR ").collect();
+
+            let query = format!("{} WHERE {}", base_query, where_clause);
+
+            let query_builder = sqlx::query_as(&query);
+            let query_builder = ids
+                .iter()
+                .fold(query_builder, |query_builder, id| query_builder.bind(id));
+
+            let rows: Vec<RegistrationRow> = query_builder
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            rows.into_iter()
+                .map(|row| row.to_registration())
+                .collect::<Vec<_>>()
+        };
+
+        let items = {
+            let where_clause: String = itertools::Itertools::intersperse(
+                registrations.iter().map(|_| "registration = ?"),
+                " OR ",
+            )
+            .collect();
+
+            let query = format!("{} WHERE {}", base_items_query, where_clause);
+
+            let query_builder = sqlx::query_as(&query);
+            let query_builder = ids
+                .iter()
+                .fold(query_builder, |query_builder, id| query_builder.bind(id));
+
+            let rows: Vec<RegistrationItemRow> = query_builder
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            rows.into_iter()
+                .map(|row| row.to_registration_item())
+                .collect::<Result<Vec<_>, _>>()?
+        };
+
+        let registrations = attach_items(registrations.into_iter(), items.into_iter());
+
+        let mut registration_map = registrations
+            .into_iter()
+            .map(|registration| (registration.id.clone(), registration))
+            .collect::<HashMap<_, _>>();
+
+        let mut outputs = Vec::new();
+        outputs.resize_with(ids.len(), Default::default);
+
+        for (idx, id) in ids.iter().enumerate() {
+            outputs[idx] = registration_map.remove(id).unwrap();
+        }
+
+        Ok(outputs)
     }
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        ids_in_table(
+            &*self.pool,
+            "registrations",
+            ids.iter().map(|id| id.as_str()),
+        )
+        .await?;
+
+        let where_clause: String =
+            itertools::Itertools::intersperse(ids.iter().map(|_| "id = ?"), " OR ").collect();
+
+        let query = format!("DELETE FROM registrations WHERE {}", where_clause);
+        let query_builder = sqlx::query(&query);
+        let query_builder = ids
+            .iter()
+            .fold(query_builder, |query_builder, id| query_builder.bind(id));
+        query_builder
+            .execute(&*self.pool)
+            .await
+            .map_err(|e| Error::DeleteError(e))?;
+
         Ok(())
     }
 }
@@ -421,7 +632,10 @@ impl Store for SqliteStore {
 mod tests {
     use std::{str::FromStr, sync::Arc};
 
-    use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
+    use common::proto::{
+        event_id_query, registration_item, registration_query, EventIdQuery, Registration,
+        RegistrationItem, RegistrationQuery, RepeatedUint32,
+    };
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
@@ -575,6 +789,15 @@ mod tests {
         registrations
     }
 
+    fn sort_registrations(mut registrations: Vec<Registration>) -> Vec<Registration> {
+        registrations.sort_by(|l, r| l.id.cmp(&r.id));
+        for r in registrations.iter_mut() {
+            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        }
+
+        registrations
+    }
+
     #[tokio::test]
     async fn insert() {
         let init = init_db().await;
@@ -623,7 +846,7 @@ mod tests {
 
         let returned_registrations = store.upsert(registrations.clone()).await.unwrap();
 
-        let mut registrations = registrations
+        let registrations = registrations
             .into_iter()
             .zip(returned_registrations.iter())
             .map(|(mut registration, returned_registration)| {
@@ -655,22 +878,15 @@ mod tests {
                 .await
                 .unwrap();
 
-        let mut store_registrations = attach_items(
+        let store_registrations = attach_items(
             store_row.into_iter().map(|row| row.to_registration()),
             store_item_row
                 .into_iter()
                 .map(|row| row.to_registration_item().unwrap()),
         );
 
-        registrations.sort_by(|l, r| l.id.cmp(&r.id));
-        for r in registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
-        }
-
-        store_registrations.sort_by(|l, r| l.id.cmp(&r.id));
-        for r in store_registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
-        }
+        let registrations = sort_registrations(registrations);
+        let store_registrations = sort_registrations(store_registrations);
 
         assert_eq!(registrations, store_registrations);
     }
@@ -708,22 +924,15 @@ mod tests {
                 .await
                 .unwrap();
 
-        let mut store_registrations = attach_items(
+        let store_registrations = attach_items(
             store_row.into_iter().map(|row| row.to_registration()),
             store_item_row
                 .into_iter()
                 .map(|row| row.to_registration_item().unwrap()),
         );
 
-        registrations.sort_by(|l, r| l.id.cmp(&r.id));
-        for r in registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
-        }
-
-        store_registrations.sort_by(|l, r| l.id.cmp(&r.id));
-        for r in store_registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
-        }
+        let registrations = sort_registrations(registrations);
+        let store_registrations = sort_registrations(store_registrations);
 
         assert_eq!(registrations, store_registrations);
     }
@@ -779,5 +988,115 @@ mod tests {
             Err(Error::IdDoesNotExist(id)) => assert_eq!(id, tc.id),
             _ => panic!("Expected IdDoesNotExistError"),
         }
+    }
+
+    #[tokio::test]
+    async fn list_all() {
+        let init = init_db().await;
+        let registrations = test_data(&init).await;
+
+        let store = SqliteStore::new(Arc::new(init.db));
+        let returned_registrations = store.list(Vec::new()).await.unwrap();
+
+        let registrations = sort_registrations(registrations);
+        let returned_registrations = sort_registrations(returned_registrations);
+
+        assert_eq!(registrations, returned_registrations);
+    }
+
+    #[tokio::test]
+    async fn list_some() {
+        let init = init_db().await;
+        let mut registrations = test_data(&init).await;
+
+        let store = SqliteStore::new(Arc::new(init.db));
+        let mut returned_registrations = store
+            .list(registrations.iter().map(|r| r.id.clone()).collect())
+            .await
+            .unwrap();
+
+        for r in registrations.iter_mut() {
+            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        }
+
+        for r in returned_registrations.iter_mut() {
+            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        }
+
+        assert_eq!(registrations, returned_registrations);
+    }
+
+    #[tokio::test]
+    async fn list_does_not_exist() {
+        let init = init_db().await;
+        let store = SqliteStore::new(Arc::new(init.db));
+
+        let id = new_id();
+        let result = store.list(vec![id.clone()]).await;
+        match result {
+            Ok(_) => panic!("Expected error"),
+            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
+            _ => panic!("Expected IdDoesNotExistError"),
+        }
+    }
+
+    #[tokio::test]
+    async fn delete_one() {
+        let init = init_db().await;
+        let mut registrations = test_data(&init).await;
+
+        let db = Arc::new(init.db);
+        let store = SqliteStore::new(db.clone());
+        store
+            .delete(&vec![registrations[0].id.clone()])
+            .await
+            .unwrap();
+
+        registrations.remove(0);
+
+        let store_row: Vec<RegistrationRow> = sqlx::query_as("SELECT * FROM registrations")
+            .fetch_all(&*db)
+            .await
+            .unwrap();
+
+        let store_item_row: Vec<RegistrationItemRow> =
+            sqlx::query_as("SELECT * FROM registration_items")
+                .fetch_all(&*db)
+                .await
+                .unwrap();
+
+        let store_registrations = attach_items(
+            store_row.into_iter().map(|row| row.to_registration()),
+            store_item_row
+                .into_iter()
+                .map(|row| row.to_registration_item().unwrap()),
+        );
+
+        let registrations = sort_registrations(registrations);
+        let store_registrations = sort_registrations(store_registrations);
+
+        assert_eq!(registrations, store_registrations);
+    }
+
+    #[tokio::test]
+    async fn query() {
+        let init = init_db().await;
+        let registrations = test_data(&init).await;
+        let registrations = vec![registrations[0].clone()];
+
+        let store = SqliteStore::new(Arc::new(init.db));
+
+        let query = RegistrationQuery {
+            query: Some(registration_query::Query::EventId(EventIdQuery {
+                operator: Some(event_id_query::Operator::Equals(init.event_1.clone())),
+            })),
+        };
+
+        let returned_registrations = store.query(query).await.unwrap();
+
+        let registrations = sort_registrations(registrations);
+        let returned_registrations = sort_registrations(returned_registrations);
+
+        assert_eq!(registrations, returned_registrations);
     }
 }

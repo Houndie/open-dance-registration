@@ -3,6 +3,7 @@ use tonic::{Code, Status};
 use crate::store::Error;
 
 pub mod event;
+pub mod registration;
 pub mod registration_schema;
 
 fn store_error_to_status(err: Error) -> Status {

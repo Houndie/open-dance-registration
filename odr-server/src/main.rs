@@ -1,9 +1,15 @@
 use std::{env, sync::Arc};
 
-use api::{event::Service as EventService, registration_schema::Service as SchemaService};
+use api::{
+    event::Service as EventService, registration::Service as RegistrationService,
+    registration_schema::Service as SchemaService,
+};
 use common::proto;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-use store::{event::SqliteStore as EventStore, registration_schema::SqliteStore as SchemaStore};
+use store::{
+    event::SqliteStore as EventStore, registration::SqliteStore as RegistrationStore,
+    registration_schema::SqliteStore as SchemaStore,
+};
 use tonic::transport::Server;
 
 pub mod api;
@@ -25,6 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_store = Arc::new(EventStore::new(db.clone()));
     let schema_store = Arc::new(SchemaStore::new(db.clone()));
+    let registration_store = Arc::new(RegistrationStore::new(db.clone()));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));
@@ -34,6 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             SchemaService::new(schema_store),
         );
 
+    let registration_service = proto::registration_service_server::RegistrationServiceServer::new(
+        RegistrationService::new(registration_store),
+    );
+
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build()?;
@@ -42,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .accept_http1(true)
         .add_service(tonic_web::enable(event_service))
         .add_service(tonic_web::enable(schema_service))
+        .add_service(tonic_web::enable(registration_service))
         .add_service(tonic_web::enable(reflection_service))
         .serve("[::1]:50051".parse()?)
         .await?;

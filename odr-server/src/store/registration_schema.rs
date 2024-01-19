@@ -601,11 +601,13 @@ impl Store for SqliteStore {
         if !schema.is_empty() {
             let where_clause = itertools::Itertools::intersperse(
                 schema.iter().map(|schema| {
-                    itertools::Itertools::intersperse(
+                    let event_clause = itertools::Itertools::intersperse(
                         std::iter::once("event = ?").chain(schema.items.iter().map(|_| "id != ?")),
                         " AND ",
                     )
-                    .collect::<String>()
+                    .collect::<String>();
+
+                    format!("({})", event_clause)
                 }),
                 " OR ".to_owned(),
             )

@@ -5,7 +5,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     tonic_build::configure()
         .file_descriptor_set_path(out_dir.join("descriptors.bin"))
         .compile(
-            &["../proto/event.proto", "../proto/registration_schema.proto"],
+            &[
+                "../proto/event.proto",
+                "../proto/registration_schema.proto",
+                "../proto/registration.proto",
+            ],
             &["../proto"],
         )?;
     Ok(())

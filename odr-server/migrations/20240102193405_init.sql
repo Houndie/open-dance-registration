@@ -29,4 +29,21 @@ CREATE TABLE registration_schema_select_options
 	name        TEXT    NOT NULL,
 	product_id  TEXT    NOT NULL,
 	FOREIGN KEY (schema_item) REFERENCES registration_schema_items (id) ON DELETE CASCADE
-)
+);
+
+CREATE TABLE registrations
+(
+	id    TEXT NOT NULL PRIMARY KEY,
+	event TEXT NOT NULL,
+	FOREIGN KEY (event) REFERENCES events (id) ON DELETE CASCADE
+);
+
+CREATE TABLE registration_items
+(
+	id            TEXT NOT NULL PRIMARY KEY,
+	registration  TEXT NOT NULL,
+	schema_item   TEXT NOT NULL,
+	value_type    TEXT CHECK( value_type IN ("StringValue", "BooleanValue", "UnsignedNumberValue", "RepeatedUnsignedNumberValue") ) NOT NULL,
+	value         TEXT NOT NULL,
+	FOREIGN KEY (registration) REFERENCES registrations (id) ON DELETE CASCADE
+);

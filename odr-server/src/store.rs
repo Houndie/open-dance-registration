@@ -1,5 +1,6 @@
 mod common;
 pub mod event;
+pub mod registration;
 pub mod registration_schema;
 
 #[derive(thiserror::Error, Debug)]

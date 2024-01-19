@@ -328,17 +328,19 @@ impl Store for SqliteStore {
                     schema_item = mydata.schema_item,
                     value_type = mydata.value_type,
                     value = mydata.value
+                FROM mydata
                 WHERE registration_items.id = mydata.id",
                 values_clause
             );
 
             let query_builder = sqlx::query(&query);
-            let query_builder = insert_items.iter().fold(
+            let query_builder = update_items.iter().fold(
                 query_builder,
                 |query_builder, (registration_idx, _, item)| {
                     bind_item(query_builder, &outputs[*registration_idx].id, item)
                 },
             );
+
             query_builder
                 .execute(&mut *tx)
                 .await
@@ -419,13 +421,14 @@ impl Store for SqliteStore {
 mod tests {
     use std::{str::FromStr, sync::Arc};
 
-    use common::proto::{registration_item, Registration, RegistrationItem};
+    use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
     use super::{attach_items, RegistrationItemRow, RegistrationRow, SqliteStore, Store};
-    use crate::store::common::new_id;
+    use crate::store::{common::new_id, Error};
+    use test_case::test_case;
 
     struct Init {
         event_1: String,
@@ -466,18 +469,153 @@ mod tests {
         }
     }
 
+    async fn test_data(init: &Init) -> Vec<Registration> {
+        let registration1_id = new_id();
+        let item1_id = new_id();
+        let item1_schema_item_id = "schema 1".to_owned();
+        let item1_value = "value";
+        let item2_id = new_id();
+        let item2_schema_item_id = "schema 2".to_owned();
+        let item2_value = true;
+        let registration2_id = new_id();
+        let item3_id = new_id();
+        let item3_schema_item_id = "schema 3".to_owned();
+        let item3_value: u32 = 1;
+        let item4_id = new_id();
+        let item4_schema_item_id = "schema 4".to_owned();
+        let item4_value: Vec<u32> = vec![1, 2, 3];
+
+        {
+            let query = sqlx::query("INSERT INTO registrations(id, event) VALUES (?, ?), (?, ?);");
+
+            let query = query
+                .bind(&registration1_id)
+                .bind(&init.event_1)
+                .bind(&registration2_id)
+                .bind(&init.event_2);
+
+            query.execute(&init.db).await.unwrap();
+        }
+
+        {
+            let query = sqlx::query(
+                "INSERT INTO registration_items(id, registration, schema_item, value_type, value) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?);",
+            );
+
+            let query = query
+                .bind(&item1_id)
+                .bind(&registration1_id)
+                .bind(&item1_schema_item_id)
+                .bind("StringValue")
+                .bind(&item1_value)
+                .bind(&item2_id)
+                .bind(&registration1_id)
+                .bind(&item2_schema_item_id)
+                .bind("BooleanValue")
+                .bind(item2_value.to_string())
+                .bind(&item3_id)
+                .bind(&registration2_id)
+                .bind(&item3_schema_item_id)
+                .bind("UnsignedNumberValue")
+                .bind(item3_value.to_string())
+                .bind(&item4_id)
+                .bind(&registration2_id)
+                .bind(&item4_schema_item_id)
+                .bind("RepeatedUnsignedNumberValue")
+                .bind(
+                    itertools::Itertools::intersperse(
+                        item4_value.iter().map(|u| u.to_string()),
+                        ",".to_owned(),
+                    )
+                    .collect::<String>(),
+                );
+
+            query.execute(&init.db).await.unwrap();
+        }
+
+        let registrations = vec![
+            Registration {
+                id: registration1_id,
+                event_id: init.event_1.clone(),
+                items: vec![
+                    RegistrationItem {
+                        id: item1_id,
+                        schema_item_id: item1_schema_item_id,
+                        value: Some(registration_item::Value::StringValue(
+                            item1_value.to_owned(),
+                        )),
+                    },
+                    RegistrationItem {
+                        id: item2_id,
+                        schema_item_id: item2_schema_item_id,
+                        value: Some(registration_item::Value::BooleanValue(item2_value)),
+                    },
+                ],
+            },
+            Registration {
+                id: registration2_id,
+                event_id: init.event_2.clone(),
+                items: vec![
+                    RegistrationItem {
+                        id: item3_id,
+                        schema_item_id: item3_schema_item_id,
+                        value: Some(registration_item::Value::UnsignedNumberValue(item3_value)),
+                    },
+                    RegistrationItem {
+                        id: item4_id,
+                        schema_item_id: item4_schema_item_id,
+                        value: Some(registration_item::Value::RepeatedUnsignedNumberValue(
+                            RepeatedUint32 { value: item4_value },
+                        )),
+                    },
+                ],
+            },
+        ];
+
+        registrations
+    }
+
     #[tokio::test]
     async fn insert() {
         let init = init_db().await;
-        let registrations = vec![Registration {
-            id: "".to_owned(),
-            event_id: init.event_1,
-            items: vec![RegistrationItem {
+        let registrations = vec![
+            Registration {
                 id: "".to_owned(),
-                schema_item_id: "schema 1".to_owned(),
-                value: Some(registration_item::Value::StringValue("value".to_owned())),
-            }],
-        }];
+                event_id: init.event_1,
+                items: vec![
+                    RegistrationItem {
+                        id: "".to_owned(),
+                        schema_item_id: "schema 1".to_owned(),
+                        value: Some(registration_item::Value::StringValue("value".to_owned())),
+                    },
+                    RegistrationItem {
+                        id: "".to_owned(),
+                        schema_item_id: "schema 2".to_owned(),
+                        value: Some(registration_item::Value::BooleanValue(true)),
+                    },
+                ],
+            },
+            Registration {
+                id: "".to_owned(),
+                event_id: init.event_2,
+                items: vec![
+                    RegistrationItem {
+                        id: "".to_owned(),
+                        schema_item_id: "schema 3".to_owned(),
+                        value: Some(registration_item::Value::UnsignedNumberValue(1)),
+                    },
+                    RegistrationItem {
+                        id: "".to_owned(),
+                        schema_item_id: "schema 4".to_owned(),
+                        value: Some(registration_item::Value::RepeatedUnsignedNumberValue(
+                            RepeatedUint32 {
+                                value: vec![1, 2, 3],
+                            },
+                        )),
+                    },
+                ],
+            },
+        ];
 
         let db = Arc::new(init.db);
 
@@ -535,5 +673,111 @@ mod tests {
         }
 
         assert_eq!(registrations, store_registrations);
+    }
+
+    #[tokio::test]
+    async fn update() {
+        let init = init_db().await;
+        let mut registrations = test_data(&init).await;
+        registrations[0].items[0].value = Some(registration_item::Value::StringValue(
+            "updated value".to_owned(),
+        ));
+        registrations[1].items[1] = RegistrationItem {
+            id: "".to_owned(),
+            schema_item_id: "schema 5".to_owned(),
+            value: Some(registration_item::Value::UnsignedNumberValue(2)),
+        };
+
+        let db = Arc::new(init.db);
+
+        let store = SqliteStore::new(db.clone());
+
+        let returned_registrations = store.upsert(registrations.clone()).await.unwrap();
+        registrations[1].items[1].id = returned_registrations[1].items[1].id.clone();
+
+        assert_eq!(registrations, returned_registrations);
+
+        let store_row: Vec<RegistrationRow> = sqlx::query_as("SELECT * FROM registrations")
+            .fetch_all(&*db)
+            .await
+            .unwrap();
+
+        let store_item_row: Vec<RegistrationItemRow> =
+            sqlx::query_as("SELECT * FROM registration_items")
+                .fetch_all(&*db)
+                .await
+                .unwrap();
+
+        let mut store_registrations = attach_items(
+            store_row.into_iter().map(|row| row.to_registration()),
+            store_item_row
+                .into_iter()
+                .map(|row| row.to_registration_item().unwrap()),
+        );
+
+        registrations.sort_by(|l, r| l.id.cmp(&r.id));
+        for r in registrations.iter_mut() {
+            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        }
+
+        store_registrations.sort_by(|l, r| l.id.cmp(&r.id));
+        for r in store_registrations.iter_mut() {
+            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        }
+
+        assert_eq!(registrations, store_registrations);
+    }
+
+    enum UpdateDoesNotExistTests {
+        BadRegistrationId,
+        BadEventId,
+        BadItemId,
+    }
+    #[test_case(UpdateDoesNotExistTests::BadRegistrationId ; "bad registration id")]
+    #[test_case(UpdateDoesNotExistTests::BadEventId ; "bad event id")]
+    #[test_case(UpdateDoesNotExistTests::BadItemId ; "bad item id")]
+    #[tokio::test]
+    async fn update_does_not_exist(test_name: UpdateDoesNotExistTests) {
+        let init = init_db().await;
+        let test_data = test_data(&init).await;
+
+        struct TestCase {
+            id: String,
+            registration: Registration,
+        }
+        let tc = match test_name {
+            UpdateDoesNotExistTests::BadRegistrationId => {
+                let id = new_id();
+                TestCase {
+                    id: id.clone(),
+                    registration: Registration {
+                        id,
+                        event_id: init.event_1,
+                        items: Vec::new(),
+                    },
+                }
+            }
+
+            UpdateDoesNotExistTests::BadEventId => {
+                let id = new_id();
+                let mut registration = test_data[0].clone();
+                registration.event_id = id.clone();
+                TestCase { id, registration }
+            }
+            UpdateDoesNotExistTests::BadItemId => {
+                let id = new_id();
+                let mut registration = test_data[0].clone();
+                registration.items[0].id = id.clone();
+                TestCase { id, registration }
+            }
+        };
+
+        let store = SqliteStore::new(Arc::new(init.db));
+        let result = store.upsert(vec![tc.registration]).await;
+        match result {
+            Ok(_) => panic!("Expected error"),
+            Err(Error::IdDoesNotExist(id)) => assert_eq!(id, tc.id),
+            _ => panic!("Expected IdDoesNotExistError"),
+        }
     }
 }

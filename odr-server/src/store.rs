@@ -8,9 +8,6 @@ pub enum Error {
     #[error("id {0} does not exist")]
     IdDoesNotExist(String),
 
-    #[error("some id does not exist")]
-    SomeIdDoesNotExist,
-
     #[error("error inserting new event into data store: {0}")]
     InsertionError(#[source] sqlx::Error),
 
@@ -34,10 +31,4 @@ pub enum Error {
 
     #[error("unable to parse column {0}")]
     ColumnParseError(&'static str),
-
-    #[error("too many ({0}) items provided")]
-    TooManyItems(usize),
-
-    #[error("unknown enum variant")]
-    UnknownEnum,
 }

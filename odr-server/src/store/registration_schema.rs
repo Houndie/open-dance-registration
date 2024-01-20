@@ -165,7 +165,7 @@ fn option_values_bind<'q>(
     Ok(query_builder
         .bind(&option.id)
         .bind(item_id)
-        .bind(i32::try_from(idx).map_err(|_| Error::TooManyItems(idx))?)
+        .bind(i32::try_from(idx).unwrap())
         .bind(&option.name)
         .bind(&option.product_id))
 }
@@ -179,90 +179,64 @@ fn values_bind<'q>(
     let query_builder = query_builder
         .bind(&item.id)
         .bind(event_id)
-        .bind(i32::try_from(idx).map_err(|_| Error::TooManyItems(idx))?)
+        .bind(i32::try_from(idx).unwrap())
         .bind(&item.name);
 
-    let query_builder = match item
-        .r#type
-        .as_ref()
-        .map(|typ| typ.r#type.as_ref())
-        .flatten()
-    {
-        Some(typ) => {
-            let query_builder = match typ {
-                ItemType::Text(_) => query_builder.bind("TextType"),
-                ItemType::Checkbox(_) => query_builder.bind("CheckboxType"),
-                ItemType::Select(_) => query_builder.bind("SelectType"),
-                ItemType::MultiSelect(_) => query_builder.bind("MultiSelectType"),
-            };
+    let typ = item.r#type.as_ref().unwrap().r#type.as_ref().unwrap();
 
-            let query_builder = match typ {
-                ItemType::Text(text) => query_builder.bind(&text.default).bind(
-                    text_type::Display::try_from(text.display)
-                        .map_err(|_| Error::UnknownEnum)?
-                        .as_str_name(),
-                ),
-                _ => query_builder
-                    .bind::<Option<String>>(None)
-                    .bind::<Option<String>>(None),
-            };
+    let query_builder = match typ {
+        ItemType::Text(_) => query_builder.bind("TextType"),
+        ItemType::Checkbox(_) => query_builder.bind("CheckboxType"),
+        ItemType::Select(_) => query_builder.bind("SelectType"),
+        ItemType::MultiSelect(_) => query_builder.bind("MultiSelectType"),
+    };
 
-            let query_builder = match typ {
-                ItemType::Checkbox(checkbox) => query_builder.bind(checkbox.default as i32),
-                _ => query_builder.bind::<Option<i32>>(None),
-            };
+    let query_builder = match typ {
+        ItemType::Text(text) => query_builder.bind(&text.default).bind(
+            text_type::Display::try_from(text.display)
+                .unwrap()
+                .as_str_name(),
+        ),
+        _ => query_builder
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None),
+    };
 
-            let query_builder = match typ {
-                ItemType::Select(select) => query_builder
-                    .bind(i32::try_from(select.default).map_err(|_| {
-                        let as_usize = match select.default.try_into() {
-                            Ok(u) => u,
-                            Err(_) => 0,
-                        };
-                        Error::TooManyItems(as_usize)
-                    })?)
-                    .bind(
-                        select_type::Display::try_from(select.display)
-                            .map_err(|_| Error::UnknownEnum)?
-                            .as_str_name(),
-                    ),
-                _ => query_builder
-                    .bind::<Option<i32>>(None)
-                    .bind::<Option<String>>(None),
-            };
+    let query_builder = match typ {
+        ItemType::Checkbox(checkbox) => query_builder.bind(checkbox.default as i32),
+        _ => query_builder.bind::<Option<i32>>(None),
+    };
 
-            let query_builder = match typ {
-                ItemType::MultiSelect(select) => {
-                    let defaults: String = itertools::Itertools::intersperse(
-                        select.defaults.iter().map(|idx| format!("{}", idx)),
-                        ",".to_owned(),
-                    )
-                    .collect();
+    let query_builder = match typ {
+        ItemType::Select(select) => query_builder
+            .bind(i32::try_from(select.default).unwrap())
+            .bind(
+                select_type::Display::try_from(select.display)
+                    .unwrap()
+                    .as_str_name(),
+            ),
+        _ => query_builder
+            .bind::<Option<i32>>(None)
+            .bind::<Option<String>>(None),
+    };
 
-                    query_builder.bind(defaults).bind(
-                        multi_select_type::Display::try_from(select.display)
-                            .map_err(|_| Error::UnknownEnum)?
-                            .as_str_name(),
-                    )
-                }
-                _ => query_builder
-                    .bind::<Option<String>>(None)
-                    .bind::<Option<String>>(None),
-            };
+    let query_builder = match typ {
+        ItemType::MultiSelect(select) => {
+            let defaults: String = itertools::Itertools::intersperse(
+                select.defaults.iter().map(|idx| format!("{}", idx)),
+                ",".to_owned(),
+            )
+            .collect();
 
-            query_builder
+            query_builder.bind(defaults).bind(
+                multi_select_type::Display::try_from(select.display)
+                    .unwrap()
+                    .as_str_name(),
+            )
         }
-        None => {
-            query_builder
-                .bind::<Option<String>>(None) // item_type
-                .bind::<Option<String>>(None) // text_type_default
-                .bind::<Option<String>>(None) // text_type_display
-                .bind::<Option<i32>>(None) // checkbox_type_default
-                .bind::<Option<i32>>(None) // select_type_default
-                .bind::<Option<String>>(None) // select_type_display
-                .bind::<Option<String>>(None) // multi_select_type_defaults
-                .bind::<Option<String>>(None)
-        } // multi_select_type_display
+        _ => query_builder
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None),
     };
 
     Ok(query_builder)

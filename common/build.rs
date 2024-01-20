@@ -9,6 +9,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "../proto/event.proto",
                 "../proto/registration_schema.proto",
                 "../proto/registration.proto",
+                "../proto/organization.proto",
             ],
             &["../proto"],
         )?;

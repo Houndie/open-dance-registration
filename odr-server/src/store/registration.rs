@@ -663,14 +663,25 @@ mod tests {
         .unwrap();
         sqlx::migrate!().run(&db).await.unwrap();
 
+        let org_id = new_id();
+        let org_name = "Org 1";
+        sqlx::query("INSERT INTO organizations(id, name) VALUES (?, ?);")
+            .bind(&org_id)
+            .bind(&org_name)
+            .execute(&db)
+            .await
+            .unwrap();
+
         let id_1 = new_id();
         let name_1 = "Event 1";
         let id_2 = new_id();
         let name_2 = "Event 2";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
+        sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
+            .bind(&org_id)
             .bind(&name_1)
             .bind(&id_2)
+            .bind(&org_id)
             .bind(&name_2)
             .execute(&db)
             .await

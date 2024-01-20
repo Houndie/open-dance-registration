@@ -1,7 +1,15 @@
-CREATE TABLE events
+CREATE TABLE organizations
 (
 	id   TEXT NOT NULL PRIMARY KEY,
 	name TEXT NOT NULL
+);
+
+CREATE TABLE events
+(
+	id           TEXT NOT NULL PRIMARY KEY,
+	organization TEXT NOT NULL,
+	name         TEXT NOT NULL,
+	FOREIGN KEY (organization) REFERENCES organizations (id) ON DELETE CASCADE
 );
 
 CREATE TABLE registration_schema_items

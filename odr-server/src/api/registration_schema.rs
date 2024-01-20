@@ -105,9 +105,9 @@ impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSc
         let request_schemas = request.into_inner().registration_schemas;
 
         for (idx, schema) in request_schemas.iter().enumerate() {
-            validate_registration_schema(schema).map_err(|e| {
+            validate_registration_schema(schema).map_err(|e| -> Status {
                 e.with_context(&format!("registration_schemas[{}]", idx))
-                    .into_status()
+                    .into()
             })?;
         }
 

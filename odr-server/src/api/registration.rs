@@ -89,9 +89,8 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
         let request_registrations = request.into_inner().registrations;
 
         for (idx, registration) in request_registrations.iter().enumerate() {
-            validate_registration(registration).map_err(|e| {
-                e.with_context(&format!("registrations[{}]", idx))
-                    .into_status()
+            validate_registration(registration).map_err(|e| -> Status {
+                e.with_context(&format!("registrations[{}]", idx)).into()
             })?;
         }
 
@@ -125,10 +124,10 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
 
         let query = match query {
             Some(query) => query,
-            None => return Err(ValidationError::new_empty("query").into_status()),
+            None => return Err(ValidationError::new_empty("query").into()),
         };
 
-        validate_query(&query).map_err(|e| e.with_context("query").into_status())?;
+        validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
 
         let registrations = self
             .store

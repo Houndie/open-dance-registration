@@ -133,6 +133,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
                                     let rsp = unlocked.upsert_events(UpsertEventsRequest{
                                         events: vec![proto::Event{
                                             id: "".to_owned(),
+                                            organization_id: "".to_owned(),
                                             name: event_name.current().as_ref().clone(),
                                         }],
                                     }).await;

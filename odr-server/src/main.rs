@@ -1,13 +1,14 @@
 use std::{env, sync::Arc};
 
 use api::{
-    event::Service as EventService, registration::Service as RegistrationService,
-    registration_schema::Service as SchemaService,
+    event::Service as EventService, organization::Service as OrganizationService,
+    registration::Service as RegistrationService, registration_schema::Service as SchemaService,
 };
 use common::proto;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use store::{
-    event::SqliteStore as EventStore, registration::SqliteStore as RegistrationStore,
+    event::SqliteStore as EventStore, organization::SqliteStore as OrganizationStore,
+    registration::SqliteStore as RegistrationStore,
     registration_schema::SqliteStore as SchemaStore,
 };
 use tonic::transport::Server;
@@ -32,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_store = Arc::new(EventStore::new(db.clone()));
     let schema_store = Arc::new(SchemaStore::new(db.clone()));
     let registration_store = Arc::new(RegistrationStore::new(db.clone()));
+    let organization_store = Arc::new(OrganizationStore::new(db.clone()));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));
@@ -45,6 +47,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         RegistrationService::new(registration_store),
     );
 
+    let organization_service = proto::organization_service_server::OrganizationServiceServer::new(
+        OrganizationService::new(organization_store),
+    );
+
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build()?;
@@ -54,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(tonic_web::enable(event_service))
         .add_service(tonic_web::enable(schema_service))
         .add_service(tonic_web::enable(registration_service))
+        .add_service(tonic_web::enable(organization_service))
         .add_service(tonic_web::enable(reflection_service))
         .serve("[::1]:50051".parse()?)
         .await?;

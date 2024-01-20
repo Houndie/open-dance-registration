@@ -6,6 +6,7 @@ use crate::store::Error;
 use thiserror::Error as ThisError;
 
 pub mod event;
+pub mod organization;
 pub mod registration;
 pub mod registration_schema;
 
@@ -81,8 +82,10 @@ impl ValidationError {
             reason: self.reason,
         }
     }
+}
 
-    fn into_status(self) -> Status {
-        Status::invalid_argument(self.to_string())
+impl From<ValidationError> for Status {
+    fn from(err: ValidationError) -> Self {
+        Status::invalid_argument(err.to_string())
     }
 }

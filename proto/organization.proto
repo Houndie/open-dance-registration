@@ -1,0 +1,35 @@
+syntax = "proto3";
+package organization;
+
+service OrganizationService {
+	rpc UpsertOrganizations(UpsertOrganizationsRequest) returns (UpsertOrganizationsResponse) {}
+	rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse) {}
+	rpc DeleteOrganizations(DeleteOrganizationsRequest) returns (DeleteOrganizationsResponse) {}
+}
+
+message UpsertOrganizationsRequest {
+	repeated Organization organizations = 1;
+}
+
+message UpsertOrganizationsResponse {
+	repeated Organization organizations = 1;
+}
+
+message ListOrganizationsRequest {
+	repeated string ids = 1;
+}
+
+message ListOrganizationsResponse {
+	repeated Organization organizations = 1;
+}
+
+message DeleteOrganizationsRequest {
+	repeated string ids = 1;
+}
+
+message DeleteOrganizationsResponse {}
+
+message Organization {
+	string id = 1;
+	string name = 2;
+}

@@ -8,7 +8,7 @@ use common::proto::{
     UpsertEventsResponse,
 };
 
-use super::store_error_to_status;
+use super::{store_error_to_status, ValidationError};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {
@@ -27,9 +27,20 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         &self,
         request: Request<UpsertEventsRequest>,
     ) -> Result<Response<UpsertEventsResponse>, Status> {
+        let events = request.into_inner().events;
+        for (idx, event) in events.iter().enumerate() {
+            if event.organization_id == "" {
+                return Err(ValidationError::new_empty(&format!(
+                    "events[{}].organization_id",
+                    idx
+                ))
+                .into());
+            }
+        }
+
         let events = self
             .store
-            .upsert(request.into_inner().events)
+            .upsert(events)
             .await
             .map_err(|e| store_error_to_status(e))?;
         Ok(Response::new(UpsertEventsResponse { events }))

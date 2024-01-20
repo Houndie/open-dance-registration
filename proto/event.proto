@@ -31,5 +31,6 @@ message DeleteEventsResponse {};
 
 message Event {
 	string id = 1;
-	string name = 2;
+	string organization_id = 2;
+	string name = 3;
 }

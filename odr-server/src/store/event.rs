@@ -13,6 +13,7 @@ use super::{
 struct EventRow {
     id: String,
     name: String,
+    organization: String,
 }
 
 impl EventRow {
@@ -20,6 +21,7 @@ impl EventRow {
         Ok(Event {
             id: self.id,
             name: self.name,
+            organization_id: self.organization,
         })
     }
 }
@@ -74,17 +76,26 @@ impl Store for SqliteStore {
                 })
                 .collect::<Vec<_>>();
 
-            let values_clause: String =
-                itertools::Itertools::intersperse(events_with_ids.iter().map(|_| "(?, ?)"), ", ")
-                    .collect();
+            let values_clause: String = itertools::Itertools::intersperse(
+                events_with_ids.iter().map(|_| "(?, ?, ?)"),
+                ", ",
+            )
+            .collect();
 
-            let query = format!("INSERT INTO events(id, name) VALUES {}", values_clause);
+            let query = format!(
+                "INSERT INTO events(id, organization, name) VALUES {}",
+                values_clause
+            );
             let query_builder = sqlx::query(&query);
-            let query_builder = events_with_ids
-                .iter()
-                .fold(query_builder, |query_builder, event| {
-                    query_builder.bind(&event.id).bind(&event.name)
-                });
+            let query_builder =
+                events_with_ids
+                    .iter()
+                    .fold(query_builder, |query_builder, event| {
+                        query_builder
+                            .bind(&event.id)
+                            .bind(&event.organization_id)
+                            .bind(&event.name)
+                    });
 
             query_builder
                 .execute(&mut *tx)
@@ -95,18 +106,25 @@ impl Store for SqliteStore {
 
         if !update_events.is_empty() {
             let values_clause: String =
-                itertools::Itertools::intersperse(update_events.iter().map(|_| "(?, ?)"), ", ")
+                itertools::Itertools::intersperse(update_events.iter().map(|_| "(?, ?, ?)"), ", ")
                     .collect();
 
             let query = format!(
-                "WITH mydata(id, name) AS (VALUES {}) UPDATE events SET name = mydata.name FROM mydata WHERE events.id = mydata.id",
+                "WITH mydata(id, organization, name) AS (VALUES {}) 
+                UPDATE events 
+                SET name = mydata.name,
+                organization = mydata.organization
+                FROM mydata WHERE events.id = mydata.id",
                 values_clause
             );
             let query_builder = sqlx::query(&query);
             let query_builder = update_events
                 .iter()
                 .fold(query_builder, |query_builder, event| {
-                    query_builder.bind(&event.id).bind(&event.name)
+                    query_builder
+                        .bind(&event.id)
+                        .bind(&event.organization_id)
+                        .bind(&event.name)
                 });
 
             query_builder
@@ -124,7 +142,7 @@ impl Store for SqliteStore {
 
     async fn list(&self, event_ids: &Vec<String>) -> Result<Vec<Event>, Error> {
         let event_rows: Vec<EventRow> = if event_ids.is_empty() {
-            sqlx::query_as("SELECT id, name FROM events")
+            sqlx::query_as("SELECT id, organization, name FROM events")
                 .fetch_all(&*self.pool)
                 .await
                 .map_err(|e| Error::FetchError(e))?
@@ -132,7 +150,10 @@ impl Store for SqliteStore {
             let where_clause: String =
                 itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ")
                     .collect();
-            let query = format!("SELECT id, name FROM events WHERE {}", where_clause);
+            let query = format!(
+                "SELECT id, organization, name FROM events WHERE {}",
+                where_clause
+            );
 
             let query_builder = sqlx::query_as(&query);
             let query_builder = event_ids
@@ -205,18 +226,34 @@ mod tests {
 
     use super::{Error, EventRow, SqliteStore, Store};
 
-    async fn init_db() -> SqlitePool {
+    struct Init {
+        org: String,
+        db: SqlitePool,
+    }
+
+    async fn init_db() -> Init {
         let db_url = "sqlite://:memory:";
         Sqlite::create_database(db_url);
 
         let db = SqlitePool::connect(db_url).await.unwrap();
         sqlx::migrate!().run(&db).await.unwrap();
-        db
+
+        let org = new_id();
+        let org_name = "Organization 1";
+        sqlx::query("INSERT INTO organizations(id, name) VALUES (?, ?);")
+            .bind(&org)
+            .bind(&org_name)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        Init { org, db }
     }
 
     #[tokio::test]
     async fn insert() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
 
         let store = {
             let db = db.clone();
@@ -225,6 +262,7 @@ mod tests {
 
         let event = Event {
             name: "Event 1".to_owned(),
+            organization_id: init.org,
             id: "".to_owned(),
         };
 
@@ -233,10 +271,11 @@ mod tests {
         assert_eq!(returned_events.len(), 1);
         assert_eq!(event.name, returned_events[0].name);
 
-        let mut store_row: Vec<EventRow> = sqlx::query_as("SELECT id, name FROM events")
-            .fetch_all(&*db)
-            .await
-            .unwrap();
+        let mut store_row: Vec<EventRow> =
+            sqlx::query_as("SELECT id, organization, name FROM events")
+                .fetch_all(&*db)
+                .await
+                .unwrap();
 
         assert_eq!(store_row.len(), 1);
 
@@ -247,15 +286,18 @@ mod tests {
 
     #[tokio::test]
     async fn update() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
         let id_1 = new_id();
         let name_1 = "Event 1";
         let id_2 = new_id();
         let name_2 = "Event 2";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
+        sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
+            .bind(&init.org)
             .bind(&name_1)
             .bind(&id_2)
+            .bind(&init.org)
             .bind(&name_2)
             .execute(&*db)
             .await
@@ -268,6 +310,7 @@ mod tests {
 
         let event = Event {
             name: "Event 3".to_owned(),
+            organization_id: init.org,
             id: id_1,
         };
 
@@ -278,7 +321,7 @@ mod tests {
         assert_eq!(event.id, returned_events[0].id);
 
         let changed_store_row: Vec<EventRow> =
-            sqlx::query_as("SELECT id, name FROM events WHERE id = ?")
+            sqlx::query_as("SELECT id, organization, name FROM events WHERE id = ?")
                 .bind(&event.id)
                 .fetch_all(&*db)
                 .await
@@ -289,7 +332,7 @@ mod tests {
         assert_eq!(changed_store_row[0].id, event.id);
 
         let unchanged_store_row: Vec<EventRow> =
-            sqlx::query_as("SELECT id, name FROM events WHERE id = ?")
+            sqlx::query_as("SELECT id, organization, name FROM events WHERE id = ?")
                 .bind(&id_2)
                 .fetch_all(&*db)
                 .await
@@ -302,7 +345,8 @@ mod tests {
 
     #[tokio::test]
     async fn update_does_not_exist() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
 
         let store = {
             let db = db.clone();
@@ -311,6 +355,7 @@ mod tests {
 
         let event = Event {
             name: "Event 1".to_owned(),
+            organization_id: init.org,
             id: new_id(),
         };
 
@@ -324,15 +369,18 @@ mod tests {
 
     #[tokio::test]
     async fn list_all() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
         let id_1 = new_id();
         let name_1 = "Event 1";
         let id_2 = new_id();
         let name_2 = "Event 2";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
+        sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
+            .bind(&init.org)
             .bind(&name_1)
             .bind(&id_2)
+            .bind(&init.org)
             .bind(&name_2)
             .execute(&*db)
             .await
@@ -360,23 +408,29 @@ mod tests {
 
     #[tokio::test]
     async fn list_some() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
         let id_1 = new_id();
         let name_1 = "Event 1";
         let id_2 = new_id();
         let name_2 = "Event 2";
         let id_3 = new_id();
         let name_3 = "Event 2";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?), (?, ?);")
-            .bind(&id_1)
-            .bind(&name_1)
-            .bind(&id_2)
-            .bind(&name_2)
-            .bind(&id_3)
-            .bind(&name_3)
-            .execute(&*db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?);",
+        )
+        .bind(&id_1)
+        .bind(&init.org)
+        .bind(&name_1)
+        .bind(&id_2)
+        .bind(&init.org)
+        .bind(&name_2)
+        .bind(&id_3)
+        .bind(&init.org)
+        .bind(&name_3)
+        .execute(&*db)
+        .await
+        .unwrap();
 
         let store = {
             let db = db.clone();
@@ -400,7 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn list_some_doesnt_exist() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
 
         let store = {
             let db = db.clone();
@@ -418,15 +473,18 @@ mod tests {
 
     #[tokio::test]
     async fn delete_one() {
-        let db = Arc::new(init_db().await);
+        let init = init_db().await;
+        let db = Arc::new(init.db);
         let id_1 = new_id();
         let name_1 = "Event 1";
         let id_2 = new_id();
         let name_2 = "Event 2";
-        sqlx::query("INSERT INTO events(id, name) VALUES (?, ?), (?, ?);")
+        sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
+            .bind(&init.org)
             .bind(&name_1)
             .bind(&id_2)
+            .bind(&init.org)
             .bind(&name_2)
             .execute(&*db)
             .await
@@ -439,10 +497,11 @@ mod tests {
 
         store.delete(&vec![id_1]).await.unwrap();
 
-        let mut store_row: Vec<EventRow> = sqlx::query_as("SELECT id, name FROM events")
-            .fetch_all(&*db)
-            .await
-            .unwrap();
+        let mut store_row: Vec<EventRow> =
+            sqlx::query_as("SELECT id, organization, name FROM events")
+                .fetch_all(&*db)
+                .await
+                .unwrap();
 
         assert_eq!(store_row.len(), 1);
 
@@ -453,7 +512,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_does_not_exist() {
-        let db = Arc::new(init_db().await);
+        let db = Arc::new(init_db().await.db);
         let store = {
             let db = db.clone();
             SqliteStore::new(db)

@@ -3,5 +3,6 @@ pub mod proto {
     tonic::include_proto!("registration_schema");
     tonic::include_proto!("registration");
     tonic::include_proto!("organization");
+    tonic::include_proto!("user");
     pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("descriptors");
 }

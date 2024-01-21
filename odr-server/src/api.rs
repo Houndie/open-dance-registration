@@ -9,6 +9,7 @@ pub mod event;
 pub mod organization;
 pub mod registration;
 pub mod registration_schema;
+pub mod user;
 
 fn store_error_to_status(err: Error) -> Status {
     let code = match err {

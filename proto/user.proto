@@ -1,0 +1,44 @@
+syntax = "proto3";
+package user;
+
+import "google/protobuf/empty.proto";
+
+service UserService {
+	rpc UpsertUsers(UpsertUsersRequest) returns (UpsertUsersResponse) {}
+	rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {}
+	rpc DeleteUsers(DeleteUsersRequest) returns (DeleteUsersResponse) {}
+}
+
+message UpsertUsersRequest {
+	repeated User users = 1;
+}
+
+message UpsertUsersResponse {
+	repeated User users = 1;
+}
+
+message ListUsersRequest {
+	repeated string ids = 1;
+}
+
+message ListUsersResponse {
+	repeated User users = 1;
+}
+
+message DeleteUsersRequest {
+	repeated string ids = 1;
+}
+
+message DeleteUsersResponse {}
+
+message User {
+	string id = 1;
+	string email = 2;
+
+	oneof password {
+		string set = 3;
+		google.protobuf.Empty unset = 4;
+		google.protobuf.Empty unchanged = 5;
+	}
+	string display_name = 6;
+}

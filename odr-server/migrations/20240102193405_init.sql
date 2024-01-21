@@ -55,3 +55,11 @@ CREATE TABLE registration_items
 	value         TEXT NOT NULL,
 	FOREIGN KEY (registration) REFERENCES registrations (id) ON DELETE CASCADE
 );
+
+CREATE TABLE users
+(
+	id           TEXT NOT NULL PRIMARY KEY,
+	email        TEXT NOT NULL,
+	password     TEXT,
+	display_name TEXT NOT NULL
+);

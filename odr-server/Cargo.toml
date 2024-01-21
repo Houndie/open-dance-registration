@@ -18,3 +18,4 @@ tonic-reflection = "0.10.2"
 uuid = { version = "1.6.1", features = ["v7"] }
 common = { path = "../common", features = ["transport"] }
 tonic-web = "0.10.2"
+bcrypt = "0.15.0"

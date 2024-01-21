@@ -3,13 +3,14 @@ use std::{env, sync::Arc};
 use api::{
     event::Service as EventService, organization::Service as OrganizationService,
     registration::Service as RegistrationService, registration_schema::Service as SchemaService,
+    user::Service as UserService,
 };
 use common::proto;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use store::{
     event::SqliteStore as EventStore, organization::SqliteStore as OrganizationStore,
     registration::SqliteStore as RegistrationStore,
-    registration_schema::SqliteStore as SchemaStore,
+    registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
 };
 use tonic::transport::Server;
 
@@ -34,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema_store = Arc::new(SchemaStore::new(db.clone()));
     let registration_store = Arc::new(RegistrationStore::new(db.clone()));
     let organization_store = Arc::new(OrganizationStore::new(db.clone()));
+    let user_store = Arc::new(UserStore::new(db.clone()));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));
@@ -51,6 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OrganizationService::new(organization_store),
     );
 
+    let user_service =
+        proto::user_service_server::UserServiceServer::new(UserService::new(user_store));
+
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build()?;
@@ -61,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(tonic_web::enable(schema_service))
         .add_service(tonic_web::enable(registration_service))
         .add_service(tonic_web::enable(organization_service))
+        .add_service(tonic_web::enable(user_service))
         .add_service(tonic_web::enable(reflection_service))
         .serve("[::1]:50051".parse()?)
         .await?;

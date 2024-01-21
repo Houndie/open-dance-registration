@@ -3,6 +3,7 @@ pub mod event;
 pub mod organization;
 pub mod registration;
 pub mod registration_schema;
+pub mod user;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

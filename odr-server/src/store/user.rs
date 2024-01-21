@@ -66,6 +66,27 @@ pub struct User {
     pub display_name: String,
 }
 
+pub enum EmailQuery {
+    Is(String),
+    IsNot(String),
+}
+
+pub enum CompoundOperator {
+    And,
+    Or,
+}
+
+pub struct CompoundQuery {
+    pub operator: CompoundOperator,
+    pub queries: Vec<Query>,
+}
+
+pub enum Query {
+    Email(EmailQuery),
+    PasswordIsSet(bool),
+    CompoundQuery(CompoundQuery),
+}
+
 type QueryBuilder<'q> = sqlx::query::Query<
     'q,
     sqlx::Sqlite,
@@ -84,10 +105,58 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
     query_builder.bind(&user.display_name)
 }
 
+type QueryAsBuilder<'q> = sqlx::query::QueryAs<
+    'q,
+    sqlx::Sqlite,
+    UserRow,
+    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
+>;
+
+fn query_where_clause(query: &Query) -> String {
+    match query {
+        Query::Email(EmailQuery::Is(_)) => "email = ?".to_owned(),
+        Query::Email(EmailQuery::IsNot(_)) => "email != ?".to_owned(),
+        Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
+        Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
+        Query::CompoundQuery(compound_query) => {
+            let operator = match compound_query.operator {
+                CompoundOperator::And => "AND",
+                CompoundOperator::Or => "OR",
+            };
+
+            let where_clauses = itertools::Itertools::intersperse(
+                compound_query
+                    .queries
+                    .iter()
+                    .map(|query| query_where_clause(query)),
+                operator.to_owned(),
+            )
+            .collect::<String>();
+
+            format!("({})", where_clauses)
+        }
+    }
+}
+
+fn bind_query<'q>(query_builder: QueryAsBuilder<'q>, query: &'q Query) -> QueryAsBuilder<'q> {
+    match query {
+        Query::Email(EmailQuery::Is(email)) => query_builder.bind(email),
+        Query::Email(EmailQuery::IsNot(email)) => query_builder.bind(email),
+        Query::PasswordIsSet(_) => query_builder,
+        Query::CompoundQuery(compound_query) => compound_query
+            .queries
+            .iter()
+            .fold(query_builder, |query_builder, query| {
+                bind_query(query_builder, query)
+            }),
+    }
+}
+
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, users: Vec<User>) -> Result<Vec<User>, Error>;
     async fn list(&self, ids: Vec<String>) -> Result<Vec<User>, Error>;
+    async fn query(&self, query: Query) -> Result<Vec<User>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -241,6 +310,21 @@ impl Store for SqliteStore {
             });
 
         Ok(outputs)
+    }
+
+    async fn query(&self, query: Query) -> Result<Vec<User>, Error> {
+        let query_string = format!(
+            "SELECT id, email, password, display_name FROM users WHERE {}",
+            query_where_clause(&query)
+        );
+        let query_builder = sqlx::query_as(&query_string);
+        let query_builder = bind_query(query_builder, &query);
+        let rows: Vec<UserRow> = query_builder
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| Error::FetchError(e))?;
+
+        Ok(rows.into_iter().map(|row| row.into()).collect())
     }
 
     async fn list(&self, ids: Vec<String>) -> Result<Vec<User>, Error> {

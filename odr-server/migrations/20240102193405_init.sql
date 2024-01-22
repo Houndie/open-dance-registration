@@ -68,5 +68,5 @@ CREATE TABLE keys
 (
 	id         TEXT NOT NULL PRIMARY KEY,
 	ecdsa_key  BLOB NOT NULL,
-	expires_at INT NOT NULL,
+	expires_at INT NOT NULL
 );

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use bcrypt::BcryptError;
+use argon2::password_hash::PasswordHashString;
 use sqlx::SqlitePool;
 
 use super::{
@@ -16,36 +16,31 @@ struct UserRow {
     display_name: String,
 }
 
-impl From<UserRow> for User {
-    fn from(row: UserRow) -> Self {
+impl TryFrom<UserRow> for User {
+    type Error = Error;
+
+    fn try_from(row: UserRow) -> Result<Self, Error> {
+        println!("A1 {:?}", row.password);
         let password = match row.password {
-            Some(password) => PasswordType::Set(HashedPassword(password)),
+            Some(password) => PasswordType::Set(
+                PasswordHashString::new(&password)
+                    .map_err(|_| Error::ColumnParseError("password"))?,
+            ),
             None => PasswordType::Unset,
         };
 
-        User {
+        Ok(User {
             id: row.id,
             email: row.email,
             password,
             display_name: row.display_name,
-        }
-    }
-}
-
-#[derive(Default, Clone, Debug, PartialEq)]
-pub struct HashedPassword(String);
-
-impl HashedPassword {
-    pub fn new(password: String) -> Result<Self, BcryptError> {
-        let hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)?;
-
-        Ok(HashedPassword(hash))
+        })
     }
 }
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum PasswordType {
-    Set(HashedPassword),
+    Set(PasswordHashString),
     Unset,
 
     #[default]
@@ -97,7 +92,7 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
     let query_builder = query_builder.bind(&user.id).bind(&user.email);
 
     let query_builder = match &user.password {
-        PasswordType::Set(password) => query_builder.bind(Some(&password.0)),
+        PasswordType::Set(password) => query_builder.bind(Some(password.as_str())),
         PasswordType::Unset => query_builder.bind(None as Option<&str>),
         PasswordType::Unchanged => query_builder,
     };
@@ -324,18 +319,28 @@ impl Store for SqliteStore {
             .await
             .map_err(|e| Error::FetchError(e))?;
 
-        Ok(rows.into_iter().map(|row| row.into()).collect())
+        let users = rows
+            .into_iter()
+            .map(|row| row.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(users)
     }
 
     async fn list(&self, ids: Vec<String>) -> Result<Vec<User>, Error> {
         let base_query = "SELECT id, email, password, display_name FROM users";
         if ids.is_empty() {
-            let users: Vec<UserRow> = sqlx::query_as(base_query)
+            let rows: Vec<UserRow> = sqlx::query_as(base_query)
                 .fetch_all(&*self.pool)
                 .await
                 .map_err(|e| Error::FetchError(e))?;
 
-            return Ok(users.into_iter().map(|row| row.into()).collect());
+            let users = rows
+                .into_iter()
+                .map(|row| row.try_into())
+                .collect::<Result<Vec<_>, _>>()?;
+
+            return Ok(users);
         };
 
         let where_clause =
@@ -354,7 +359,12 @@ impl Store for SqliteStore {
             .await
             .map_err(|e| Error::FetchError(e))?;
 
-        Ok(rows.into_iter().map(|row| row.into()).collect())
+        let users = rows
+            .into_iter()
+            .map(|row| row.try_into())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(users)
     }
 
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
@@ -387,13 +397,18 @@ impl Store for SqliteStore {
 mod tests {
     use std::{str::FromStr, sync::Arc};
 
+    use argon2::{
+        password_hash::{PasswordHashString, SaltString},
+        Argon2, PasswordHasher,
+    };
+    use rand::rngs::OsRng;
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
     use crate::store::{common::new_id, Error};
 
-    use super::{HashedPassword, PasswordType, SqliteStore, Store, User, UserRow};
+    use super::{PasswordType, SqliteStore, Store, User, UserRow};
 
     struct Init {
         db: SqlitePool,
@@ -415,25 +430,32 @@ mod tests {
         Init { db }
     }
 
+    fn new_password(password: &str) -> PasswordHashString {
+        Argon2::default()
+            .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+            .unwrap()
+            .serialize()
+    }
+
     async fn test_data(init: &Init) -> Vec<User> {
         let user1_id = new_id();
         let user1_email = "a@gmail.com";
-        let user1_password = "abcde";
+        let user1_password = new_password("abcde");
         let user1_display_name = "a";
         let user2_id = new_id();
         let user2_email = "b@gmail.com";
-        let user2_password = "fghij";
+        let user2_password = new_password("fghij");
         let user2_display_name = "b";
 
         let query = "INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?), (?, ?, ?, ?)";
         sqlx::query(query)
             .bind(&user1_id)
             .bind(user1_email)
-            .bind(user1_password)
+            .bind(Some(user1_password.as_str()))
             .bind(user1_display_name)
             .bind(&user2_id)
             .bind(user2_email)
-            .bind(user2_password)
+            .bind(Some(user2_password.as_str()))
             .bind(user2_display_name)
             .execute(&init.db)
             .await
@@ -443,13 +465,13 @@ mod tests {
             User {
                 id: user1_id,
                 email: user1_email.to_string(),
-                password: PasswordType::Set(HashedPassword(user1_password.to_string())),
+                password: PasswordType::Set(user1_password),
                 display_name: user1_display_name.to_string(),
             },
             User {
                 id: user2_id,
                 email: user2_email.to_string(),
-                password: PasswordType::Set(HashedPassword(user2_password.to_string())),
+                password: PasswordType::Set(user2_password),
                 display_name: user2_display_name.to_string(),
             },
         ];
@@ -467,13 +489,13 @@ mod tests {
             User {
                 id: "".to_string(),
                 email: "a@gmail.com".to_string(),
-                password: PasswordType::Set(HashedPassword("abcde".to_string())),
+                password: PasswordType::Set(new_password("abcde")),
                 display_name: "a".to_string(),
             },
             User {
                 id: "".to_string(),
                 email: "b@gmail.com".to_string(),
-                password: PasswordType::Set(HashedPassword("fghij".to_string())),
+                password: PasswordType::Set(new_password("fghij")),
                 display_name: "b".to_string(),
             },
         ];
@@ -497,8 +519,10 @@ mod tests {
                 .await
                 .unwrap();
 
-        let mut store_users: Vec<User> =
-            store_user_rows.into_iter().map(|row| row.into()).collect();
+        let mut store_users: Vec<User> = store_user_rows
+            .into_iter()
+            .map(|row| row.try_into().unwrap())
+            .collect();
 
         users.sort_by(|a, b| a.id.cmp(&b.id));
         store_users.sort_by(|a, b| a.id.cmp(&b.id));
@@ -517,7 +541,7 @@ mod tests {
         users[0].display_name = "new name".to_string();
         let password_backup = std::mem::take(&mut users[0].password);
         users[1].email = "c@gmail.com".to_string();
-        users[1].password = PasswordType::Set(HashedPassword("klmno".to_string()));
+        users[1].password = PasswordType::Set(new_password("klmno"));
 
         let returned_users = store.upsert(users.clone()).await.unwrap();
 
@@ -531,7 +555,7 @@ mod tests {
 
         let mut store_users: Vec<User> = store_user_rows
             .into_iter()
-            .map(|row| row.into())
+            .map(|row| row.try_into().unwrap())
             .collect::<Vec<_>>();
 
         users[0].password = password_backup;
@@ -553,7 +577,7 @@ mod tests {
             .upsert(vec![User {
                 id: id.clone(),
                 email: "whatever".to_string(),
-                password: PasswordType::Set(HashedPassword("whatever".to_string())),
+                password: PasswordType::Set(new_password("whatever")),
                 display_name: "whatever".to_string(),
             }])
             .await;
@@ -612,7 +636,7 @@ mod tests {
 
         let mut store_users: Vec<User> = store_user_rows
             .into_iter()
-            .map(|row| row.into())
+            .map(|row| row.try_into().unwrap())
             .collect::<Vec<_>>();
 
         store_users.sort_by(|a, b| a.id.cmp(&b.id));

@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
+use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use common::proto::{
     self, user::Password, DeleteUsersRequest, DeleteUsersResponse, ListUsersRequest,
     ListUsersResponse, UpsertUsersRequest, UpsertUsersResponse,
 };
+use rand::rngs::OsRng;
 use tonic::{Request, Response, Status};
 
-use crate::store::user::{self as store, HashedPassword, PasswordType, Store};
+use crate::store::user::{self as store, PasswordType, Store};
 
 use super::{store_error_to_status, ValidationError};
 
@@ -23,8 +25,10 @@ impl<StoreType: Store> Service<StoreType> {
 fn proto_to_user(proto_user: proto::User) -> Result<store::User, Status> {
     let password = match proto_user.password.unwrap() {
         Password::Set(password) => {
-            let hashed_password = HashedPassword::new(password)
-                .map_err(|e| Status::internal(format!("unable to hash password: {}", e)))?;
+            let hashed_password = Argon2::default()
+                .hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+                .map_err(|e| Status::internal(format!("unable to hash password: {}", e)))?
+                .serialize();
 
             PasswordType::Set(hashed_password)
         }

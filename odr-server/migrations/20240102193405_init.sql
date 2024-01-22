@@ -63,3 +63,10 @@ CREATE TABLE users
 	password     TEXT,
 	display_name TEXT NOT NULL
 );
+
+CREATE TABLE keys
+(
+	id         TEXT NOT NULL PRIMARY KEY,
+	ecdsa_key  BLOB NOT NULL,
+	expires_at INT NOT NULL,
+);

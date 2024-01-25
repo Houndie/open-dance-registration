@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use p256::ecdsa;
+use ed25519_dalek::{SecretKey, SigningKey};
 use sqlx::SqlitePool;
 
 use super::{common::new_id, Error};
@@ -9,7 +9,7 @@ use super::{common::new_id, Error};
 #[derive(Debug, PartialEq)]
 pub struct Key {
     pub id: String,
-    pub key: ecdsa::SigningKey,
+    pub key: SigningKey,
     pub created_at: DateTime<Utc>,
 }
 
@@ -34,7 +34,7 @@ impl SqliteStore {
 #[derive(sqlx::FromRow)]
 struct KeyRow {
     id: String,
-    ecdsa_key: Vec<u8>,
+    eddsa_key: Vec<u8>,
     created_at: i64,
 }
 
@@ -42,10 +42,14 @@ impl TryFrom<KeyRow> for Key {
     type Error = Error;
 
     fn try_from(row: KeyRow) -> Result<Self, Self::Error> {
+        let key_bytes: SecretKey = row
+            .eddsa_key
+            .try_into()
+            .map_err(|_| Error::ColumnParseError("eddsa_key"))?;
+
         Ok(Key {
             id: row.id,
-            key: ecdsa::SigningKey::from_slice(row.ecdsa_key.as_slice())
-                .map_err(|_| Error::ColumnParseError("ecdsa_key"))?,
+            key: SigningKey::from_bytes(&key_bytes),
             created_at: DateTime::<Utc>::from_timestamp(row.created_at, 0)
                 .ok_or_else(|| Error::ColumnParseError("created_at"))?,
         })
@@ -59,7 +63,7 @@ impl Store for SqliteStore {
 
         sqlx::query(
             r#"
-            INSERT INTO keys (id, ecdsa_key, created_at)
+            INSERT INTO keys (id, eddsa_key, created_at)
             VALUES (?, ?, ?)
             "#,
         )
@@ -76,7 +80,7 @@ impl Store for SqliteStore {
     async fn get_newest(&self) -> Result<Key, Error> {
         let row: KeyRow = sqlx::query_as(
             r#"
-            SELECT id, ecdsa_key, MAX(created_at) AS created_at
+            SELECT id, eddsa_key, MAX(created_at) AS created_at
             FROM keys
             "#,
         )
@@ -88,7 +92,7 @@ impl Store for SqliteStore {
     }
 
     async fn list(&self, ids: Vec<&str>) -> Result<Vec<Key>, Error> {
-        let base_query = "SELECT id, ecdsa_key, created_at FROM keys";
+        let base_query = "SELECT id, eddsa_key, created_at FROM keys";
         if ids.is_empty() {
             let rows: Vec<KeyRow> = sqlx::query_as(base_query)
                 .fetch_all(&*self.pool)
@@ -144,7 +148,7 @@ mod tests {
     use std::{str::FromStr, sync::Arc};
 
     use chrono::{DateTime, Utc};
-    use p256::ecdsa::SigningKey;
+    use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
@@ -177,13 +181,13 @@ mod tests {
     async fn get_newest() {
         let old_key = Key {
             id: new_id(),
-            key: SigningKey::random(&mut OsRng),
+            key: SigningKey::generate(&mut OsRng),
             created_at: DateTime::<Utc>::from_timestamp(1000, 0).unwrap(),
         };
 
         let new_key = Key {
             id: new_id(),
-            key: SigningKey::random(&mut OsRng),
+            key: SigningKey::generate(&mut OsRng),
             created_at: DateTime::<Utc>::from_timestamp(3000, 0).unwrap(),
         };
 
@@ -191,7 +195,7 @@ mod tests {
 
         sqlx::query(
             r#"
-            INSERT INTO keys (id, ecdsa_key, created_at)
+            INSERT INTO keys (id, eddsa_key, created_at)
             VALUES (?, ?, ?), (?, ?, ?)
             "#,
         )

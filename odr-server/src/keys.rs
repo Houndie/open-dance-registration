@@ -1,5 +1,5 @@
 use chrono::Utc;
-use p256::ecdsa::{SigningKey, VerifyingKey};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 
 use crate::store::{
@@ -30,7 +30,7 @@ impl<Store: KeyStore> KeyManager<Store> {
 
         let key = Key {
             id: "".to_string(),
-            key: SigningKey::random(&mut OsRng),
+            key: SigningKey::generate(&mut OsRng),
             created_at: Utc::now(),
         };
 

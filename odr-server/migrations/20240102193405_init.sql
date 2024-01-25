@@ -67,6 +67,6 @@ CREATE TABLE users
 CREATE TABLE keys
 (
 	id         TEXT NOT NULL PRIMARY KEY,
-	ecdsa_key  BLOB NOT NULL,
+	eddsa_key  BLOB NOT NULL,
 	created_at INT NOT NULL
 );

@@ -6,6 +6,7 @@ use crate::store::Error;
 use thiserror::Error as ThisError;
 
 pub mod event;
+pub mod login;
 pub mod organization;
 pub mod registration;
 pub mod registration_schema;

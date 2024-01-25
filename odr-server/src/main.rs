@@ -15,6 +15,7 @@ use store::{
 use tonic::transport::Server;
 
 pub mod api;
+pub mod keys;
 pub mod store;
 
 fn db_url() -> String {

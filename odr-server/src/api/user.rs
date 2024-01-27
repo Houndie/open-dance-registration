@@ -2,13 +2,17 @@ use std::sync::Arc;
 
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use common::proto::{
-    self, user::Password, DeleteUsersRequest, DeleteUsersResponse, ListUsersRequest,
-    ListUsersResponse, UpsertUsersRequest, UpsertUsersResponse,
+    self, compound_user_query, email_query, user::Password, user_query, DeleteUsersRequest,
+    DeleteUsersResponse, QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest,
+    UpsertUsersResponse, UserQuery,
 };
 use rand::rngs::OsRng;
 use tonic::{Request, Response, Status};
 
-use crate::store::user::{self as store, PasswordType, Store};
+use crate::store::{
+    user::{self as store, EmailQuery, PasswordType, Query, Store},
+    CompoundOperator, CompoundQuery,
+};
 
 use super::{store_error_to_status, ValidationError};
 
@@ -86,6 +90,66 @@ fn validate_user(user: &proto::User) -> Result<(), ValidationError> {
     Ok(())
 }
 
+fn validate_query(query: &UserQuery) -> Result<(), ValidationError> {
+    let query = match &query.query {
+        Some(query) => query,
+        None => return Err(ValidationError::new_empty("query")),
+    };
+
+    match query {
+        user_query::Query::Email(email_query) => {
+            if email_query.operator.is_none() {
+                return Err(ValidationError::new_empty("query.email_query.operator"));
+            };
+        }
+        user_query::Query::Compound(compound_query) => {
+            if compound_user_query::Operator::try_from(compound_query.operator).is_err() {
+                return Err(ValidationError::new_invalid_enum("query.compound.operator"));
+            }
+
+            for (i, query) in compound_query.queries.iter().enumerate() {
+                validate_query(query).map_err(|e| -> ValidationError {
+                    e.with_context(&format!("query.compound.queries[{}]", i))
+                })?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+impl From<UserQuery> for Query {
+    fn from(query: UserQuery) -> Self {
+        match query.query.unwrap() {
+            user_query::Query::Email(email_query) => {
+                let q = match email_query.operator.unwrap() {
+                    email_query::Operator::Equals(equals) => EmailQuery::Is(equals),
+                    email_query::Operator::NotEquals(not_equals) => EmailQuery::IsNot(not_equals),
+                };
+
+                Query::Email(q)
+            }
+
+            user_query::Query::Compound(compound_query) => {
+                let operator =
+                    match compound_user_query::Operator::try_from(compound_query.operator).unwrap()
+                    {
+                        compound_user_query::Operator::And => CompoundOperator::And,
+                        compound_user_query::Operator::Or => CompoundOperator::Or,
+                    };
+
+                let queries = compound_query
+                    .queries
+                    .into_iter()
+                    .map(|query| query.into())
+                    .collect();
+
+                Query::CompoundQuery(CompoundQuery { operator, queries })
+            }
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl<StoreType: Store> proto::user_service_server::UserService for Service<StoreType> {
     async fn upsert_users(
@@ -115,17 +179,28 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
         }))
     }
 
-    async fn list_users(
+    async fn query_users(
         &self,
-        request: Request<ListUsersRequest>,
-    ) -> Result<Response<ListUsersResponse>, Status> {
-        let users = self
-            .store
-            .list(request.into_inner().ids)
-            .await
-            .map_err(|e| store_error_to_status(e))?;
+        request: Request<QueryUsersRequest>,
+    ) -> Result<Response<QueryUsersResponse>, Status> {
+        let query = request.into_inner().query;
+        let users = match query {
+            Some(query) => {
+                validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
 
-        Ok(Response::new(ListUsersResponse {
+                self.store
+                    .query(query.into())
+                    .await
+                    .map_err(|e| store_error_to_status(e))?
+            }
+            None => self
+                .store
+                .list()
+                .await
+                .map_err(|e| store_error_to_status(e))?,
+        };
+
+        Ok(Response::new(QueryUsersResponse {
             users: users.into_iter().map(user_to_proto).collect(),
         }))
     }

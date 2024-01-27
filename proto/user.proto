@@ -5,7 +5,7 @@ import "google/protobuf/empty.proto";
 
 service UserService {
 	rpc UpsertUsers(UpsertUsersRequest) returns (UpsertUsersResponse) {}
-	rpc ListUsers(ListUsersRequest) returns (ListUsersResponse) {}
+	rpc QueryUsers(QueryUsersRequest) returns (QueryUsersResponse) {}
 	rpc DeleteUsers(DeleteUsersRequest) returns (DeleteUsersResponse) {}
 }
 
@@ -17,11 +17,12 @@ message UpsertUsersResponse {
 	repeated User users = 1;
 }
 
-message ListUsersRequest {
-	repeated string ids = 1;
+message QueryUsersRequest {
+	// leave empty to fetch all users
+	UserQuery query = 1;
 }
 
-message ListUsersResponse {
+message QueryUsersResponse {
 	repeated User users = 1;
 }
 
@@ -41,4 +42,27 @@ message User {
 		google.protobuf.Empty unchanged = 5;
 	}
 	string display_name = 6;
+}
+
+message UserQuery {
+	oneof query {
+		EmailQuery email = 1;
+		CompoundUserQuery compound = 2;
+	}
+}
+
+message EmailQuery {
+	oneof operator {
+		string equals = 1;
+		string not_equals = 2;
+	}
+}
+
+message CompoundUserQuery {
+	enum Operator {
+		AND = 0;
+		OR = 1;
+	}
+	Operator operator = 1;
+	repeated UserQuery queries = 2;
 }

@@ -58,3 +58,66 @@ impl IntoResponse for Error {
         (status, self.to_string()).into_response()
     }
 }
+
+pub trait Queryable {
+    fn where_clause(&self) -> String;
+}
+
+pub trait Bindable<'q, DB: sqlx::Database> {
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments>;
+}
+
+pub enum CompoundOperator {
+    And,
+    Or,
+}
+
+pub struct CompoundQuery<Q: Queryable> {
+    pub operator: CompoundOperator,
+    pub queries: Vec<Q>,
+}
+
+impl<Q: Queryable> Queryable for CompoundQuery<Q> {
+    fn where_clause(&self) -> String {
+        let operator = match self.operator {
+            CompoundOperator::And => "AND",
+            CompoundOperator::Or => "OR",
+        };
+
+        let where_clauses = itertools::Itertools::intersperse(
+            self.queries.iter().map(|query| query.where_clause()),
+            operator.to_owned(),
+        )
+        .collect::<String>();
+
+        format!("({})", where_clauses)
+    }
+}
+
+impl<'q, DB: sqlx::Database, Q: Queryable + Bindable<'q, DB>> Bindable<'q, DB>
+    for CompoundQuery<Q>
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        self.queries
+            .iter()
+            .fold(query_builder, |query_builder, query| {
+                query.bind(query_builder)
+            })
+    }
+}

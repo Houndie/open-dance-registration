@@ -5,7 +5,7 @@ use sqlx::SqlitePool;
 
 use super::{
     common::{ids_in_table, new_id},
-    Error,
+    Bindable as _, Error, Queryable as _,
 };
 
 #[derive(sqlx::FromRow)]
@@ -66,20 +66,44 @@ pub enum EmailQuery {
     IsNot(String),
 }
 
-pub enum CompoundOperator {
-    And,
-    Or,
-}
-
-pub struct CompoundQuery {
-    pub operator: CompoundOperator,
-    pub queries: Vec<Query>,
-}
-
 pub enum Query {
     Email(EmailQuery),
     PasswordIsSet(bool),
-    CompoundQuery(CompoundQuery),
+    CompoundQuery(super::CompoundQuery<Query>),
+}
+
+impl super::Queryable for Query {
+    fn where_clause(&self) -> String {
+        match self {
+            Query::Email(EmailQuery::Is(_)) => "email = ?".to_owned(),
+            Query::Email(EmailQuery::IsNot(_)) => "email != ?".to_owned(),
+            Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
+            Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
+            Query::CompoundQuery(compound_query) => compound_query.where_clause(),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
+where
+    String: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            Query::Email(EmailQuery::Is(email)) => query_builder.bind(email),
+            Query::Email(EmailQuery::IsNot(email)) => query_builder.bind(email),
+            Query::PasswordIsSet(_) => query_builder,
+            Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
+        }
+    }
 }
 
 type QueryBuilder<'q> = sqlx::query::Query<
@@ -100,58 +124,11 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
     query_builder.bind(&user.display_name)
 }
 
-type QueryAsBuilder<'q> = sqlx::query::QueryAs<
-    'q,
-    sqlx::Sqlite,
-    UserRow,
-    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
->;
-
-fn query_where_clause(query: &Query) -> String {
-    match query {
-        Query::Email(EmailQuery::Is(_)) => "email = ?".to_owned(),
-        Query::Email(EmailQuery::IsNot(_)) => "email != ?".to_owned(),
-        Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
-        Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
-        Query::CompoundQuery(compound_query) => {
-            let operator = match compound_query.operator {
-                CompoundOperator::And => "AND",
-                CompoundOperator::Or => "OR",
-            };
-
-            let where_clauses = itertools::Itertools::intersperse(
-                compound_query
-                    .queries
-                    .iter()
-                    .map(|query| query_where_clause(query)),
-                operator.to_owned(),
-            )
-            .collect::<String>();
-
-            format!("({})", where_clauses)
-        }
-    }
-}
-
-fn bind_query<'q>(query_builder: QueryAsBuilder<'q>, query: &'q Query) -> QueryAsBuilder<'q> {
-    match query {
-        Query::Email(EmailQuery::Is(email)) => query_builder.bind(email),
-        Query::Email(EmailQuery::IsNot(email)) => query_builder.bind(email),
-        Query::PasswordIsSet(_) => query_builder,
-        Query::CompoundQuery(compound_query) => compound_query
-            .queries
-            .iter()
-            .fold(query_builder, |query_builder, query| {
-                bind_query(query_builder, query)
-            }),
-    }
-}
-
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, users: Vec<User>) -> Result<Vec<User>, Error>;
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<User>, Error>;
     async fn query(&self, query: Query) -> Result<Vec<User>, Error>;
+    async fn list(&self) -> Result<Vec<User>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -310,10 +287,10 @@ impl Store for SqliteStore {
     async fn query(&self, query: Query) -> Result<Vec<User>, Error> {
         let query_string = format!(
             "SELECT id, email, password, display_name FROM users WHERE {}",
-            query_where_clause(&query)
+            query.where_clause()
         );
         let query_builder = sqlx::query_as(&query_string);
-        let query_builder = bind_query(query_builder, &query);
+        let query_builder = query.bind(query_builder);
         let rows: Vec<UserRow> = query_builder
             .fetch_all(&*self.pool)
             .await
@@ -327,34 +304,9 @@ impl Store for SqliteStore {
         Ok(users)
     }
 
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<User>, Error> {
+    async fn list(&self) -> Result<Vec<User>, Error> {
         let base_query = "SELECT id, email, password, display_name FROM users";
-        if ids.is_empty() {
-            let rows: Vec<UserRow> = sqlx::query_as(base_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            let users = rows
-                .into_iter()
-                .map(|row| row.try_into())
-                .collect::<Result<Vec<_>, _>>()?;
-
-            return Ok(users);
-        };
-
-        let where_clause =
-            itertools::Itertools::intersperse(std::iter::repeat("id = ?").take(ids.len()), " OR ")
-                .collect::<String>();
-
-        let query = format!("{} WHERE {}", base_query, where_clause);
-
-        let query_builder = sqlx::query_as(&query);
-        let query_builder = ids
-            .iter()
-            .fold(query_builder, |query_builder, id| query_builder.bind(id));
-
-        let rows: Vec<UserRow> = query_builder
+        let rows: Vec<UserRow> = sqlx::query_as(base_query)
             .fetch_all(&*self.pool)
             .await
             .map_err(|e| Error::FetchError(e))?;
@@ -364,7 +316,7 @@ impl Store for SqliteStore {
             .map(|row| row.try_into())
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(users)
+        return Ok(users);
     }
 
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {

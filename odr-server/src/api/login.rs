@@ -21,9 +21,8 @@ use crate::{
     store::{
         self,
         keys::Store as KeyStore,
-        user::{
-            CompoundOperator, CompoundQuery, EmailQuery, PasswordType, Query, Store as UserStore,
-        },
+        user::{EmailQuery, PasswordType, Query, Store as UserStore},
+        CompoundOperator, CompoundQuery,
     },
 };
 

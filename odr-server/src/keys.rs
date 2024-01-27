@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use chrono::Utc;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
@@ -8,11 +10,11 @@ use crate::store::{
 };
 
 pub struct KeyManager<Store: KeyStore> {
-    store: Store,
+    store: Arc<Store>,
 }
 
 impl<Store: KeyStore> KeyManager<Store> {
-    pub fn new(store: Store) -> Self {
+    pub fn new(store: Arc<Store>) -> Self {
         Self { store }
     }
 
@@ -43,8 +45,9 @@ impl<Store: KeyStore> KeyManager<Store> {
         Ok(())
     }
 
-    pub async fn get_signing_key(&self) -> Result<SigningKey, store::Error> {
-        Ok(self.store.get_newest().await?.key)
+    pub async fn get_signing_key(&self) -> Result<(String, SigningKey), store::Error> {
+        let key_data = self.store.get_newest().await?;
+        Ok((key_data.id, key_data.key))
     }
 
     pub async fn get_verifying_key(&self, kid: &str) -> Result<VerifyingKey, store::Error> {

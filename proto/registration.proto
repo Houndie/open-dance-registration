@@ -1,10 +1,11 @@
 syntax = "proto3";
-package registration;
+package proto;
+
+import "queries.proto";
 
 service RegistrationService {
 	rpc UpsertRegistrations(UpsertRegistrationsRequest) returns (UpsertRegistrationsResponse) {}
 	rpc QueryRegistrations(QueryRegistrationsRequest) returns (QueryRegistrationsResponse) {}
-	rpc ListRegistrations(ListRegistrationsRequest) returns (ListRegistrationsResponse) {}
 	rpc DeleteRegistrations(DeleteRegistrationsRequest) returns (DeleteRegistrationsResponse) {}
 }
 
@@ -21,14 +22,6 @@ message QueryRegistrationsRequest {
 }
 
 message QueryRegistrationsResponse {
-	repeated Registration registrations = 1;
-}
-
-message ListRegistrationsRequest {
-	repeated string ids = 1;
-}
-
-message ListRegistrationsResponse {
 	repeated Registration registrations = 1;
 }
 
@@ -61,15 +54,9 @@ message RepeatedUint32 {
 
 message RegistrationQuery {
 	oneof query {
-		EventIdQuery event_id = 1;
-		CompoundRegistrationQuery compound = 2;
-	}
-}
-
-message EventIdQuery {
-	oneof operator {
-		string equals = 1;
-		string not_equals = 2;
+		StringQuery id = 1;
+		StringQuery event_id = 2;
+		CompoundRegistrationQuery compound = 3;
 	}
 }
 
@@ -80,6 +67,5 @@ message CompoundRegistrationQuery {
 	}
 
 	Operator operator = 1;
-	RegistrationQuery left = 2;
-	RegistrationQuery right = 3;
+	repeated RegistrationQuery queries = 2;
 }

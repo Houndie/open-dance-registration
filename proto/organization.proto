@@ -1,5 +1,5 @@
 syntax = "proto3";
-package organization;
+package proto;
 
 service OrganizationService {
 	rpc UpsertOrganizations(UpsertOrganizationsRequest) returns (UpsertOrganizationsResponse) {}

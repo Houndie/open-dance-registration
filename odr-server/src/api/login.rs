@@ -106,7 +106,7 @@ pub fn api_routes<KStore: KeyStore, UStore: UserStore>(
                             .query(Query::CompoundQuery(CompoundQuery {
                                 operator: CompoundOperator::And,
                                 queries: vec![
-                                    Query::Email(EmailQuery::Is(email)),
+                                    Query::Email(EmailQuery::Equals(email)),
                                     Query::PasswordIsSet(true),
                                 ],
                             }))
@@ -174,7 +174,7 @@ pub fn api_routes<KStore: KeyStore, UStore: UserStore>(
 
                         // Make sure the user hasn't been removed since the token was issued
                         let mut users = user_store
-                            .query(Query::Email(EmailQuery::Is(token_data.claims.sub)))
+                            .query(Query::Email(EmailQuery::Equals(token_data.claims.sub)))
                             .await
                             .map_err(|e| match e {
                                 store::Error::IdDoesNotExist(_) => Error::InvalidRefreshToken,

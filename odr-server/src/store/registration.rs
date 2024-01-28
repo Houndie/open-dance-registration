@@ -1,14 +1,11 @@
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
-use common::proto::{
-    compound_registration_query, event_id_query, registration_item, registration_query,
-    Registration, RegistrationItem, RegistrationQuery, RepeatedUint32,
-};
+use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
 use sqlx::SqlitePool;
 
 use super::{
     common::{ids_in_table, new_id},
-    Error,
+    Bindable as _, Error, Queryable as _,
 };
 
 #[derive(sqlx::FromRow)]
@@ -69,6 +66,68 @@ impl RegistrationItemRow {
     }
 }
 
+pub struct IdField;
+
+impl super::Field for IdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "id"
+    }
+}
+
+pub type IdQuery = super::LogicalQuery<IdField>;
+
+pub struct EventIdField;
+
+impl super::Field for EventIdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "event"
+    }
+}
+
+pub type EventIdQuery = super::LogicalQuery<EventIdField>;
+
+pub enum Query {
+    Id(IdQuery),
+    EventId(EventIdQuery),
+    Compound(super::CompoundQuery<Query>),
+}
+
+impl super::Queryable for Query {
+    fn where_clause(&self) -> String {
+        match self {
+            Query::Id(query) => query.where_clause(),
+            Query::EventId(query) => query.where_clause(),
+            Query::Compound(query) => query.where_clause(),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
+where
+    <IdField as super::Field>::Item: sqlx::Encode<'q, DB> + sqlx::Type<DB> + Sync,
+    <EventIdField as super::Field>::Item: sqlx::Encode<'q, DB> + sqlx::Type<DB> + Sync,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            Query::Id(query) => query.bind(query_builder),
+            Query::EventId(query) => query.bind(query_builder),
+            Query::Compound(query) => query.bind(query_builder),
+        }
+    }
+}
+
 fn attach_items(
     registrations: impl IntoIterator<Item = Registration>,
     registration_items: impl IntoIterator<Item = (String, RegistrationItem)>,
@@ -104,18 +163,11 @@ type QueryBuilder<'q> = sqlx::query::Query<
     <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
 >;
 
-type QueryAsBuilder<'q> = sqlx::query::QueryAs<
-    'q,
-    sqlx::Sqlite,
-    RegistrationRow,
-    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
->;
-
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, registrations: Vec<Registration>) -> Result<Vec<Registration>, Error>;
-    async fn query(&self, query: RegistrationQuery) -> Result<Vec<Registration>, Error>;
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<Registration>, Error>;
+    async fn query(&self, query: Query) -> Result<Vec<Registration>, Error>;
+    async fn list(&self) -> Result<Vec<Registration>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -149,45 +201,6 @@ fn bind_item<'q>(
     };
 
     query_builder
-}
-
-fn query_where_clause(query: &RegistrationQuery) -> String {
-    match query.query.as_ref().unwrap() {
-        registration_query::Query::EventId(event_id_query) => {
-            match event_id_query.operator.as_ref().unwrap() {
-                event_id_query::Operator::Equals(_) => "event = ?".to_owned(),
-                event_id_query::Operator::NotEquals(_) => "event != ?".to_owned(),
-            }
-        }
-        registration_query::Query::Compound(compound) => {
-            let left = query_where_clause(compound.left.as_ref().unwrap());
-            let right = query_where_clause(compound.right.as_ref().unwrap());
-            let operator = compound_registration_query::Operator::try_from(compound.operator)
-                .unwrap()
-                .as_str_name();
-
-            format!("({}) {} ({})", left, operator, right)
-        }
-    }
-}
-
-fn bind_query<'q>(
-    query_builder: QueryAsBuilder<'q>,
-    query: &'q RegistrationQuery,
-) -> QueryAsBuilder<'q> {
-    match query.query.as_ref().unwrap() {
-        registration_query::Query::EventId(event_id_query) => {
-            match event_id_query.operator.as_ref().unwrap() {
-                event_id_query::Operator::Equals(equals) => query_builder.bind(equals),
-                event_id_query::Operator::NotEquals(not_equals) => query_builder.bind(not_equals),
-            }
-        }
-        registration_query::Query::Compound(compound) => {
-            let query_builder = bind_query(query_builder, compound.left.as_ref().unwrap());
-            let query_builder = bind_query(query_builder, compound.right.as_ref().unwrap());
-            query_builder
-        }
-    }
 }
 
 #[tonic::async_trait]
@@ -454,14 +467,14 @@ impl Store for SqliteStore {
         Ok(outputs)
     }
 
-    async fn query(&self, query: RegistrationQuery) -> Result<Vec<Registration>, Error> {
+    async fn query(&self, query: Query) -> Result<Vec<Registration>, Error> {
         let registrations = {
             let query_string = format!(
                 "SELECT id, event FROM registrations WHERE {}",
-                query_where_clause(&query)
+                query.where_clause()
             );
             let query_builder = sqlx::query_as(&query_string);
-            let query_builder = bind_query(query_builder, &query);
+            let query_builder = query.bind(query_builder);
             let rows: Vec<RegistrationRow> = query_builder
                 .fetch_all(&*self.pool)
                 .await
@@ -471,6 +484,10 @@ impl Store for SqliteStore {
                 .map(|row| row.to_registration())
                 .collect::<Vec<_>>()
         };
+
+        if registrations.is_empty() {
+            return Ok(registrations);
+        }
 
         let items = {
             let where_clause: String = itertools::Itertools::intersperse(
@@ -504,101 +521,32 @@ impl Store for SqliteStore {
         Ok(registrations)
     }
 
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<Registration>, Error> {
+    async fn list(&self) -> Result<Vec<Registration>, Error> {
         let base_query = "SELECT id, event FROM registrations";
         let base_items_query =
             "SELECT id, registration, schema_item, value_type, value FROM registration_items";
 
-        if ids.is_empty() {
-            let registrations: Vec<RegistrationRow> = sqlx::query_as(base_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
+        let registrations: Vec<RegistrationRow> = sqlx::query_as(base_query)
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| Error::FetchError(e))?;
 
-            let items: Vec<RegistrationItemRow> = sqlx::query_as(base_items_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
+        let items: Vec<RegistrationItemRow> = sqlx::query_as(base_items_query)
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| Error::FetchError(e))?;
 
-            let registrations = attach_items(
-                registrations.into_iter().map(|row| row.to_registration()),
-                items
-                    .into_iter()
-                    .map(|row| row.to_registration_item())
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-
-            return Ok(registrations);
-        }
-
-        ids_in_table(
-            &*self.pool,
-            "registrations",
-            ids.iter().map(|id| id.as_str()),
-        )
-        .await?;
-
-        let registrations = {
-            let where_clause: String =
-                itertools::Itertools::intersperse(ids.iter().map(|_| "id = ?"), " OR ").collect();
-
-            let query = format!("{} WHERE {}", base_query, where_clause);
-
-            let query_builder = sqlx::query_as(&query);
-            let query_builder = ids
-                .iter()
-                .fold(query_builder, |query_builder, id| query_builder.bind(id));
-
-            let rows: Vec<RegistrationRow> = query_builder
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            rows.into_iter()
-                .map(|row| row.to_registration())
-                .collect::<Vec<_>>()
-        };
-
-        let items = {
-            let where_clause: String = itertools::Itertools::intersperse(
-                registrations.iter().map(|_| "registration = ?"),
-                " OR ",
-            )
-            .collect();
-
-            let query = format!("{} WHERE {}", base_items_query, where_clause);
-
-            let query_builder = sqlx::query_as(&query);
-            let query_builder = ids
-                .iter()
-                .fold(query_builder, |query_builder, id| query_builder.bind(id));
-
-            let rows: Vec<RegistrationItemRow> = query_builder
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            rows.into_iter()
+        let registrations = attach_items(
+            registrations.into_iter().map(|row| row.to_registration()),
+            items
+                .into_iter()
                 .map(|row| row.to_registration_item())
-                .collect::<Result<Vec<_>, _>>()?
-        };
+                .collect::<Result<Vec<_>, _>>()?,
+        );
 
-        let registrations = attach_items(registrations.into_iter(), items.into_iter());
-
-        let mut registration_map = registrations
-            .into_iter()
-            .map(|registration| (registration.id.clone(), registration))
-            .collect::<HashMap<_, _>>();
-
-        let mut outputs = Vec::new();
-        outputs.resize_with(ids.len(), Default::default);
-
-        for (idx, id) in ids.iter().enumerate() {
-            outputs[idx] = registration_map.remove(id).unwrap();
-        }
-
-        Ok(outputs)
+        Ok(registrations)
     }
+
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
         if ids.is_empty() {
             return Ok(());
@@ -632,16 +580,15 @@ impl Store for SqliteStore {
 mod tests {
     use std::{str::FromStr, sync::Arc};
 
-    use common::proto::{
-        event_id_query, registration_item, registration_query, EventIdQuery, Registration,
-        RegistrationItem, RegistrationQuery, RepeatedUint32,
-    };
+    use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
     use super::{attach_items, RegistrationItemRow, RegistrationRow, SqliteStore, Store};
-    use crate::store::{common::new_id, Error};
+    use crate::store::{
+        common::new_id, registration::Query, CompoundOperator, CompoundQuery, Error, LogicalQuery,
+    };
     use test_case::test_case;
 
     struct Init {
@@ -1007,7 +954,7 @@ mod tests {
         let registrations = test_data(&init).await;
 
         let store = SqliteStore::new(Arc::new(init.db));
-        let returned_registrations = store.list(Vec::new()).await.unwrap();
+        let returned_registrations = store.list().await.unwrap();
 
         let registrations = sort_registrations(registrations);
         let returned_registrations = sort_registrations(returned_registrations);
@@ -1022,7 +969,13 @@ mod tests {
 
         let store = SqliteStore::new(Arc::new(init.db));
         let mut returned_registrations = store
-            .list(registrations.iter().map(|r| r.id.clone()).collect())
+            .query(Query::Compound(CompoundQuery {
+                operator: CompoundOperator::Or,
+                queries: registrations
+                    .iter()
+                    .map(|r| Query::Id(LogicalQuery::Equals(r.id.clone())))
+                    .collect(),
+            }))
             .await
             .unwrap();
 
@@ -1043,12 +996,11 @@ mod tests {
         let store = SqliteStore::new(Arc::new(init.db));
 
         let id = new_id();
-        let result = store.list(vec![id.clone()]).await;
-        match result {
-            Ok(_) => panic!("Expected error"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("Expected IdDoesNotExistError"),
-        }
+        let registrations = store
+            .query(Query::Id(LogicalQuery::Equals(id)))
+            .await
+            .unwrap();
+        assert_eq!(registrations, Vec::new());
     }
 
     #[tokio::test]
@@ -1097,11 +1049,7 @@ mod tests {
 
         let store = SqliteStore::new(Arc::new(init.db));
 
-        let query = RegistrationQuery {
-            query: Some(registration_query::Query::EventId(EventIdQuery {
-                operator: Some(event_id_query::Operator::Equals(init.event_1.clone())),
-            })),
-        };
+        let query = Query::EventId(LogicalQuery::Equals(init.event_1.clone()));
 
         let returned_registrations = store.query(query).await.unwrap();
 

@@ -2,15 +2,21 @@ use std::sync::Arc;
 
 use common::proto::{
     self, compound_registration_query, registration_query, DeleteRegistrationsRequest,
-    DeleteRegistrationsResponse, ListRegistrationsRequest, ListRegistrationsResponse,
-    QueryRegistrationsRequest, QueryRegistrationsResponse, Registration, RegistrationItem,
-    RegistrationQuery, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
+    DeleteRegistrationsResponse, QueryRegistrationsRequest, QueryRegistrationsResponse,
+    Registration, RegistrationItem, RegistrationQuery, UpsertRegistrationsRequest,
+    UpsertRegistrationsResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::store::registration::Store;
+use crate::store::{
+    registration::{Query, Store},
+    CompoundOperator, CompoundQuery,
+};
 
-use super::{store_error_to_status, ValidationError};
+use super::{
+    common::{to_logical_string_query, validate_string_query},
+    store_error_to_status, ValidationError,
+};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -50,32 +56,54 @@ fn validate_query(query: &RegistrationQuery) -> Result<(), ValidationError> {
 
     match query {
         registration_query::Query::EventId(event_id_query) => {
-            if event_id_query.operator.is_none() {
-                return Err(ValidationError::new_empty("query.event_id.operator"));
-            }
+            validate_string_query(event_id_query).map_err(|e| e.with_context("query.event_id"))?;
+        }
+        registration_query::Query::Id(query) => {
+            validate_string_query(query).map_err(|e| e.with_context("query.id"))?;
         }
         registration_query::Query::Compound(compound_query) => {
             if compound_registration_query::Operator::try_from(compound_query.operator).is_err() {
                 return Err(ValidationError::new_invalid_enum("query.compound.operator"));
             }
 
-            let left = match &compound_query.left {
-                Some(left) => left,
-                None => return Err(ValidationError::new_empty("query.compound.left")),
-            };
-
-            validate_query(left).map_err(|e| e.with_context("query.compound.left"))?;
-
-            let right = match &compound_query.right {
-                Some(right) => right,
-                None => return Err(ValidationError::new_empty("query.compound.right")),
-            };
-
-            validate_query(right).map_err(|e| e.with_context("query.compound.right"))?;
+            for (i, query) in compound_query.queries.iter().enumerate() {
+                validate_query(query)
+                    .map_err(|e| e.with_context(&format!("query.compound.queries[{}]", i)))?;
+            }
         }
     }
 
     Ok(())
+}
+
+impl From<RegistrationQuery> for Query {
+    fn from(query: RegistrationQuery) -> Self {
+        match query.query.unwrap() {
+            registration_query::Query::EventId(event_id_query) => {
+                Query::EventId(to_logical_string_query(event_id_query))
+            }
+
+            registration_query::Query::Id(id_query) => Query::Id(to_logical_string_query(id_query)),
+
+            registration_query::Query::Compound(compound_query) => {
+                let operator =
+                    match compound_registration_query::Operator::try_from(compound_query.operator)
+                        .unwrap()
+                    {
+                        compound_registration_query::Operator::And => CompoundOperator::And,
+                        compound_registration_query::Operator::Or => CompoundOperator::Or,
+                    };
+
+                let queries = compound_query
+                    .queries
+                    .into_iter()
+                    .map(|query| query.into())
+                    .collect();
+
+                Query::Compound(CompoundQuery { operator, queries })
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -103,37 +131,29 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
         Ok(Response::new(UpsertRegistrationsResponse { registrations }))
     }
 
-    async fn list_registrations(
-        &self,
-        request: Request<ListRegistrationsRequest>,
-    ) -> Result<Response<ListRegistrationsResponse>, Status> {
-        let registrations = self
-            .store
-            .list(request.into_inner().ids)
-            .await
-            .map_err(|e| store_error_to_status(e))?;
-
-        Ok(Response::new(ListRegistrationsResponse { registrations }))
-    }
-
     async fn query_registrations(
         &self,
         request: Request<QueryRegistrationsRequest>,
     ) -> Result<Response<QueryRegistrationsResponse>, Status> {
         let query = request.into_inner().query;
 
-        let query = match query {
-            Some(query) => query,
-            None => return Err(ValidationError::new_empty("query").into()),
+        let registrations = match query {
+            Some(query) => {
+                validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
+
+                let store_query = query.into();
+
+                self.store
+                    .query(store_query)
+                    .await
+                    .map_err(|e| store_error_to_status(e))?
+            }
+            None => self
+                .store
+                .list()
+                .await
+                .map_err(|e| store_error_to_status(e))?,
         };
-
-        validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
-
-        let registrations = self
-            .store
-            .query(query)
-            .await
-            .map_err(|e| store_error_to_status(e))?;
 
         Ok(Response::new(QueryRegistrationsResponse { registrations }))
     }

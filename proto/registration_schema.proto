@@ -1,5 +1,5 @@
 syntax = "proto3";
-package registration_schema;
+package proto;
 
 service RegistrationSchemaService {
 	rpc UpsertRegistrationSchemas(UpsertRegistrationSchemasRequest) returns (UpsertRegistrationSchemasResponse) {}

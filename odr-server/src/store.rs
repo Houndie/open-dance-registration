@@ -88,8 +88,8 @@ pub struct CompoundQuery<Q: Queryable> {
 impl<Q: Queryable> Queryable for CompoundQuery<Q> {
     fn where_clause(&self) -> String {
         let operator = match self.operator {
-            CompoundOperator::And => "AND",
-            CompoundOperator::Or => "OR",
+            CompoundOperator::And => " AND ",
+            CompoundOperator::Or => " OR ",
         };
 
         let where_clauses = itertools::Itertools::intersperse(
@@ -119,5 +119,44 @@ impl<'q, DB: sqlx::Database, Q: Queryable + Bindable<'q, DB>> Bindable<'q, DB>
             .fold(query_builder, |query_builder, query| {
                 query.bind(query_builder)
             })
+    }
+}
+
+pub trait Field {
+    type Item;
+    fn field() -> &'static str;
+}
+
+pub enum LogicalQuery<F: Field> {
+    Equals(F::Item),
+    NotEquals(F::Item),
+}
+
+impl<F: Field> Queryable for LogicalQuery<F> {
+    fn where_clause(&self) -> String {
+        match self {
+            LogicalQuery::Equals(_) => format!("{} = ?", F::field()),
+            LogicalQuery::NotEquals(_) => format!("{} != ?", F::field()),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database, F: Field> Bindable<'q, DB> for LogicalQuery<F>
+where
+    F::Item: sqlx::Encode<'q, DB> + sqlx::Type<DB> + Sync,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            LogicalQuery::Equals(value) => query_builder.bind(value),
+            LogicalQuery::NotEquals(value) => query_builder.bind(value),
+        }
     }
 }

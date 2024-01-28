@@ -5,6 +5,7 @@ use tonic::{Code, Status};
 use crate::store::Error;
 use thiserror::Error as ThisError;
 
+mod common;
 pub mod event;
 pub mod login;
 pub mod organization;

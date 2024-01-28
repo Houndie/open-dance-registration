@@ -1,7 +1,8 @@
 syntax = "proto3";
-package user;
+package proto;
 
 import "google/protobuf/empty.proto";
+import "queries.proto";
 
 service UserService {
 	rpc UpsertUsers(UpsertUsersRequest) returns (UpsertUsersResponse) {}
@@ -46,7 +47,7 @@ message User {
 
 message UserQuery {
 	oneof query {
-		EmailQuery email = 1;
+		StringQuery email = 1;
 		CompoundUserQuery compound = 2;
 	}
 }

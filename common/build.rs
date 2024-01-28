@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 "../proto/registration.proto",
                 "../proto/organization.proto",
                 "../proto/user.proto",
+                "../proto/queries.proto",
             ],
             &["../proto"],
         )?;

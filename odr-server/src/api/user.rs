@@ -2,19 +2,21 @@ use std::sync::Arc;
 
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
 use common::proto::{
-    self, compound_user_query, email_query, user::Password, user_query, DeleteUsersRequest,
-    DeleteUsersResponse, QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest,
-    UpsertUsersResponse, UserQuery,
+    self, compound_user_query, user::Password, user_query, DeleteUsersRequest, DeleteUsersResponse,
+    QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest, UpsertUsersResponse, UserQuery,
 };
 use rand::rngs::OsRng;
 use tonic::{Request, Response, Status};
 
 use crate::store::{
-    user::{self as store, EmailQuery, PasswordType, Query, Store},
+    user::{self, PasswordType, Query, Store},
     CompoundOperator, CompoundQuery,
 };
 
-use super::{store_error_to_status, ValidationError};
+use super::{
+    common::{to_logical_string_query, validate_string_query},
+    store_error_to_status, ValidationError,
+};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -26,7 +28,7 @@ impl<StoreType: Store> Service<StoreType> {
     }
 }
 
-fn proto_to_user(proto_user: proto::User) -> Result<store::User, Status> {
+fn proto_to_user(proto_user: proto::User) -> Result<user::User, Status> {
     let password = match proto_user.password.unwrap() {
         Password::Set(password) => {
             let hashed_password = Argon2::default()
@@ -40,7 +42,7 @@ fn proto_to_user(proto_user: proto::User) -> Result<store::User, Status> {
         Password::Unchanged(_) => PasswordType::Unchanged,
     };
 
-    Ok(store::User {
+    Ok(user::User {
         id: proto_user.id,
         email: proto_user.email,
         password,
@@ -48,7 +50,7 @@ fn proto_to_user(proto_user: proto::User) -> Result<store::User, Status> {
     })
 }
 
-fn user_to_proto(user: store::User) -> proto::User {
+fn user_to_proto(user: user::User) -> proto::User {
     proto::User {
         id: user.id,
         email: user.email,
@@ -98,9 +100,7 @@ fn validate_query(query: &UserQuery) -> Result<(), ValidationError> {
 
     match query {
         user_query::Query::Email(email_query) => {
-            if email_query.operator.is_none() {
-                return Err(ValidationError::new_empty("query.email_query.operator"));
-            };
+            validate_string_query(&email_query).map_err(|e| e.with_context("query.email_query"))?;
         }
         user_query::Query::Compound(compound_query) => {
             if compound_user_query::Operator::try_from(compound_query.operator).is_err() {
@@ -108,9 +108,8 @@ fn validate_query(query: &UserQuery) -> Result<(), ValidationError> {
             }
 
             for (i, query) in compound_query.queries.iter().enumerate() {
-                validate_query(query).map_err(|e| -> ValidationError {
-                    e.with_context(&format!("query.compound.queries[{}]", i))
-                })?;
+                validate_query(query)
+                    .map_err(|e| e.with_context(&format!("query.compound.queries[{}]", i)))?;
             }
         }
     }
@@ -122,12 +121,7 @@ impl From<UserQuery> for Query {
     fn from(query: UserQuery) -> Self {
         match query.query.unwrap() {
             user_query::Query::Email(email_query) => {
-                let q = match email_query.operator.unwrap() {
-                    email_query::Operator::Equals(equals) => EmailQuery::Is(equals),
-                    email_query::Operator::NotEquals(not_equals) => EmailQuery::IsNot(not_equals),
-                };
-
-                Query::Email(q)
+                Query::Email(to_logical_string_query(email_query))
             }
 
             user_query::Query::Compound(compound_query) => {

@@ -61,12 +61,32 @@ pub struct User {
     pub display_name: String,
 }
 
-pub enum EmailQuery {
-    Is(String),
-    IsNot(String),
+pub struct IdField;
+
+impl super::Field for IdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "id"
+    }
 }
 
+pub type IdQuery = super::LogicalQuery<IdField>;
+
+pub struct EmailField;
+
+impl super::Field for EmailField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "email"
+    }
+}
+
+pub type EmailQuery = super::LogicalQuery<EmailField>;
+
 pub enum Query {
+    Id(IdQuery),
     Email(EmailQuery),
     PasswordIsSet(bool),
     CompoundQuery(super::CompoundQuery<Query>),
@@ -75,8 +95,8 @@ pub enum Query {
 impl super::Queryable for Query {
     fn where_clause(&self) -> String {
         match self {
-            Query::Email(EmailQuery::Is(_)) => "email = ?".to_owned(),
-            Query::Email(EmailQuery::IsNot(_)) => "email != ?".to_owned(),
+            Query::Id(q) => q.where_clause(),
+            Query::Email(q) => q.where_clause(),
             Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
             Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
             Query::CompoundQuery(compound_query) => compound_query.where_clause(),
@@ -86,7 +106,7 @@ impl super::Queryable for Query {
 
 impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
 where
-    String: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
+    <EmailField as super::Field>::Item: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
 {
     fn bind<O>(
         &'q self,
@@ -98,8 +118,8 @@ where
         >,
     ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
         match self {
-            Query::Email(EmailQuery::Is(email)) => query_builder.bind(email),
-            Query::Email(EmailQuery::IsNot(email)) => query_builder.bind(email),
+            Query::Id(q) => q.bind(query_builder),
+            Query::Email(q) => q.bind(query_builder),
             Query::PasswordIsSet(_) => query_builder,
             Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
         }
@@ -358,7 +378,7 @@ mod tests {
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
-    use crate::store::{common::new_id, Error};
+    use crate::store::{common::new_id, user::Query, Error, LogicalQuery};
 
     use super::{PasswordType, SqliteStore, Store, User, UserRow};
 
@@ -549,7 +569,7 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        let mut returned_users = store.list(vec![]).await.unwrap();
+        let mut returned_users = store.list().await.unwrap();
 
         users.sort_by(|a, b| a.id.cmp(&b.id));
         returned_users.sort_by(|a, b| a.id.cmp(&b.id));
@@ -565,7 +585,10 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        let returned_users = store.list(vec![users[0].id.clone()]).await.unwrap();
+        let returned_users = store
+            .query(Query::Id(LogicalQuery::Equals(users[0].id.clone())))
+            .await
+            .unwrap();
 
         assert_eq!(users[0], returned_users[0]);
     }

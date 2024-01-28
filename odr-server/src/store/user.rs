@@ -378,9 +378,13 @@ mod tests {
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
-    use crate::store::{common::new_id, user::Query, Error, LogicalQuery};
+    use crate::store::{
+        common::new_id, user::Query, CompoundOperator, CompoundQuery, Error, LogicalQuery,
+    };
 
     use super::{PasswordType, SqliteStore, Store, User, UserRow};
+
+    use test_case::test_case;
 
     struct Init {
         db: SqlitePool,
@@ -577,20 +581,66 @@ mod tests {
         assert_eq!(users, returned_users);
     }
 
+    enum QueryTest {
+        Id,
+        Email,
+        PasswordIsSet,
+        CompoundQuery,
+        NoResults,
+    }
+    #[test_case(QueryTest::Id ; "id")]
+    #[test_case(QueryTest::Email ; "email")]
+    #[test_case(QueryTest::PasswordIsSet ; "password is set")]
+    #[test_case(QueryTest::CompoundQuery ; "compound query")]
+    #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_some() {
+    async fn query(test_name: QueryTest) {
         let init = init().await;
-        let users = test_data(&init).await;
+        let mut users = test_data(&init).await;
+
+        struct TestCase {
+            query: Query,
+            expected: Vec<User>,
+        }
+        let tc = match test_name {
+            QueryTest::Id => TestCase {
+                query: Query::Id(LogicalQuery::Equals(users[0].id.clone())),
+                expected: vec![users.remove(0)],
+            },
+            QueryTest::Email => TestCase {
+                query: Query::Email(LogicalQuery::Equals(users[0].email.clone())),
+                expected: vec![users.remove(0)],
+            },
+            QueryTest::PasswordIsSet => TestCase {
+                query: Query::PasswordIsSet(true),
+                expected: users,
+            },
+            QueryTest::CompoundQuery => TestCase {
+                query: Query::CompoundQuery(CompoundQuery {
+                    operator: CompoundOperator::Or,
+                    queries: users
+                        .iter()
+                        .map(|user| Query::Email(LogicalQuery::Equals(user.email.clone())))
+                        .collect(),
+                }),
+                expected: users,
+            },
+            QueryTest::NoResults => TestCase {
+                query: Query::Id(LogicalQuery::Equals(new_id())),
+                expected: vec![],
+            },
+        };
 
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        let returned_users = store
-            .query(Query::Id(LogicalQuery::Equals(users[0].id.clone())))
-            .await
-            .unwrap();
+        let mut returned_users = store.query(tc.query).await.unwrap();
+        returned_users.sort_by(|a, b| a.id.cmp(&b.id));
 
-        assert_eq!(users[0], returned_users[0]);
+        let mut expected = tc.expected;
+        expected.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(expected, returned_users);
     }
 
     #[tokio::test]

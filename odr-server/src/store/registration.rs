@@ -289,8 +289,11 @@ impl Store for SqliteStore {
             .map_err(|e| Error::TransactionStartError(e))?;
 
         if !inserts.is_empty() {
-            let values_clause: String =
-                itertools::Itertools::intersperse(inserts.iter().map(|_| "(?, ?)"), ", ").collect();
+            let values_clause: String = itertools::Itertools::intersperse(
+                std::iter::repeat("(?, ?)").take(inserts.len()),
+                ", ",
+            )
+            .collect();
 
             let query = format!(
                 "INSERT INTO registrations(id, event) VALUES {}",
@@ -309,8 +312,11 @@ impl Store for SqliteStore {
         }
 
         if !updates.is_empty() {
-            let values_clause: String =
-                itertools::Itertools::intersperse(updates.iter().map(|_| "(?, ?)"), ", ").collect();
+            let values_clause: String = itertools::Itertools::intersperse(
+                std::iter::repeat("(?, ?)").take(updates.len()),
+                ", ",
+            )
+            .collect();
 
             let query = format!(
                 "WITH mydata(id, event) AS (VALUES {}) 
@@ -351,7 +357,7 @@ impl Store for SqliteStore {
 
         if !insert_items.is_empty() {
             let values_clause: String = itertools::Itertools::intersperse(
-                insert_items.iter().map(|_| "(?, ?, ?, ?, ?)"),
+                std::iter::repeat("(?, ?, ?, ?, ?)").take(insert_items.len()),
                 ", ",
             )
             .collect();
@@ -374,7 +380,7 @@ impl Store for SqliteStore {
 
         if !update_items.is_empty() {
             let values_clause: String = itertools::Itertools::intersperse(
-                update_items.iter().map(|_| "(?, ?, ?, ?, ?)"),
+                std::iter::repeat("(?, ?, ?, ?, ?)").take(update_items.len()),
                 ", ",
             )
             .collect();
@@ -437,7 +443,7 @@ impl Store for SqliteStore {
                 outputs.iter().map(|r| {
                     let registration_clause = itertools::Itertools::intersperse(
                         std::iter::once("registration = ?")
-                            .chain(r.items.iter().map(|_| "id != ?")),
+                            .chain(std::iter::repeat("id != ?").take(r.items.len())),
                         " AND ",
                     )
                     .collect::<String>();
@@ -491,7 +497,7 @@ impl Store for SqliteStore {
 
         let items = {
             let where_clause: String = itertools::Itertools::intersperse(
-                registrations.iter().map(|_| "registration = ?"),
+                std::iter::repeat("registration = ?").take(registrations.len()),
                 " OR ",
             )
             .collect();
@@ -560,7 +566,8 @@ impl Store for SqliteStore {
         .await?;
 
         let where_clause: String =
-            itertools::Itertools::intersperse(ids.iter().map(|_| "id = ?"), " OR ").collect();
+            itertools::Itertools::intersperse(std::iter::repeat("id = ?").take(ids.len()), " OR ")
+                .collect();
 
         let query = format!("DELETE FROM registrations WHERE {}", where_clause);
         let query_builder = sqlx::query(&query);
@@ -962,45 +969,59 @@ mod tests {
         assert_eq!(registrations, returned_registrations);
     }
 
+    enum QueryTest {
+        Id,
+        EventId,
+        CompoundQuery,
+        NoResults,
+    }
+
+    #[test_case(QueryTest::Id ; "id")]
+    #[test_case(QueryTest::EventId ; "event id")]
+    #[test_case(QueryTest::CompoundQuery ; "compound query")]
+    #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_some() {
+    async fn list_some(test_name: QueryTest) {
         let init = init_db().await;
         let mut registrations = test_data(&init).await;
 
-        let store = SqliteStore::new(Arc::new(init.db));
-        let mut returned_registrations = store
-            .query(Query::Compound(CompoundQuery {
-                operator: CompoundOperator::Or,
-                queries: registrations
-                    .iter()
-                    .map(|r| Query::Id(LogicalQuery::Equals(r.id.clone())))
-                    .collect(),
-            }))
-            .await
-            .unwrap();
-
-        for r in registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+        struct TestCase {
+            query: Query,
+            expected: Vec<Registration>,
         }
 
-        for r in returned_registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
-        }
+        let tc = match test_name {
+            QueryTest::Id => TestCase {
+                query: Query::Id(LogicalQuery::Equals(registrations[0].id.clone())),
+                expected: vec![registrations.remove(0)],
+            },
+            QueryTest::EventId => TestCase {
+                query: Query::EventId(LogicalQuery::Equals(init.event_1.clone())),
+                expected: vec![registrations.remove(0)],
+            },
+            QueryTest::CompoundQuery => TestCase {
+                query: Query::Compound(CompoundQuery {
+                    operator: CompoundOperator::Or,
+                    queries: registrations
+                        .iter()
+                        .map(|r| Query::Id(LogicalQuery::Equals(r.id.clone())))
+                        .collect(),
+                }),
+                expected: registrations,
+            },
+            QueryTest::NoResults => TestCase {
+                query: Query::Id(LogicalQuery::Equals(new_id())),
+                expected: Vec::new(),
+            },
+        };
 
-        assert_eq!(registrations, returned_registrations);
-    }
-
-    #[tokio::test]
-    async fn list_does_not_exist() {
-        let init = init_db().await;
         let store = SqliteStore::new(Arc::new(init.db));
+        let returned_registrations = store.query(tc.query).await.unwrap();
 
-        let id = new_id();
-        let registrations = store
-            .query(Query::Id(LogicalQuery::Equals(id)))
-            .await
-            .unwrap();
-        assert_eq!(registrations, Vec::new());
+        let returned_registrations = sort_registrations(returned_registrations);
+        let expected = sort_registrations(tc.expected);
+
+        assert_eq!(expected, returned_registrations);
     }
 
     #[tokio::test]
@@ -1039,23 +1060,5 @@ mod tests {
         let store_registrations = sort_registrations(store_registrations);
 
         assert_eq!(registrations, store_registrations);
-    }
-
-    #[tokio::test]
-    async fn query() {
-        let init = init_db().await;
-        let registrations = test_data(&init).await;
-        let registrations = vec![registrations[0].clone()];
-
-        let store = SqliteStore::new(Arc::new(init.db));
-
-        let query = Query::EventId(LogicalQuery::Equals(init.event_1.clone()));
-
-        let returned_registrations = store.query(query).await.unwrap();
-
-        let registrations = sort_registrations(registrations);
-        let returned_registrations = sort_registrations(returned_registrations);
-
-        assert_eq!(registrations, returned_registrations);
     }
 }

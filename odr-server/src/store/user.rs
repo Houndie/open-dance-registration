@@ -147,8 +147,7 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, users: Vec<User>) -> Result<Vec<User>, Error>;
-    async fn query(&self, query: Query) -> Result<Vec<User>, Error>;
-    async fn list(&self) -> Result<Vec<User>, Error>;
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<User>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -304,13 +303,19 @@ impl Store for SqliteStore {
         Ok(outputs)
     }
 
-    async fn query(&self, query: Query) -> Result<Vec<User>, Error> {
-        let query_string = format!(
-            "SELECT id, email, password, display_name FROM users WHERE {}",
-            query.where_clause()
-        );
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<User>, Error> {
+        let base_query_string = "SELECT id, email, password, display_name FROM users";
+        let query_string = match query {
+            Some(query) => format!("{} WHERE {}", base_query_string, query.where_clause()),
+            None => base_query_string.to_owned(),
+        };
+
         let query_builder = sqlx::query_as(&query_string);
-        let query_builder = query.bind(query_builder);
+        let query_builder = match query {
+            Some(query) => query.bind(query_builder),
+            None => query_builder,
+        };
+
         let rows: Vec<UserRow> = query_builder
             .fetch_all(&*self.pool)
             .await
@@ -322,21 +327,6 @@ impl Store for SqliteStore {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(users)
-    }
-
-    async fn list(&self) -> Result<Vec<User>, Error> {
-        let base_query = "SELECT id, email, password, display_name FROM users";
-        let rows: Vec<UserRow> = sqlx::query_as(base_query)
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| Error::FetchError(e))?;
-
-        let users = rows
-            .into_iter()
-            .map(|row| row.try_into())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        return Ok(users);
     }
 
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
@@ -565,29 +555,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn list_all() {
-        let init = init().await;
-        let mut users = test_data(&init).await;
-
-        let db = Arc::new(init.db);
-        let store = SqliteStore::new(db.clone());
-
-        let mut returned_users = store.list().await.unwrap();
-
-        users.sort_by(|a, b| a.id.cmp(&b.id));
-        returned_users.sort_by(|a, b| a.id.cmp(&b.id));
-
-        assert_eq!(users, returned_users);
-    }
-
     enum QueryTest {
+        All,
         Id,
         Email,
         PasswordIsSet,
         CompoundQuery,
         NoResults,
     }
+    #[test_case(QueryTest::All ; "all")]
     #[test_case(QueryTest::Id ; "id")]
     #[test_case(QueryTest::Email ; "email")]
     #[test_case(QueryTest::PasswordIsSet ; "password is set")]
@@ -599,34 +575,38 @@ mod tests {
         let mut users = test_data(&init).await;
 
         struct TestCase {
-            query: Query,
+            query: Option<Query>,
             expected: Vec<User>,
         }
         let tc = match test_name {
+            QueryTest::All => TestCase {
+                query: None,
+                expected: users,
+            },
             QueryTest::Id => TestCase {
-                query: Query::Id(LogicalQuery::Equals(users[0].id.clone())),
+                query: Some(Query::Id(LogicalQuery::Equals(users[0].id.clone()))),
                 expected: vec![users.remove(0)],
             },
             QueryTest::Email => TestCase {
-                query: Query::Email(LogicalQuery::Equals(users[0].email.clone())),
+                query: Some(Query::Email(LogicalQuery::Equals(users[0].email.clone()))),
                 expected: vec![users.remove(0)],
             },
             QueryTest::PasswordIsSet => TestCase {
-                query: Query::PasswordIsSet(true),
+                query: Some(Query::PasswordIsSet(true)),
                 expected: users,
             },
             QueryTest::CompoundQuery => TestCase {
-                query: Query::CompoundQuery(CompoundQuery {
+                query: Some(Query::CompoundQuery(CompoundQuery {
                     operator: CompoundOperator::Or,
                     queries: users
                         .iter()
                         .map(|user| Query::Email(LogicalQuery::Equals(user.email.clone())))
                         .collect(),
-                }),
+                })),
                 expected: users,
             },
             QueryTest::NoResults => TestCase {
-                query: Query::Id(LogicalQuery::Equals(new_id())),
+                query: Some(Query::Id(LogicalQuery::Equals(new_id()))),
                 expected: vec![],
             },
         };
@@ -634,7 +614,7 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        let mut returned_users = store.query(tc.query).await.unwrap();
+        let mut returned_users = store.query(tc.query.as_ref()).await.unwrap();
         returned_users.sort_by(|a, b| a.id.cmp(&b.id));
 
         let mut expected = tc.expected;

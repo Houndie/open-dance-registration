@@ -48,7 +48,7 @@ impl Display for ValidationErrorReason {
 
 #[derive(Debug, ThisError)]
 #[error("{field} {reason}")]
-struct ValidationError {
+pub struct ValidationError {
     field: String,
     reason: ValidationErrorReason,
 }

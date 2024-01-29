@@ -13,7 +13,7 @@ use common::proto::{
 
 use super::{
     common::{ids_in_table, new_id},
-    Error,
+    Bindable as _, Error, Queryable as _,
 };
 
 #[derive(sqlx::FromRow)]
@@ -152,8 +152,54 @@ pub trait Store: Send + Sync + 'static {
         &self,
         schemas: Vec<RegistrationSchema>,
     ) -> Result<Vec<RegistrationSchema>, Error>;
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<RegistrationSchema>, Error>;
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<RegistrationSchema>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
+}
+
+pub struct EventIdField;
+
+impl super::Field for EventIdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "event"
+    }
+}
+
+pub type EventIdQuery = super::LogicalQuery<EventIdField>;
+
+pub enum Query {
+    EventId(EventIdQuery),
+    Compound(super::CompoundQuery<Query>),
+}
+
+impl super::Queryable for Query {
+    fn where_clause(&self) -> String {
+        match self {
+            Query::EventId(query) => query.where_clause(),
+            Query::Compound(query) => query.where_clause(),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
+where
+    <EventIdField as super::Field>::Item: sqlx::Encode<'q, DB> + sqlx::Type<DB> + Sync,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            Query::EventId(query) => query.bind(query_builder),
+            Query::Compound(query) => query.bind(query_builder),
+        }
+    }
 }
 
 fn option_values_bind<'q>(
@@ -667,7 +713,7 @@ impl Store for SqliteStore {
         Ok(schema)
     }
 
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<RegistrationSchema>, Error> {
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<RegistrationSchema>, Error> {
         let base_query = "SELECT id, 
             event,
             idx,
@@ -684,42 +730,17 @@ impl Store for SqliteStore {
         let base_options_query =
             "SELECT id, schema_item, idx, name, product_id FROM registration_schema_select_options";
 
-        if ids.is_empty() {
-            let item_rows: Vec<ItemRow> = sqlx::query_as(base_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            let items = item_rows
-                .into_iter()
-                .map(|row| row.to_item())
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let option_rows: Vec<OptionRow> = sqlx::query_as(base_options_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            let options = option_rows
-                .into_iter()
-                .map(|row| row.to_option())
-                .collect::<Result<Vec<_>, _>>()?;
-
-            return Ok(items_to_schema(items, options));
-        }
-
-        ids_in_table(&*self.pool, "events", ids.iter().map(|id| id.as_str())).await?;
-
         let items = {
-            let where_clause: String =
-                itertools::Itertools::intersperse(ids.iter().map(|_| "event = ?"), " OR ")
-                    .collect();
-            let query = format!("{} WHERE {}", base_query, where_clause);
+            let query_string = match query {
+                Some(query) => format!("{} WHERE {}", base_query, query.where_clause()),
+                None => base_query.to_owned(),
+            };
 
-            let query_builder = sqlx::query_as(&query);
-            let query_builder = ids
-                .iter()
-                .fold(query_builder, |query_builder, id| query_builder.bind(id));
+            let query_builder = sqlx::query_as(&query_string);
+            let query_builder = match query {
+                Some(query) => query.bind(query_builder),
+                None => query_builder,
+            };
 
             let rows: Vec<ItemRow> = query_builder
                 .fetch_all(&*self.pool)
@@ -730,6 +751,10 @@ impl Store for SqliteStore {
                 .map(|row| row.to_item())
                 .collect::<Result<Vec<_>, _>>()?
         };
+
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let options = {
             let select_items = items
@@ -767,18 +792,7 @@ impl Store for SqliteStore {
                 .collect::<Result<Vec<_>, _>>()?
         };
 
-        let mut schema_map = build_items_map(items, options);
-
-        let schemas = ids
-            .into_iter()
-            .map(|id| {
-                let items = schema_map.remove(&id).unwrap_or_default();
-                RegistrationSchema {
-                    event_id: id,
-                    items,
-                }
-            })
-            .collect();
+        let schemas = items_to_schema(items, options);
 
         Ok(schemas)
     }
@@ -835,11 +849,11 @@ mod tests {
         store::{
             common::new_id,
             registration_schema::{OptionRow, Store},
-            Error,
+            CompoundOperator, CompoundQuery, Error, LogicalQuery,
         },
     };
 
-    use super::{items_to_schema, ItemRow, SqliteStore};
+    use super::{items_to_schema, ItemRow, Query, SqliteStore};
 
     use test_case::test_case;
 
@@ -1109,6 +1123,11 @@ mod tests {
             },
         ];
 
+        schemas
+    }
+
+    fn sort_schemas(mut schemas: Vec<RegistrationSchema>) -> Vec<RegistrationSchema> {
+        schemas.sort_by(|a, b| a.event_id.cmp(&b.event_id));
         schemas
     }
 
@@ -1448,50 +1467,57 @@ mod tests {
         };
     }
 
+    enum QueryTest {
+        All,
+        EventId,
+        CompoundQuery,
+        NoResults,
+    }
+
+    #[test_case(QueryTest::All ; "all")]
+    #[test_case(QueryTest::EventId ; "event id")]
+    #[test_case(QueryTest::CompoundQuery ; "compound query")]
+    #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_all() {
+    async fn query(test_name: QueryTest) {
         let init = init_db().await;
         let schemas = test_data(&init).await;
-        let store = SqliteStore::new(Arc::new(init.db));
-        let returned_schemas = store.list(Vec::new()).await.unwrap();
-        let returned_schema_map = returned_schemas
-            .into_iter()
-            .map(|schema| (schema.event_id.clone(), schema))
-            .collect::<HashMap<_, _>>();
 
-        for schema in schemas.iter() {
-            let returned_schema = returned_schema_map.get(&schema.event_id).unwrap();
-            assert_eq!(schema, returned_schema);
+        struct TestCase {
+            query: Option<Query>,
+            expected: Vec<RegistrationSchema>,
         }
-    }
 
-    #[tokio::test]
-    async fn list_some() {
-        let init = init_db().await;
-        let schemas = test_data(&init).await;
-
-        let store = SqliteStore::new(Arc::new(init.db));
-
-        let returned_schemas = store.list(vec![init.event_1]).await.unwrap();
-
-        assert_eq!(returned_schemas.len(), 1);
-        assert_eq!(schemas[0], returned_schemas[0]);
-    }
-
-    #[tokio::test]
-    async fn list_does_not_exist() {
-        let init = init_db().await;
-        let _ = test_data(&init).await;
-
-        let store = SqliteStore::new(Arc::new(init.db));
-
-        let id = new_id();
-        let result = store.list(vec![id.clone()]).await;
-        match result {
-            Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type: {:?}", result),
+        let tc = match test_name {
+            QueryTest::All => TestCase {
+                query: None,
+                expected: schemas,
+            },
+            QueryTest::EventId => TestCase {
+                query: Some(Query::EventId(LogicalQuery::Equals(init.event_1.clone()))),
+                expected: vec![schemas[0].clone()],
+            },
+            QueryTest::CompoundQuery => TestCase {
+                query: Some(Query::Compound(CompoundQuery {
+                    operator: CompoundOperator::Or,
+                    queries: schemas
+                        .iter()
+                        .map(|s| Query::EventId(LogicalQuery::Equals(s.event_id.clone())))
+                        .collect(),
+                })),
+                expected: schemas,
+            },
+            QueryTest::NoResults => TestCase {
+                query: Some(Query::EventId(LogicalQuery::Equals(new_id()))),
+                expected: Vec::new(),
+            },
         };
+
+        let store = SqliteStore::new(Arc::new(init.db));
+        let returned_schemas = store.query(tc.query.as_ref()).await.unwrap();
+        let expected = sort_schemas(tc.expected);
+        let returned_schemas = sort_schemas(returned_schemas);
+        assert_eq!(expected, returned_schemas);
     }
 
     #[tokio::test]

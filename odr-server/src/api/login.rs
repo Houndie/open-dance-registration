@@ -103,13 +103,16 @@ pub fn api_routes<KStore: KeyStore, UStore: UserStore>(
                 let user_email = match request {
                     LoginRequest::Credientials { email, password } => {
                         let mut users = user_store
-                            .query(Query::CompoundQuery(CompoundQuery {
-                                operator: CompoundOperator::And,
-                                queries: vec![
-                                    Query::Email(EmailQuery::Equals(email)),
-                                    Query::PasswordIsSet(true),
-                                ],
-                            }))
+                            .query(
+                                Some(Query::CompoundQuery(CompoundQuery {
+                                    operator: CompoundOperator::And,
+                                    queries: vec![
+                                        Query::Email(EmailQuery::Equals(email)),
+                                        Query::PasswordIsSet(true),
+                                    ],
+                                }))
+                                .as_ref(),
+                            )
                             .await
                             .map_err(|e| match e {
                                 store::Error::IdDoesNotExist(_) => Error::InvalidEmailOrPassword,
@@ -174,7 +177,10 @@ pub fn api_routes<KStore: KeyStore, UStore: UserStore>(
 
                         // Make sure the user hasn't been removed since the token was issued
                         let mut users = user_store
-                            .query(Query::Email(EmailQuery::Equals(token_data.claims.sub)))
+                            .query(
+                                Some(Query::Email(EmailQuery::Equals(token_data.claims.sub)))
+                                    .as_ref(),
+                            )
                             .await
                             .map_err(|e| match e {
                                 store::Error::IdDoesNotExist(_) => Error::InvalidRefreshToken,

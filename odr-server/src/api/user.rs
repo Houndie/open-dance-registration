@@ -13,10 +13,7 @@ use crate::store::{
     CompoundOperator, CompoundQuery,
 };
 
-use super::{
-    common::{to_logical_string_query, validate_string_query},
-    store_error_to_status, ValidationError,
-};
+use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -92,54 +89,41 @@ fn validate_user(user: &proto::User) -> Result<(), ValidationError> {
     Ok(())
 }
 
-fn validate_query(query: &UserQuery) -> Result<(), ValidationError> {
-    let query = match &query.query {
-        Some(query) => query,
-        None => return Err(ValidationError::new_empty("query")),
-    };
+impl TryFrom<UserQuery> for Query {
+    type Error = ValidationError;
 
-    match query {
-        user_query::Query::Email(email_query) => {
-            validate_string_query(&email_query).map_err(|e| e.with_context("query.email_query"))?;
-        }
-        user_query::Query::Compound(compound_query) => {
-            if compound_user_query::Operator::try_from(compound_query.operator).is_err() {
-                return Err(ValidationError::new_invalid_enum("query.compound.operator"));
-            }
+    fn try_from(query: UserQuery) -> Result<Self, Self::Error> {
+        match query.query {
+            Some(user_query::Query::Email(email_query)) => Ok(Query::Email(
+                try_logical_string_query(email_query).map_err(|e| e.with_context("query.email"))?,
+            )),
 
-            for (i, query) in compound_query.queries.iter().enumerate() {
-                validate_query(query)
-                    .map_err(|e| e.with_context(&format!("query.compound.queries[{}]", i)))?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-impl From<UserQuery> for Query {
-    fn from(query: UserQuery) -> Self {
-        match query.query.unwrap() {
-            user_query::Query::Email(email_query) => {
-                Query::Email(to_logical_string_query(email_query))
-            }
-
-            user_query::Query::Compound(compound_query) => {
+            Some(user_query::Query::Compound(compound_query)) => {
                 let operator =
-                    match compound_user_query::Operator::try_from(compound_query.operator).unwrap()
-                    {
-                        compound_user_query::Operator::And => CompoundOperator::And,
-                        compound_user_query::Operator::Or => CompoundOperator::Or,
+                    match compound_user_query::Operator::try_from(compound_query.operator) {
+                        Ok(compound_user_query::Operator::And) => CompoundOperator::And,
+                        Ok(compound_user_query::Operator::Or) => CompoundOperator::Or,
+                        Err(_) => {
+                            return Err(ValidationError::new_invalid_enum(
+                                "query.compound.operator",
+                            ))
+                        }
                     };
 
                 let queries = compound_query
                     .queries
                     .into_iter()
-                    .map(|query| query.into())
-                    .collect();
+                    .enumerate()
+                    .map(|(idx, query)| {
+                        query.try_into().map_err(|e: Self::Error| {
+                            e.with_context(&format!("query.compound.queries[{}]", idx))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                Query::CompoundQuery(CompoundQuery { operator, queries })
+                Ok(Query::CompoundQuery(CompoundQuery { operator, queries }))
             }
+            None => Err(ValidationError::new_empty("query")),
         }
     }
 }
@@ -178,21 +162,13 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
         request: Request<QueryUsersRequest>,
     ) -> Result<Response<QueryUsersResponse>, Status> {
         let query = request.into_inner().query;
-        let users = match query {
-            Some(query) => {
-                validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
+        let query = query.map(|query| query.try_into()).transpose()?;
 
-                self.store
-                    .query(query.into())
-                    .await
-                    .map_err(|e| store_error_to_status(e))?
-            }
-            None => self
-                .store
-                .list()
-                .await
-                .map_err(|e| store_error_to_status(e))?,
-        };
+        let users = self
+            .store
+            .query(query.as_ref())
+            .await
+            .map_err(|e| store_error_to_status(e))?;
 
         Ok(Response::new(QueryUsersResponse {
             users: users.into_iter().map(user_to_proto).collect(),

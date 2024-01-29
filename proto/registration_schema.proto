@@ -1,9 +1,11 @@
 syntax = "proto3";
 package proto;
 
+import "queries.proto";
+
 service RegistrationSchemaService {
 	rpc UpsertRegistrationSchemas(UpsertRegistrationSchemasRequest) returns (UpsertRegistrationSchemasResponse) {}
-	rpc ListRegistrationSchemas(ListRegistrationSchemasRequest) returns (ListRegistrationSchemasResponse) {}
+	rpc QueryRegistrationSchemas(QueryRegistrationSchemasRequest) returns (QueryRegistrationSchemasResponse) {}
 	rpc DeleteRegistrationSchemas(DeleteRegistrationSchemasRequest) returns (DeleteRegistrationSchemasResponse) {}
 }
 
@@ -15,11 +17,11 @@ message UpsertRegistrationSchemasResponse {
 	repeated RegistrationSchema registration_schemas = 1;
 }
 
-message ListRegistrationSchemasRequest {
-	repeated string ids = 1;
+message QueryRegistrationSchemasRequest {
+	RegistrationSchemaQuery query = 1;
 }
 
-message ListRegistrationSchemasResponse {
+message QueryRegistrationSchemasResponse {
 	repeated RegistrationSchema registration_schemas = 1;
 }
 
@@ -89,4 +91,21 @@ message MultiSelectType {
 	repeated uint32 defaults = 1;
 	Display display = 2;
 	repeated SelectOption options = 3;
+}
+
+message RegistrationSchemaQuery {
+	oneof query {
+		StringQuery event_id = 2;
+		CompoundRegistrationSchemaQuery compound = 3;
+	}
+}
+
+message CompoundRegistrationSchemaQuery {
+	enum Operator {
+		AND = 0;
+		OR = 1;
+	}
+
+	Operator operator = 1;
+	repeated RegistrationSchemaQuery queries = 2;
 }

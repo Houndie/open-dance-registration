@@ -2,15 +2,19 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use crate::store::registration_schema::Store;
+use crate::store::{
+    registration_schema::{Query, Store},
+    CompoundOperator, CompoundQuery,
+};
 use common::proto::{
-    self, multi_select_type, registration_schema_item_type, select_type, text_type,
-    DeleteRegistrationSchemasResponse, ListRegistrationSchemasRequest,
-    ListRegistrationSchemasResponse, RegistrationSchema, RegistrationSchemaItem,
-    UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
+    self, compound_registration_schema_query, multi_select_type, registration_schema_item_type,
+    registration_schema_query, select_type, text_type, DeleteRegistrationSchemasResponse,
+    QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse, RegistrationSchema,
+    RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
+    UpsertRegistrationSchemasResponse,
 };
 
-use super::{store_error_to_status, ValidationError};
+use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {
@@ -94,6 +98,45 @@ fn validate_registration_schema(
     Ok(())
 }
 
+impl TryFrom<RegistrationSchemaQuery> for Query {
+    type Error = ValidationError;
+
+    fn try_from(query: RegistrationSchemaQuery) -> Result<Self, Self::Error> {
+        match query.query {
+            Some(registration_schema_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
+                try_logical_string_query(event_id_query)
+                    .map_err(|e| e.with_context("query.event_id"))?,
+            )),
+
+            Some(registration_schema_query::Query::Compound(compound_query)) => {
+                let operator = match compound_registration_schema_query::Operator::try_from(
+                    compound_query.operator,
+                ) {
+                    Ok(compound_registration_schema_query::Operator::And) => CompoundOperator::And,
+                    Ok(compound_registration_schema_query::Operator::Or) => CompoundOperator::Or,
+                    Err(_) => {
+                        return Err(ValidationError::new_invalid_enum("query.compound.operator"))
+                    }
+                };
+
+                let queries = compound_query
+                    .queries
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, query)| {
+                        query.try_into().map_err(|e: Self::Error| {
+                            e.with_context(&format!("query.compound.queries[{}]", idx))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(Query::Compound(CompoundQuery { operator, queries }))
+            }
+            None => Err(ValidationError::new_empty("query")),
+        }
+    }
+}
+
 #[tonic::async_trait]
 impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSchemaService
     for Service<StoreType>
@@ -122,16 +165,22 @@ impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSc
         }))
     }
 
-    async fn list_registration_schemas(
+    async fn query_registration_schemas(
         &self,
-        request: Request<ListRegistrationSchemasRequest>,
-    ) -> Result<Response<ListRegistrationSchemasResponse>, Status> {
+        request: Request<QueryRegistrationSchemasRequest>,
+    ) -> Result<Response<QueryRegistrationSchemasResponse>, Status> {
+        let query = request
+            .into_inner()
+            .query
+            .map(|q| -> Result<_, ValidationError> { q.try_into() })
+            .transpose()?;
+
         let registration_schemas = self
             .store
-            .list(request.into_inner().ids)
+            .query(query.as_ref())
             .await
             .map_err(|e| store_error_to_status(e))?;
-        Ok(Response::new(ListRegistrationSchemasResponse {
+        Ok(Response::new(QueryRegistrationSchemasResponse {
             registration_schemas,
         }))
     }

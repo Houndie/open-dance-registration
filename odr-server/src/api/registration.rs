@@ -13,10 +13,7 @@ use crate::store::{
     CompoundOperator, CompoundQuery,
 };
 
-use super::{
-    common::{to_logical_string_query, validate_string_query},
-    store_error_to_status, ValidationError,
-};
+use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -48,60 +45,45 @@ fn validate_registration(registration: &Registration) -> Result<(), ValidationEr
     Ok(())
 }
 
-fn validate_query(query: &RegistrationQuery) -> Result<(), ValidationError> {
-    let query = match &query.query {
-        Some(query) => query,
-        None => return Err(ValidationError::new_empty("query")),
-    };
+impl TryFrom<RegistrationQuery> for Query {
+    type Error = ValidationError;
 
-    match query {
-        registration_query::Query::EventId(event_id_query) => {
-            validate_string_query(event_id_query).map_err(|e| e.with_context("query.event_id"))?;
-        }
-        registration_query::Query::Id(query) => {
-            validate_string_query(query).map_err(|e| e.with_context("query.id"))?;
-        }
-        registration_query::Query::Compound(compound_query) => {
-            if compound_registration_query::Operator::try_from(compound_query.operator).is_err() {
-                return Err(ValidationError::new_invalid_enum("query.compound.operator"));
-            }
+    fn try_from(query: RegistrationQuery) -> Result<Self, Self::Error> {
+        match query.query {
+            Some(registration_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
+                try_logical_string_query(event_id_query)
+                    .map_err(|e| e.with_context("query.event_id"))?,
+            )),
 
-            for (i, query) in compound_query.queries.iter().enumerate() {
-                validate_query(query)
-                    .map_err(|e| e.with_context(&format!("query.compound.queries[{}]", i)))?;
-            }
-        }
-    }
+            Some(registration_query::Query::Id(id_query)) => Ok(Query::Id(
+                try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
+            )),
 
-    Ok(())
-}
-
-impl From<RegistrationQuery> for Query {
-    fn from(query: RegistrationQuery) -> Self {
-        match query.query.unwrap() {
-            registration_query::Query::EventId(event_id_query) => {
-                Query::EventId(to_logical_string_query(event_id_query))
-            }
-
-            registration_query::Query::Id(id_query) => Query::Id(to_logical_string_query(id_query)),
-
-            registration_query::Query::Compound(compound_query) => {
-                let operator =
-                    match compound_registration_query::Operator::try_from(compound_query.operator)
-                        .unwrap()
-                    {
-                        compound_registration_query::Operator::And => CompoundOperator::And,
-                        compound_registration_query::Operator::Or => CompoundOperator::Or,
-                    };
+            Some(registration_query::Query::Compound(compound_query)) => {
+                let operator = match compound_registration_query::Operator::try_from(
+                    compound_query.operator,
+                ) {
+                    Ok(compound_registration_query::Operator::And) => CompoundOperator::And,
+                    Ok(compound_registration_query::Operator::Or) => CompoundOperator::Or,
+                    Err(_) => {
+                        return Err(ValidationError::new_invalid_enum("query.compound.operator"))
+                    }
+                };
 
                 let queries = compound_query
                     .queries
                     .into_iter()
-                    .map(|query| query.into())
-                    .collect();
+                    .enumerate()
+                    .map(|(i, query)| {
+                        query.try_into().map_err(|e: Self::Error| {
+                            e.with_context(&format!("query.compound.queries[{}]", i))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                Query::Compound(CompoundQuery { operator, queries })
+                Ok(Query::Compound(CompoundQuery { operator, queries }))
             }
+            None => Err(ValidationError::new_empty("query")),
         }
     }
 }
@@ -137,23 +119,13 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
     ) -> Result<Response<QueryRegistrationsResponse>, Status> {
         let query = request.into_inner().query;
 
-        let registrations = match query {
-            Some(query) => {
-                validate_query(&query).map_err(|e| -> Status { e.with_context("query").into() })?;
+        let query = query.map(|query| query.try_into()).transpose()?;
 
-                let store_query = query.into();
-
-                self.store
-                    .query(store_query)
-                    .await
-                    .map_err(|e| store_error_to_status(e))?
-            }
-            None => self
-                .store
-                .list()
-                .await
-                .map_err(|e| store_error_to_status(e))?,
-        };
+        let registrations = self
+            .store
+            .query(query.as_ref())
+            .await
+            .map_err(|e| store_error_to_status(e))?;
 
         Ok(Response::new(QueryRegistrationsResponse { registrations }))
     }

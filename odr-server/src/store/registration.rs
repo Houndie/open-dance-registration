@@ -166,8 +166,7 @@ type QueryBuilder<'q> = sqlx::query::Query<
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, registrations: Vec<Registration>) -> Result<Vec<Registration>, Error>;
-    async fn query(&self, query: Query) -> Result<Vec<Registration>, Error>;
-    async fn list(&self) -> Result<Vec<Registration>, Error>;
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Registration>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -473,14 +472,20 @@ impl Store for SqliteStore {
         Ok(outputs)
     }
 
-    async fn query(&self, query: Query) -> Result<Vec<Registration>, Error> {
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Registration>, Error> {
         let registrations = {
-            let query_string = format!(
-                "SELECT id, event FROM registrations WHERE {}",
-                query.where_clause()
-            );
+            let base_query_string = "SELECT id, event FROM registrations";
+            let query_string = match query {
+                Some(query) => format!("{} WHERE {}", base_query_string, query.where_clause()),
+                None => base_query_string.to_owned(),
+            };
+
             let query_builder = sqlx::query_as(&query_string);
-            let query_builder = query.bind(query_builder);
+            let query_builder = match query {
+                Some(query) => query.bind(query_builder),
+                None => query_builder,
+            };
+
             let rows: Vec<RegistrationRow> = query_builder
                 .fetch_all(&*self.pool)
                 .await
@@ -523,32 +528,6 @@ impl Store for SqliteStore {
         };
 
         let registrations = attach_items(registrations.into_iter(), items.into_iter());
-
-        Ok(registrations)
-    }
-
-    async fn list(&self) -> Result<Vec<Registration>, Error> {
-        let base_query = "SELECT id, event FROM registrations";
-        let base_items_query =
-            "SELECT id, registration, schema_item, value_type, value FROM registration_items";
-
-        let registrations: Vec<RegistrationRow> = sqlx::query_as(base_query)
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| Error::FetchError(e))?;
-
-        let items: Vec<RegistrationItemRow> = sqlx::query_as(base_items_query)
-            .fetch_all(&*self.pool)
-            .await
-            .map_err(|e| Error::FetchError(e))?;
-
-        let registrations = attach_items(
-            registrations.into_iter().map(|row| row.to_registration()),
-            items
-                .into_iter()
-                .map(|row| row.to_registration_item())
-                .collect::<Result<Vec<_>, _>>()?,
-        );
 
         Ok(registrations)
     }
@@ -955,68 +934,60 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn list_all() {
-        let init = init_db().await;
-        let registrations = test_data(&init).await;
-
-        let store = SqliteStore::new(Arc::new(init.db));
-        let returned_registrations = store.list().await.unwrap();
-
-        let registrations = sort_registrations(registrations);
-        let returned_registrations = sort_registrations(returned_registrations);
-
-        assert_eq!(registrations, returned_registrations);
-    }
-
     enum QueryTest {
+        All,
         Id,
         EventId,
         CompoundQuery,
         NoResults,
     }
 
+    #[test_case(QueryTest::All ; "all")]
     #[test_case(QueryTest::Id ; "id")]
     #[test_case(QueryTest::EventId ; "event id")]
     #[test_case(QueryTest::CompoundQuery ; "compound query")]
     #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_some(test_name: QueryTest) {
+    async fn query(test_name: QueryTest) {
         let init = init_db().await;
         let mut registrations = test_data(&init).await;
 
         struct TestCase {
-            query: Query,
+            query: Option<Query>,
             expected: Vec<Registration>,
         }
 
         let tc = match test_name {
+            QueryTest::All => TestCase {
+                query: None,
+                expected: registrations.clone(),
+            },
             QueryTest::Id => TestCase {
-                query: Query::Id(LogicalQuery::Equals(registrations[0].id.clone())),
+                query: Some(Query::Id(LogicalQuery::Equals(registrations[0].id.clone()))),
                 expected: vec![registrations.remove(0)],
             },
             QueryTest::EventId => TestCase {
-                query: Query::EventId(LogicalQuery::Equals(init.event_1.clone())),
+                query: Some(Query::EventId(LogicalQuery::Equals(init.event_1.clone()))),
                 expected: vec![registrations.remove(0)],
             },
             QueryTest::CompoundQuery => TestCase {
-                query: Query::Compound(CompoundQuery {
+                query: Some(Query::Compound(CompoundQuery {
                     operator: CompoundOperator::Or,
                     queries: registrations
                         .iter()
                         .map(|r| Query::Id(LogicalQuery::Equals(r.id.clone())))
                         .collect(),
-                }),
+                })),
                 expected: registrations,
             },
             QueryTest::NoResults => TestCase {
-                query: Query::Id(LogicalQuery::Equals(new_id())),
+                query: Some(Query::Id(LogicalQuery::Equals(new_id()))),
                 expected: Vec::new(),
             },
         };
 
         let store = SqliteStore::new(Arc::new(init.db));
-        let returned_registrations = store.query(tc.query).await.unwrap();
+        let returned_registrations = store.query(tc.query.as_ref()).await.unwrap();
 
         let returned_registrations = sort_registrations(returned_registrations);
         let expected = sort_registrations(tc.expected);

@@ -1,9 +1,11 @@
 syntax = "proto3";
 package proto;
 
+import "queries.proto";
+
 service OrganizationService {
 	rpc UpsertOrganizations(UpsertOrganizationsRequest) returns (UpsertOrganizationsResponse) {}
-	rpc ListOrganizations(ListOrganizationsRequest) returns (ListOrganizationsResponse) {}
+	rpc QueryOrganizations(QueryOrganizationsRequest) returns (QueryOrganizationsResponse) {}
 	rpc DeleteOrganizations(DeleteOrganizationsRequest) returns (DeleteOrganizationsResponse) {}
 }
 
@@ -15,11 +17,11 @@ message UpsertOrganizationsResponse {
 	repeated Organization organizations = 1;
 }
 
-message ListOrganizationsRequest {
-	repeated string ids = 1;
+message QueryOrganizationsRequest {
+	OrganizationQuery query = 1;
 }
 
-message ListOrganizationsResponse {
+message QueryOrganizationsResponse {
 	repeated Organization organizations = 1;
 }
 
@@ -32,4 +34,21 @@ message DeleteOrganizationsResponse {}
 message Organization {
 	string id = 1;
 	string name = 2;
+}
+
+message OrganizationQuery {
+	oneof query {
+		StringQuery id = 1;
+		CompoundOrganizationQuery compound = 3;
+	}
+}
+
+message CompoundOrganizationQuery {
+	enum Operator {
+		AND = 0;
+		OR = 1;
+	}
+
+	Operator operator = 1;
+	repeated OrganizationQuery queries = 2;
 }

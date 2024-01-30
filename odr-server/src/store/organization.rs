@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::{
     common::{ids_in_table, new_id},
-    Error,
+    Bindable as _, Error, Queryable as _,
 };
 use common::proto::Organization;
 use sqlx::SqlitePool;
@@ -22,10 +22,56 @@ impl From<OrganizationRow> for Organization {
     }
 }
 
+pub struct IdField;
+
+impl super::Field for IdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "id"
+    }
+}
+
+pub type IdQuery = super::LogicalQuery<IdField>;
+
+pub enum Query {
+    Id(IdQuery),
+    CompoundQuery(super::CompoundQuery<Query>),
+}
+
+impl super::Queryable for Query {
+    fn where_clause(&self) -> String {
+        match self {
+            Query::Id(q) => q.where_clause(),
+            Query::CompoundQuery(compound_query) => compound_query.where_clause(),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
+where
+    <IdField as super::Field>::Item: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            Query::Id(q) => q.bind(query_builder),
+            Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
+        }
+    }
+}
+
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, organizations: Vec<Organization>) -> Result<Vec<Organization>, Error>;
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<Organization>, Error>;
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Organization>, Error>;
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -139,28 +185,18 @@ impl Store for SqliteStore {
 
         Ok(outputs)
     }
-    async fn list(&self, ids: Vec<String>) -> Result<Vec<Organization>, Error> {
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Organization>, Error> {
         let base_query = "SELECT id, name FROM organizations";
+        let query_string = match query {
+            Some(query) => format!("{} WHERE {}", base_query, query.where_clause()),
+            None => base_query.to_string(),
+        };
 
-        if ids.is_empty() {
-            let organizations: Vec<OrganizationRow> = sqlx::query_as(base_query)
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            return Ok(organizations.into_iter().map(|row| row.into()).collect());
-        }
-
-        let where_clause =
-            itertools::Itertools::intersperse(std::iter::repeat("id = ?").take(ids.len()), " OR ")
-                .collect::<String>();
-
-        let query = format!("{} WHERE {}", base_query, where_clause);
-
-        let query_builder = sqlx::query_as(&query);
-        let query_builder = ids
-            .iter()
-            .fold(query_builder, |query_builder, id| query_builder.bind(id));
+        let query_builder = sqlx::query_as(&query_string);
+        let query_builder = match query {
+            Some(query) => query.bind(query_builder),
+            None => query_builder,
+        };
 
         let rows: Vec<OrganizationRow> = query_builder
             .fetch_all(&*self.pool)
@@ -169,6 +205,7 @@ impl Store for SqliteStore {
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
+
     async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
         if ids.is_empty() {
             return Ok(());
@@ -209,9 +246,11 @@ mod tests {
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
-    use crate::store::{common::new_id, Error};
+    use crate::store::{common::new_id, CompoundOperator, CompoundQuery, Error, LogicalQuery};
 
-    use super::{OrganizationRow, SqliteStore, Store};
+    use super::{OrganizationRow, Query, SqliteStore, Store};
+
+    use test_case::test_case;
 
     struct Init {
         db: SqlitePool,
@@ -363,33 +402,62 @@ mod tests {
         }
     }
 
+    enum QueryTest {
+        All,
+        Id,
+        CompoundQuery,
+        NoResults,
+    }
+
+    #[test_case(QueryTest::All ; "all")]
+    #[test_case(QueryTest::Id ; "id")]
+    #[test_case(QueryTest::CompoundQuery ; "compound query")]
+    #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_all() {
+    async fn query(test_name: QueryTest) {
         let init = init().await;
         let mut orgs = test_data(&init).await;
 
+        struct TestCase {
+            query: Option<Query>,
+            expected: Vec<Organization>,
+        }
+
+        let tc = match test_name {
+            QueryTest::All => TestCase {
+                query: None,
+                expected: orgs,
+            },
+            QueryTest::Id => TestCase {
+                query: Some(Query::Id(LogicalQuery::Equals(orgs[0].id.clone()))),
+                expected: vec![orgs.remove(0)],
+            },
+            QueryTest::CompoundQuery => TestCase {
+                query: Some(Query::CompoundQuery(CompoundQuery {
+                    operator: CompoundOperator::Or,
+                    queries: orgs
+                        .iter()
+                        .map(|e| Query::Id(LogicalQuery::Equals(e.id.clone())))
+                        .collect(),
+                })),
+                expected: orgs,
+            },
+            QueryTest::NoResults => TestCase {
+                query: Some(Query::Id(LogicalQuery::Equals(new_id()))),
+                expected: vec![],
+            },
+        };
+
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        let mut returned_orgs = store.list(vec![]).await.unwrap();
+        let mut returned_orgs = store.query(tc.query.as_ref()).await.unwrap();
 
-        orgs.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut expected_orgs = tc.expected;
+        expected_orgs.sort_by(|a, b| a.id.cmp(&b.id));
         returned_orgs.sort_by(|a, b| a.id.cmp(&b.id));
 
-        assert_eq!(orgs, returned_orgs);
-    }
-
-    #[tokio::test]
-    async fn list_some() {
-        let init = init().await;
-        let orgs = test_data(&init).await;
-
-        let db = Arc::new(init.db);
-        let store = SqliteStore::new(db.clone());
-
-        let returned_orgs = store.list(vec![orgs[0].id.clone()]).await.unwrap();
-
-        assert_eq!(orgs[0], returned_orgs[0]);
+        assert_eq!(expected_orgs, returned_orgs);
     }
 
     #[tokio::test]

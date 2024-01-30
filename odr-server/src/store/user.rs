@@ -20,7 +20,6 @@ impl TryFrom<UserRow> for User {
     type Error = Error;
 
     fn try_from(row: UserRow) -> Result<Self, Error> {
-        println!("A1 {:?}", row.password);
         let password = match row.password {
             Some(password) => PasswordType::Set(
                 PasswordHashString::new(&password)

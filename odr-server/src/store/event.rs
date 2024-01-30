@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 
 use sqlx::SqlitePool;
 
@@ -6,7 +6,7 @@ use common::proto::Event;
 
 use super::{
     common::{ids_in_table, new_id},
-    Error,
+    Bindable as _, Error, Queryable as _,
 };
 
 #[derive(sqlx::FromRow)]
@@ -16,20 +16,82 @@ struct EventRow {
     organization: String,
 }
 
-impl EventRow {
-    fn to_event(self) -> Result<Event, Error> {
-        Ok(Event {
-            id: self.id,
-            name: self.name,
-            organization_id: self.organization,
-        })
+impl From<EventRow> for Event {
+    fn from(row: EventRow) -> Self {
+        Event {
+            id: row.id,
+            name: row.name,
+            organization_id: row.organization,
+        }
+    }
+}
+
+pub struct IdField;
+
+impl super::Field for IdField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "id"
+    }
+}
+
+pub type IdQuery = super::LogicalQuery<IdField>;
+
+pub struct OrganizationField;
+
+impl super::Field for OrganizationField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "organization"
+    }
+}
+
+pub type OrganizationQuery = super::LogicalQuery<OrganizationField>;
+
+pub enum Query {
+    Id(IdQuery),
+    Organization(OrganizationQuery),
+    CompoundQuery(super::CompoundQuery<Query>),
+}
+
+impl super::Queryable for Query {
+    fn where_clause(&self) -> String {
+        match self {
+            Query::Id(q) => q.where_clause(),
+            Query::Organization(q) => q.where_clause(),
+            Query::CompoundQuery(compound_query) => compound_query.where_clause(),
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> super::Bindable<'q, DB> for Query
+where
+    <IdField as super::Field>::Item: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
+    <OrganizationField as super::Field>::Item: sqlx::Type<DB> + sqlx::Encode<'q, DB>,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            Query::Id(q) => q.bind(query_builder),
+            Query::Organization(q) => q.bind(query_builder),
+            Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
+        }
     }
 }
 
 #[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
     async fn upsert(&self, events: Vec<Event>) -> Result<Vec<Event>, Error>;
-    async fn list(&self, event_ids: &Vec<String>) -> Result<Vec<Event>, Error>;
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Event>, Error>;
     async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error>;
 }
 
@@ -140,48 +202,25 @@ impl Store for SqliteStore {
         Ok(output_events)
     }
 
-    async fn list(&self, event_ids: &Vec<String>) -> Result<Vec<Event>, Error> {
-        let event_rows: Vec<EventRow> = if event_ids.is_empty() {
-            sqlx::query_as("SELECT id, organization, name FROM events")
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?
-        } else {
-            let where_clause: String =
-                itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ")
-                    .collect();
-            let query = format!(
-                "SELECT id, organization, name FROM events WHERE {}",
-                where_clause
-            );
-
-            let query_builder = sqlx::query_as(&query);
-            let query_builder = event_ids
-                .iter()
-                .fold(query_builder, |query_builder, id| query_builder.bind(id));
-
-            let rows: Vec<EventRow> = query_builder
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
-
-            if rows.len() < event_ids.len() {
-                let found_ids = rows.into_iter().map(|row| row.id).collect::<HashSet<_>>();
-
-                let first_missing = event_ids
-                    .iter()
-                    .find(|id| !found_ids.contains(*id))
-                    .unwrap();
-                return Err(Error::IdDoesNotExist(first_missing.clone()));
-            };
-
-            rows
+    async fn query(&self, query: Option<&Query>) -> Result<Vec<Event>, Error> {
+        let base_query = "SELECT id, organization, name FROM events";
+        let query_string = match query {
+            Some(query) => format!("{} WHERE {}", base_query, query.where_clause()),
+            None => base_query.to_owned(),
         };
 
-        let output_events = event_rows
-            .into_iter()
-            .map(|row| row.to_event())
-            .collect::<Result<_, _>>()?;
+        let query_builder = sqlx::query_as(&query_string);
+        let query_builder = match query {
+            Some(query) => query.bind(query_builder),
+            None => query_builder,
+        };
+
+        let rows: Vec<EventRow> = query_builder
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(|e| Error::FetchError(e))?;
+
+        let output_events = rows.into_iter().map(|row| row.into()).collect();
 
         Ok(output_events)
     }
@@ -222,14 +261,19 @@ mod tests {
 
     use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
-    use crate::{proto::Event, store::common::new_id};
+    use crate::{
+        proto::Event,
+        store::{common::new_id, CompoundOperator, CompoundQuery, LogicalQuery},
+    };
 
-    use super::{Error, EventRow, SqliteStore, Store};
+    use super::{Error, EventRow, Query, SqliteStore, Store};
 
     struct Init {
         org: String,
         db: SqlitePool,
     }
+
+    use test_case::test_case;
 
     async fn init_db() -> Init {
         let db_url = "sqlite://:memory:";
@@ -279,7 +323,7 @@ mod tests {
 
         assert_eq!(store_row.len(), 1);
 
-        let store_event = store_row.pop().unwrap().to_event().unwrap();
+        let store_event: Event = store_row.pop().unwrap().into();
         assert_eq!(store_event.name, event.name);
         assert_eq!(store_event.id, returned_events[0].id);
     }
@@ -367,8 +411,20 @@ mod tests {
         };
     }
 
+    enum QueryTest {
+        All,
+        Id,
+        Organization,
+        CompoundQuery,
+        NoResults,
+    }
+    #[test_case(QueryTest::All ; "all")]
+    #[test_case(QueryTest::Id ; "id")]
+    #[test_case(QueryTest::Organization ; "organization")]
+    #[test_case(QueryTest::CompoundQuery ; "compound query")]
+    #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
-    async fn list_all() {
+    async fn query(test_name: QueryTest) {
         let init = init_db().await;
         let db = Arc::new(init.db);
         let id_1 = new_id();
@@ -386,89 +442,64 @@ mod tests {
             .await
             .unwrap();
 
-        let store = {
-            let db = db.clone();
-            SqliteStore::new(db)
-        };
-
-        let returned_events = store.list(&vec![]).await.unwrap();
-
-        assert_eq!(returned_events.len(), 2);
-
-        match returned_events.iter().find(|e| e.id == id_1) {
-            Some(event) => assert_eq!(event.name, name_1),
-            None => panic!("id 1 not found in result"),
-        };
-
-        match returned_events.iter().find(|e| e.id == id_2) {
-            Some(event) => assert_eq!(event.name, name_2),
-            None => panic!("id 2 not found in result"),
-        };
-    }
-
-    #[tokio::test]
-    async fn list_some() {
-        let init = init_db().await;
-        let db = Arc::new(init.db);
-        let id_1 = new_id();
-        let name_1 = "Event 1";
-        let id_2 = new_id();
-        let name_2 = "Event 2";
-        let id_3 = new_id();
-        let name_3 = "Event 2";
-        sqlx::query(
-            "INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?), (?, ?, ?);",
-        )
-        .bind(&id_1)
-        .bind(&init.org)
-        .bind(&name_1)
-        .bind(&id_2)
-        .bind(&init.org)
-        .bind(&name_2)
-        .bind(&id_3)
-        .bind(&init.org)
-        .bind(&name_3)
-        .execute(&*db)
-        .await
-        .unwrap();
+        let mut events = vec![
+            Event {
+                name: name_1.to_owned(),
+                organization_id: init.org.clone(),
+                id: id_1.clone(),
+            },
+            Event {
+                name: name_2.to_owned(),
+                organization_id: init.org.clone(),
+                id: id_2.clone(),
+            },
+        ];
 
         let store = {
             let db = db.clone();
             SqliteStore::new(db)
         };
 
-        let returned_events = store.list(&vec![id_1.clone(), id_2.clone()]).await.unwrap();
-
-        assert_eq!(returned_events.len(), 2);
-
-        match returned_events.iter().find(|e| e.id == id_1) {
-            Some(event) => assert_eq!(event.name, name_1),
-            None => panic!("id 1 not found in result"),
-        };
-
-        match returned_events.iter().find(|e| e.id == id_2) {
-            Some(event) => assert_eq!(event.name, name_2),
-            None => panic!("id 2 not found in result"),
-        };
-    }
-
-    #[tokio::test]
-    async fn list_some_doesnt_exist() {
-        let init = init_db().await;
-        let db = Arc::new(init.db);
-
-        let store = {
-            let db = db.clone();
-            SqliteStore::new(db)
-        };
-
-        let id = new_id();
-        let result = store.list(&vec![id.clone()]).await;
-        match result {
-            Ok(_) => panic!("no error returned"),
-            Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),
-            _ => panic!("incorrect error type: {:?}", result),
+        struct TestCase {
+            query: Option<Query>,
+            expected: Vec<Event>,
         }
+
+        let tc = match test_name {
+            QueryTest::All => TestCase {
+                query: None,
+                expected: events,
+            },
+            QueryTest::Id => TestCase {
+                query: Some(Query::Id(LogicalQuery::Equals(id_1))),
+                expected: vec![events.remove(0)],
+            },
+            QueryTest::Organization => TestCase {
+                query: Some(Query::Organization(LogicalQuery::Equals(init.org))),
+                expected: events,
+            },
+            QueryTest::CompoundQuery => TestCase {
+                query: Some(Query::CompoundQuery(CompoundQuery {
+                    operator: CompoundOperator::Or,
+                    queries: events
+                        .iter()
+                        .map(|e| Query::Id(LogicalQuery::Equals(e.id.clone())))
+                        .collect(),
+                })),
+                expected: events,
+            },
+            QueryTest::NoResults => TestCase {
+                query: Some(Query::Id(LogicalQuery::Equals(new_id()))),
+                expected: vec![],
+            },
+        };
+
+        let mut returned_events = store.query(tc.query.as_ref()).await.unwrap();
+        returned_events.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut expected_events = tc.expected;
+        expected_events.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(returned_events.len(), expected_events.len());
     }
 
     #[tokio::test]
@@ -505,7 +536,7 @@ mod tests {
 
         assert_eq!(store_row.len(), 1);
 
-        let store_event = store_row.pop().unwrap().to_event().unwrap();
+        let store_event: Event = store_row.pop().unwrap().into();
         assert_eq!(store_event.name, name_2);
         assert_eq!(store_event.id, id_2);
     }

@@ -1,4 +1,4 @@
-use common::proto::ListEventsRequest;
+use common::proto::{event_query, string_query, EventQuery, QueryEventsRequest, StringQuery};
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use tonic::Request;
@@ -22,7 +22,13 @@ pub fn Page(cx: Scope, id: String) -> Element {
             let response = events_client
                 .lock()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
-                .list_events(Request::new(ListEventsRequest { ids: vec![id] }))
+                .query_events(Request::new(QueryEventsRequest {
+                    query: Some(EventQuery {
+                        query: Some(event_query::Query::Id(StringQuery {
+                            operator: Some(string_query::Operator::Equals(id.clone())),
+                        })),
+                    }),
+                }))
                 .await
                 .map_err(|e| anyhow::Error::new(e))?;
 

@@ -1,4 +1,4 @@
-use common::proto::{self, ListEventsRequest, UpsertEventsRequest};
+use common::proto::{self, QueryEventsRequest, UpsertEventsRequest};
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 
@@ -23,7 +23,7 @@ pub fn Page(cx: Scope) -> Element {
             let response = events_client
                 .lock()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
-                .list_events(tonic::Request::new(ListEventsRequest { ids: Vec::new() }))
+                .query_events(tonic::Request::new(QueryEventsRequest { query: None }))
                 .await
                 .map_err(|e| anyhow::Error::new(e))?;
 

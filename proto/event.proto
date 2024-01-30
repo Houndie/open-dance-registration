@@ -1,9 +1,11 @@
 syntax = "proto3";
 package proto;
 
+import "queries.proto";
+
 service EventService {
 	rpc UpsertEvents(UpsertEventsRequest) returns (UpsertEventsResponse) {}
-	rpc ListEvents(ListEventsRequest) returns (ListEventsResponse) {}
+	rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse) {}
 	rpc DeleteEvents(DeleteEventsRequest) returns (DeleteEventsResponse) {}
 }
 
@@ -15,11 +17,11 @@ message UpsertEventsResponse {
 	repeated Event events = 1;
 }
 
-message ListEventsRequest {
-	repeated string ids = 1;
+message QueryEventsRequest {
+	EventQuery query = 1;
 }
 
-message ListEventsResponse {
+message QueryEventsResponse {
 	repeated Event events = 1;
 }
 
@@ -33,4 +35,22 @@ message Event {
 	string id = 1;
 	string organization_id = 2;
 	string name = 3;
+}
+
+message EventQuery {
+	oneof query {
+		StringQuery id = 1;
+		StringQuery organization_id = 2;
+		CompoundEventQuery compound = 3;
+	}
+}
+
+message CompoundEventQuery {
+	enum Operator {
+		AND = 0;
+		OR = 1;
+	}
+
+	Operator operator = 1;
+	repeated EventQuery queries = 2;
 }

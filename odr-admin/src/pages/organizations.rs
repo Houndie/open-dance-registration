@@ -1,34 +1,35 @@
-use common::proto::{self, QueryEventsRequest, UpsertEventsRequest};
+use common::proto::{Organization, QueryOrganizationsRequest, UpsertOrganizationsRequest};
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
+use dioxus_router::hooks::use_navigator;
 
 use crate::{
     components::{modal::Modal, page::Page as GenericPage},
-    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
+    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, OrganizationsClient},
     pages::Routes,
 };
 
-#[component]
-pub fn Page(cx: Scope, org_id: String) -> Element {
-    use_grpc_client_provider::<EventsClient>(cx);
+pub fn Page(cx: Scope) -> Element {
+    use_grpc_client_provider::<OrganizationsClient>(cx);
 
-    let events_client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let orgs_client = use_grpc_client::<OrganizationsClient>(cx).unwrap();
 
     let toast_manager = use_toasts(cx).unwrap();
 
-    let events = use_ref(cx, || Vec::new());
+    let orgs = use_ref(cx, || Vec::new());
 
     let rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(events_client, events);
+        to_owned!(orgs_client, orgs);
         async move {
-            let response = events_client
+            let response = orgs_client
                 .lock()
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?
-                .query_events(tonic::Request::new(QueryEventsRequest { query: None }))
+                .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
+                    query: None,
+                }))
                 .await
                 .map_err(|e| anyhow::Error::new(e))?;
 
-            events.with_mut(|events| *events = response.into_inner().events);
+            orgs.with_mut(|orgs| *orgs = response.into_inner().organizations);
             Ok(())
         }
     });
@@ -37,12 +38,13 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
         toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(err.to_string()));
     };
 
-    let show_event_modal = use_state(cx, || false);
+    let show_org_modal = use_state(cx, || false);
 
     let nav = use_navigator(cx);
+
     cx.render(rsx! {
         GenericPage {
-            title: "My Events".to_owned(),
+            title: "My Organizations".to_owned(),
             table {
                 class: "table table-striped",
                 thead {
@@ -57,7 +59,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                     }
                 }
                 tbody {
-                    events.read().iter().map(|e|{
+                    orgs.read().iter().map(|e|{
                         let id = e.id.clone();
                         rsx!{
                             tr {
@@ -71,11 +73,11 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                                     button {
                                         class: "btn btn-primary",
                                         onclick: move |_| {
-                                            nav.push(Routes::EventPage{
-                                                id: id.clone(),
+                                            nav.push(Routes::EventsPage{
+                                                org_id: id.clone(),
                                             });
                                         },
-                                        "Edit Event"
+                                        "Edit Organization"
                                     }
                                 }
                             }
@@ -85,40 +87,38 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
             }
             button {
                 class: "btn btn-primary",
-                onclick: move |_| show_event_modal.set(true),
-                "Create New Event"
+                onclick: move |_| show_org_modal.set(true),
+                "Create New Organization"
             }
         }
-        if **show_event_modal { rsx!(EventModal {
-            org_id: org_id.clone(),
-            do_submit: |event| {
-                show_event_modal.set(false);
-                events.with_mut(|events| events.push(event));
+        if **show_org_modal { rsx!(OrganizationModal {
+            do_submit: |organization| {
+                show_org_modal.set(false);
+                orgs.with_mut(|organizations| organizations.push(organization));
             },
-            do_close: || show_event_modal.set(false),
+            do_close: || show_org_modal.set(false),
         }) }
     })
 }
 
 #[component]
-fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
+fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
-    org_id: String,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
-    let event_name = use_state(cx, || "".to_owned());
+    let organization_name = use_state(cx, || "".to_owned());
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
-    let client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let client = use_grpc_client::<OrganizationsClient>(cx).unwrap();
     let toast_manager = use_toasts(cx).unwrap();
 
     {
         let mut created_mut = created.write_silent();
-        if let Some(event) = created_mut.as_mut() {
+        if let Some(organization) = created_mut.as_mut() {
             created.needs_update();
-            let event = std::mem::take::<proto::Event>(event);
-            do_submit(event);
+            let organization = std::mem::take::<Organization>(organization);
+            do_submit(organization);
         }
     }
 
@@ -127,17 +127,16 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
             do_submit: move || {
                 cx.spawn({
                     submitted.set(true);
-                    to_owned!(client, event_name, created, toast_manager, org_id, submitted);
+                    to_owned!(client, organization_name, created, toast_manager);
                     async move {
                         let rsp = {
                             let lock = client.lock();
                             match lock {
                                 Ok(mut unlocked) => {
-                                    let rsp = unlocked.upsert_events(UpsertEventsRequest{
-                                        events: vec![proto::Event{
+                                    let rsp = unlocked.upsert_organizations(UpsertOrganizationsRequest{
+                                        organizations: vec![Organization{
                                             id: "".to_owned(),
-                                            organization_id: org_id.clone(),
-                                            name: event_name.current().as_ref().clone(),
+                                            name: organization_name.current().as_ref().clone(),
                                         }],
                                     }).await;
 
@@ -145,41 +144,39 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
                                         Ok(rsp) => Some(rsp),
                                         Err(e) => {
                                             toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                            submitted.set(false);
                                             None
                                         },
                                     }
                                 },
                                 Err(e) =>  {
                                     toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                    submitted.set(false);
                                     None
                                 },
                             }
 
                         };
                         if let Some(rsp) = rsp {
-                            created.set(Some(rsp.into_inner().events.remove(0)));
+                            created.set(Some(rsp.into_inner().organizations.remove(0)));
                         };
                     }
                 })
             },
             do_close: || do_close(),
             disable_submit: **submitted,
-            title: "Create new Event",
+            title: "Create new Organization",
             form {
                 div {
                     class: "mb-3",
                     label {
-                        "for": "create-event-name-input",
+                        "for": "create-organization-name-input",
                         class: "form-label",
-                        "Event Name"
+                        "Organization Name"
                     }
                     input {
-                        id: "create-event-name-input",
+                        id: "create-organization-name-input",
                         class: "form-control",
-                        value: "{event_name}",
-                        oninput: move |evt| event_name.set(evt.value.clone()),
+                        value: "{organization_name}",
+                        oninput: move |evt| organization_name.set(evt.value.clone()),
                     }
                 }
             }

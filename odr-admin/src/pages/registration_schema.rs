@@ -6,9 +6,7 @@ use crate::{
     },
     hooks::toasts::use_toasts,
 };
-use common::proto::{
-    multi_select_type, select_type, CheckboxType, RegistrationSchemaItem, SelectOption, TextType,
-};
+use common::proto::{multi_select_type, CheckboxType, RegistrationSchemaItem, SelectOption};
 use dioxus::prelude::*;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -138,7 +136,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         let idx = match evt.value.parse::<usize>() {
                             Ok(idx) => idx,
                             Err(e) => {
-                                toast_manager.borrow_mut().new_error(format!("{}", e));
+                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
                                 return;
                             },
                         };
@@ -166,7 +164,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                     let idx = match evt.value.parse::<usize>() {
                                         Ok(idx) => idx,
                                         Err(e) => {
-                                            toast_manager.borrow_mut().new_error(format!("{}", e));
+                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
                                             return;
                                         },
                                     };
@@ -197,7 +195,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                     let idx = match evt.value.parse::<usize>() {
                                         Ok(idx) => idx,
                                         Err(e) => {
-                                            toast_manager.borrow_mut().new_error(format!("{}", e));
+                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
                                             return;
                                         },
                                     };

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use dioxus::prelude::*;
 
 #[derive(Default)]
@@ -30,14 +28,12 @@ impl ToastManager {
     }
 }
 
-struct ToastsContext(Rc<RefCell<ToastManager>>);
+pub struct ToastsContext(pub ToastManager);
 
 pub fn use_toasts_provider(cx: &ScopeState) {
-    use_shared_state_provider(cx, || {
-        ToastsContext(Rc::new(RefCell::new(ToastManager::default())))
-    })
+    use_shared_state_provider(cx, || ToastsContext(ToastManager::default()))
 }
 
-pub fn use_toasts(cx: &ScopeState) -> Option<Rc<RefCell<ToastManager>>> {
-    use_shared_state::<ToastsContext>(cx).map(|state| state.read().0.clone())
+pub fn use_toasts(cx: &ScopeState) -> Option<&UseSharedState<ToastsContext>> {
+    use_shared_state::<ToastsContext>(cx)
 }

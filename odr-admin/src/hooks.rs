@@ -1,13 +1,14 @@
 use std::sync::{Arc, Mutex};
 
-use common::proto::event_service_client::EventServiceClient;
+use common::proto::{
+    event_service_client::EventServiceClient,
+    organization_service_client::OrganizationServiceClient,
+};
 use dioxus::prelude::*;
 
 pub mod toasts;
 
 pub struct ClientContext<Client>(Arc<Mutex<Client>>);
-
-pub struct EventsClient;
 
 pub trait ClientTraits {
     type Client;
@@ -17,8 +18,27 @@ pub trait ClientTraits {
     fn deref_context(ctx: &Self::Context) -> Arc<Mutex<Self::Client>>;
 }
 
+pub struct EventsClient;
+
 impl ClientTraits for EventsClient {
     type Client = EventServiceClient<tonic_web_wasm_client::Client>;
+    type Context = ClientContext<Self::Client>;
+
+    fn new(addr: String) -> Self::Context {
+        ClientContext::<Self::Client>(Arc::new(Mutex::new(Self::Client::new(
+            tonic_web_wasm_client::Client::new(addr),
+        ))))
+    }
+
+    fn deref_context(ctx: &Self::Context) -> Arc<Mutex<Self::Client>> {
+        ctx.0.clone()
+    }
+}
+
+pub struct OrganizationsClient;
+
+impl ClientTraits for OrganizationsClient {
+    type Client = OrganizationServiceClient<tonic_web_wasm_client::Client>;
     type Context = ClientContext<Self::Client>;
 
     fn new(addr: String) -> Self::Context {

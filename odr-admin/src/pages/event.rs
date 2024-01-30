@@ -65,7 +65,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 }
             }),
             Err(e) => {
-                toast_manager.borrow_mut().new_error(e.to_string());
+                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
                 None
             }
         },

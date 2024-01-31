@@ -26,9 +26,6 @@ pub fn use_grpc_client_provider(cx: &ScopeState) {
     use_context_provider(cx, || GrpcContext::new("http://localhost:50051".to_owned()));
 }
 
-pub fn use_grpc_client(cx: &ScopeState) -> Option<GrpcContext> {
-    // Cloning grpc clients share the existing channels.
-    // Cloning lets us perform multiple requests in parallel, as they all require &mut self for
-    // tower reasons
-    use_context::<GrpcContext>(cx).cloned()
+pub fn use_grpc_client(cx: &ScopeState) -> Option<&GrpcContext> {
+    use_context::<GrpcContext>(cx)
 }

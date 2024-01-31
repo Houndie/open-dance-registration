@@ -9,25 +9,22 @@ use crate::{
         page::Page as GenericPage,
         table::Table,
     },
-    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, OrganizationsClient},
+    hooks::{toasts::use_toasts, use_grpc_client},
     pages::Routes,
 };
 
 pub fn Page(cx: Scope) -> Element {
-    use_grpc_client_provider::<OrganizationsClient>(cx);
-
-    let orgs_client = use_grpc_client::<OrganizationsClient>(cx).unwrap();
+    let grpc_client = use_grpc_client(cx).unwrap();
 
     let toast_manager = use_toasts(cx).unwrap();
 
     let orgs = use_ref(cx, || Vec::new());
 
     let rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(orgs_client, orgs);
+        to_owned!(grpc_client, orgs);
         async move {
-            let response = orgs_client
-                .lock()
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            let response = grpc_client
+                .organizations
                 .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
                     query: None,
                 }))
@@ -116,7 +113,7 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
     let organization_name = use_state(cx, || "".to_owned());
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
-    let client = use_grpc_client::<OrganizationsClient>(cx).unwrap();
+    let client = use_grpc_client(cx).unwrap();
     let toast_manager = use_toasts(cx).unwrap();
 
     {
@@ -135,35 +132,19 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
                     submitted.set(true);
                     to_owned!(client, organization_name, created, toast_manager);
                     async move {
-                        let rsp = {
-                            let lock = client.lock();
-                            match lock {
-                                Ok(mut unlocked) => {
-                                    let rsp = unlocked.upsert_organizations(UpsertOrganizationsRequest{
-                                        organizations: vec![Organization{
-                                            id: "".to_owned(),
-                                            name: organization_name.current().as_ref().clone(),
-                                        }],
-                                    }).await;
+                        let rsp = client.organizations.upsert_organizations(UpsertOrganizationsRequest{
+                            organizations: vec![Organization{
+                                id: "".to_owned(),
+                                name: organization_name.current().as_ref().clone(),
+                            }],
+                        }).await;
 
-                                    match rsp {
-                                        Ok(rsp) => Some(rsp),
-                                        Err(e) => {
-                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                            None
-                                        },
-                                    }
-                                },
-                                Err(e) =>  {
-                                    toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                    None
-                                },
-                            }
-
-                        };
-                        if let Some(rsp) = rsp {
-                            created.set(Some(rsp.into_inner().organizations.remove(0)));
-                        };
+                        match rsp {
+                            Ok(rsp) => created.set(Some(rsp.into_inner().organizations.remove(0))),
+                            Err(e) => {
+                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                            },
+                        }
                     }
                 })
             },

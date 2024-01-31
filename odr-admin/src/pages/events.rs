@@ -1,4 +1,7 @@
-use common::proto::{self, QueryEventsRequest, UpsertEventsRequest};
+use common::proto::{
+    self, organization_query, string_query, OrganizationQuery, QueryEventsRequest,
+    QueryOrganizationsRequest, StringQuery, UpsertEventsRequest,
+};
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 
@@ -9,26 +12,54 @@ use crate::{
         page::Page as GenericPage,
         table::Table,
     },
-    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
+    hooks::{toasts::use_toasts, use_grpc_client},
     pages::Routes,
 };
 
 #[component]
 pub fn Page(cx: Scope, org_id: String) -> Element {
-    use_grpc_client_provider::<EventsClient>(cx);
-
-    let events_client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let grpc_client = use_grpc_client(cx).unwrap();
 
     let toast_manager = use_toasts(cx).unwrap();
 
+    let organizations_rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
+        to_owned!(grpc_client, org_id);
+        async move {
+            let response = grpc_client
+                .organizations
+                .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
+                    query: Some(OrganizationQuery {
+                        query: Some(organization_query::Query::Id(StringQuery {
+                            operator: Some(string_query::Operator::Equals(org_id)),
+                        })),
+                    }),
+                }))
+                .await
+                .map_err(|e| anyhow::Error::new(e))?;
+
+            if response.into_inner().organizations.is_empty() {
+                return Err(anyhow::anyhow!("No organization returned for id"));
+            }
+
+            Ok(())
+        }
+    });
+
+    if let Some(err) = organizations_rsp
+        .value()
+        .map(|rsp| rsp.as_ref().err())
+        .flatten()
+    {
+        toast_manager.write_silent().0.new_error(err.to_string());
+    };
+
     let events = use_ref(cx, || Vec::new());
 
-    let rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(events_client, events);
+    let events_rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
+        to_owned!(grpc_client, events);
         async move {
-            let response = events_client
-                .lock()
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            let response = grpc_client
+                .events
                 .query_events(tonic::Request::new(QueryEventsRequest { query: None }))
                 .await
                 .map_err(|e| anyhow::Error::new(e))?;
@@ -38,7 +69,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
         }
     });
 
-    if let Some(err) = rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
+    if let Some(err) = events_rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
         toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(err.to_string()));
     };
 
@@ -116,7 +147,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
     let event_name = use_state(cx, || "".to_owned());
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
-    let client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let client = use_grpc_client(cx).unwrap();
     let toast_manager = use_toasts(cx).unwrap();
 
     {
@@ -132,41 +163,26 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
         Modal{
             do_submit: move || {
                 cx.spawn({
-                    submitted.set(true);
                     to_owned!(client, event_name, created, toast_manager, org_id, submitted);
                     async move {
-                        let rsp = {
-                            let lock = client.lock();
-                            match lock {
-                                Ok(mut unlocked) => {
-                                    let rsp = unlocked.upsert_events(UpsertEventsRequest{
-                                        events: vec![proto::Event{
-                                            id: "".to_owned(),
-                                            organization_id: org_id.clone(),
-                                            name: event_name.current().as_ref().clone(),
-                                        }],
-                                    }).await;
+                        submitted.set(true);
 
-                                    match rsp {
-                                        Ok(rsp) => Some(rsp),
-                                        Err(e) => {
-                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                            submitted.set(false);
-                                            None
-                                        },
-                                    }
-                                },
-                                Err(e) =>  {
-                                    toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                                    submitted.set(false);
-                                    None
-                                },
-                            }
+                        let rsp = { client.events.upsert_events(UpsertEventsRequest{
+                            events: vec![proto::Event{
+                                id: "".to_owned(),
+                                organization_id: org_id.clone(),
+                                name: event_name.get().clone(),
+                            }],
+                        })}.await;
 
-                        };
-                        if let Some(rsp) = rsp {
-                            created.set(Some(rsp.into_inner().events.remove(0)));
-                        };
+                        match rsp {
+                            Ok(rsp) => created.set(Some(rsp.into_inner().events.remove(0))),
+                            Err(e) => {
+                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                                submitted.set(false);
+                            },
+                        }
+
                     }
                 })
             },

@@ -8,23 +8,20 @@ use crate::{
         form::{Button, ButtonFlavor},
         page::Page as GenericPage,
     },
-    hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
+    hooks::{toasts::use_toasts, use_grpc_client},
     pages::Routes,
 };
 
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
-    use_grpc_client_provider::<EventsClient>(cx);
-
-    let events_client = use_grpc_client::<EventsClient>(cx).unwrap();
+    let grpc_client = use_grpc_client(cx).unwrap();
     let toast_manager = use_toasts(cx).unwrap();
 
     let event = use_future(cx, (), |_| {
-        to_owned!(events_client, id);
+        to_owned!(grpc_client, id);
         async move {
-            let response = events_client
-                .lock()
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            let response = grpc_client
+                .events
                 .query_events(Request::new(QueryEventsRequest {
                     query: Some(EventQuery {
                         query: Some(event_query::Query::Id(StringQuery {

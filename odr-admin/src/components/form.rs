@@ -31,18 +31,30 @@ pub fn TextInput<'a>(
 
     cx.render(rsx!(
         div {
-            class: "mb-3",
-            label {
-                "for": "{input_id}",
-                class: "form-label",
-                "{label}"
+            class: "field is-horizontal",
+            div {
+                class: "field-label is-normal",
+                label {
+                    "for": "{input_id}",
+                    class: "label",
+                    "{label}"
+                }
             }
-            input {
-                id: "{input_id}",
-                class: "form-control",
-                value: "{value_str}",
-                "type": typ,
-                oninput: move |evt| oninput.call(evt),
+            div {
+                class: "field-body",
+                div {
+                    class: "field",
+                    div {
+                        class: "control",
+                        input {
+                            id: "{input_id}",
+                            class: "input",
+                            value: "{value_str}",
+                            "type": typ,
+                            oninput: move |evt| oninput.call(evt),
+                        }
+                    }
+                }
             }
         }
     ))
@@ -119,6 +131,37 @@ pub fn CheckInput<'a>(
                     "{label}"
                 }
             }
+        }
+    ))
+}
+
+pub enum ButtonFlavor {
+    Info,
+    Success,
+}
+
+#[component]
+pub fn Button<'a>(
+    cx: Scope,
+    onclick: EventHandler<'a, MouseEvent>,
+    flavor: Option<ButtonFlavor>,
+    disabled: Option<bool>,
+    children: Element<'a>,
+) -> Element {
+    let mut class = "button".to_owned();
+
+    match flavor {
+        None => {}
+        Some(ButtonFlavor::Info) => class.push_str(" is-info"),
+        Some(ButtonFlavor::Success) => class.push_str(" is-success"),
+    };
+
+    cx.render(rsx!(
+        button {
+            class: "{class}",
+            disabled: *disabled,
+            onclick: move |evt| onclick.call(evt),
+            &children
         }
     ))
 }

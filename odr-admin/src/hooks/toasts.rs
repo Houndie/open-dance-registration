@@ -15,7 +15,7 @@ impl ToastManager {
         log::error!("Error occurred while fetching events: {}", error_message);
         self.toasts.push(Toast {
             title: "Oh no!".to_owned(),
-            body: "We're sorry, something unexpected went wrong".to_owned(),
+            body: "We're sorry, something unexpected went wrong.".to_owned(),
         })
     }
 

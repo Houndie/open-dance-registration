@@ -3,7 +3,12 @@ use dioxus::prelude::*;
 use dioxus_router::hooks::use_navigator;
 
 use crate::{
-    components::{modal::Modal, page::Page as GenericPage},
+    components::{
+        form::{Button, ButtonFlavor, TextInput, TextInputType},
+        modal::Modal,
+        page::Page as GenericPage,
+        table::Table,
+    },
     hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, OrganizationsClient},
     pages::Routes,
 };
@@ -45,8 +50,9 @@ pub fn Page(cx: Scope) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "My Organizations".to_owned(),
-            table {
-                class: "table table-striped",
+            Table {
+                is_striped: true,
+                is_fullwidth: true,
                 thead {
                     tr {
                         th {
@@ -70,8 +76,8 @@ pub fn Page(cx: Scope) -> Element {
                                 }
                                 td {
                                     style: "width: 1px; white-space: nowrap;",
-                                    button {
-                                        class: "btn btn-primary",
+                                    Button {
+                                        flavor: ButtonFlavor::Info,
                                         onclick: move |_| {
                                             nav.push(Routes::EventsPage{
                                                 org_id: id.clone(),
@@ -85,8 +91,8 @@ pub fn Page(cx: Scope) -> Element {
                     })
                 }
             }
-            button {
-                class: "btn btn-primary",
+            Button {
+                flavor: ButtonFlavor::Info,
                 onclick: move |_| show_org_modal.set(true),
                 "Create New Organization"
             }
@@ -163,20 +169,14 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
             },
             do_close: || do_close(),
             disable_submit: **submitted,
-            title: "Create new Organization",
+            title: "Create New Organization",
             form {
                 div {
                     class: "mb-3",
-                    label {
-                        "for": "create-organization-name-input",
-                        class: "form-label",
-                        "Organization Name"
-                    }
-                    input {
-                        id: "create-organization-name-input",
-                        class: "form-control",
-                        value: "{organization_name}",
-                        oninput: move |evt| organization_name.set(evt.value.clone()),
+                    TextInput {
+                        value: TextInputType::Text(organization_name.get().clone()),
+                        label: "Organization Name",
+                        oninput: move |evt: FormEvent| organization_name.set(evt.value.clone()),
                     }
                 }
             }

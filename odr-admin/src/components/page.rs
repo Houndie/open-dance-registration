@@ -10,38 +10,37 @@ pub fn Page<'a>(cx: Scope, title: String, children: Element<'a>) -> Element {
     cx.render(rsx!(
         div {
             class: "container",
-            h2 {
+            h1 {
+                class: "title",
                 "{title}"
             }
             &children
-            div {
-                class: "toast-container",
-                toast_manager.read().0.toasts().enumerate().map(|(idx, toast)| {
-                    let toast_manager = toast_manager.clone();
-                    cx.render(rsx!(
-                        div {
-                            key: "{idx}",
-                            class: "toast",
-                            role: "alert",
-                            div {
-                                class: "toast-header",
-                                "{toast.title}",
-                                button {
-                                    "type": "button",
-                                    class: "btn-close",
-                                    onclick: move |_| {
-                                        toast_manager.with_mut(|toast_manager| toast_manager.0.remove_toast(idx));
-                                    },
-                                }
-                            }
-                            div {
-                                class: "toast-body",
-                                "{toast.body}",
-                            }
-                        }
-                    ))
-                })
-            }
         }
+        toast_manager.read().0.toasts().enumerate().map(|(idx, toast)| {
+            let toast_manager = toast_manager.clone();
+            let offset = idx * 9;
+            cx.render(rsx!(
+                div {
+                    key: "{idx}",
+                    class: "notification is-warning",
+                    style: "position: fixed; bottom: {offset}rem; right: 1.5rem; z-index: 1000; height: 7rem;",
+                    role: "alert",
+                    button {
+                        class: "delete",
+                        onclick: move |_| {
+                            toast_manager.with_mut(|toast_manager| toast_manager.0.remove_toast(idx));
+                        },
+                    }
+
+                    h1 {
+                        class: "title is-4",
+                        "{toast.title}",
+                    }
+                    p {
+                        "{toast.body}",
+                    }
+                }
+            ))
+        })
     ))
 }

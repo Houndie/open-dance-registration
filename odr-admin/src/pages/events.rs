@@ -3,7 +3,12 @@ use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 
 use crate::{
-    components::{modal::Modal, page::Page as GenericPage},
+    components::{
+        form::{Button, ButtonFlavor, TextInput, TextInputType},
+        modal::Modal,
+        page::Page as GenericPage,
+        table::Table,
+    },
     hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
@@ -43,8 +48,9 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "My Events".to_owned(),
-            table {
-                class: "table table-striped",
+            Table {
+                is_striped: true,
+                is_fullwidth: true,
                 thead {
                     tr {
                         th {
@@ -68,8 +74,8 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                                 }
                                 td {
                                     style: "width: 1px; white-space: nowrap;",
-                                    button {
-                                        class: "btn btn-primary",
+                                    Button {
+                                        flavor: ButtonFlavor::Info,
                                         onclick: move |_| {
                                             nav.push(Routes::EventPage{
                                                 id: id.clone(),
@@ -83,8 +89,8 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                     })
                 }
             }
-            button {
-                class: "btn btn-primary",
+            Button {
+                flavor: ButtonFlavor::Info,
                 onclick: move |_| show_event_modal.set(true),
                 "Create New Event"
             }
@@ -168,19 +174,11 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
             disable_submit: **submitted,
             title: "Create new Event",
             form {
-                div {
-                    class: "mb-3",
-                    label {
-                        "for": "create-event-name-input",
-                        class: "form-label",
-                        "Event Name"
-                    }
-                    input {
-                        id: "create-event-name-input",
-                        class: "form-control",
-                        value: "{event_name}",
-                        oninput: move |evt| event_name.set(evt.value.clone()),
-                    }
+                TextInput {
+                    oninput: move |evt: FormEvent| event_name.set(evt.value.clone()),
+                    value: TextInputType::Text(event_name.get().clone()),
+                    label: "Event Name",
+                    input_id: "create-event-name-input",
                 }
             }
         }

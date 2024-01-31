@@ -1,6 +1,6 @@
 use crate::{
     components::{
-        form::{CheckInput, SelectInput, TextInput, TextInputType},
+        form::{Button, ButtonFlavor, CheckInput, SelectInput, TextInput, TextInputType},
         modal::Modal,
         page::Page as GenericPage,
     },
@@ -18,8 +18,8 @@ pub fn Page(cx: Scope, id: String) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "Modify Registration Schema".to_owned(),
-            button {
-                class: "btn btn-primary",
+            Button {
+                flavor: ButtonFlavor::Info,
                 onclick: |_| show_schema_item_modal.set(true),
                 "Add Field"
             }
@@ -239,9 +239,8 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                 }
                             )
                         })
-                        button {
-                            class: "btn btn-primary",
-                            prevent_default: "onclick",
+                        Button {
+                            flavor: ButtonFlavor::Info,
                             onclick: |_| fields.with_mut(|fields| fields.options.push(SelectOption::default())),
                             "Add Option"
                         }

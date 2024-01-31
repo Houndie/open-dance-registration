@@ -4,7 +4,10 @@ use dioxus_router::prelude::*;
 use tonic::Request;
 
 use crate::{
-    components::page::Page as GenericPage,
+    components::{
+        form::{Button, ButtonFlavor},
+        page::Page as GenericPage,
+    },
     hooks::{toasts::use_toasts, use_grpc_client, use_grpc_client_provider, EventsClient},
     pages::Routes,
 };
@@ -51,8 +54,8 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         class: "row",
                         div {
                             class: "col",
-                            button {
-                                class: "btn btn-primary",
+                            Button {
+                                flavor: ButtonFlavor::Info,
                                 onclick: |_| {
                                     nav.push(Routes::RegistrationSchemaPage {
                                         id: id.clone(),

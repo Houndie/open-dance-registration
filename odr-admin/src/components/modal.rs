@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+use crate::components::form::{Button, ButtonFlavor};
+
 #[component]
 pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
     cx: Scope,
@@ -11,60 +13,42 @@ pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
 ) -> Element {
     cx.render(rsx! {
         div {
-            style: "position: fixed; z-index: 1; padding-top: 100px; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgb(0,0,0); background-color: rgba(0,0,0,0.4);",
+            class: "modal is-active",
             div {
-                style: "margin: auto; width: 80%",
-                div {
-                    class: "card",
-                    div {
-                        div {
-                            class: "card-header",
-                            div {
-                                class: "row",
-                                div {
-                                    class: "col",
-                                    h5 {
-                                        class: "card-title",
-                                        "{title}"
-                                    }
-                                }
-                                div {
-                                    class: "col-1 d-flex justify-content-end",
-                                    button {
-                                        class: "btn-close",
-                                        onclick: |_| do_close(),
-                                    }
-                                }
-                            }
-                        }
-                        div {
-                            class: "card-body",
-                            &children,
-
-                            div {
-                                class: "d-flex flex-row-reverse",
-                                div {
-                                    class: "p-1 flex-shrink-1",
-                                    button {
-                                        class: "btn btn-primary",
-                                        disabled: *disable_submit,
-                                        onclick: |_| {
-                                            log::info!("HI");
-                                            do_submit()
-                                        },
-                                        "Create"
-                                    }
-                                }
-                                div {
-                                    class: "p-1 flex-shrink-1",
-                                    button {
-                                        class: "btn btn-secondary",
-                                        onclick: |_| do_close(),
-                                        "Cancel"
-                                    }
-                                }
-                            }
-                        }
+                class: "modal-background",
+                onclick: |_| do_close(),
+            }
+            div {
+                class: "modal-card",
+                header {
+                    class: "modal-card-head",
+                    p {
+                        class: "modal-card-title",
+                        "{title}"
+                    }
+                    button {
+                        class: "delete",
+                        "aria-label": "close",
+                        onclick: |_| do_close(),
+                    }
+                }
+                section {
+                    class: "modal-card-body",
+                    &children,
+                }
+                footer {
+                    class: "modal-card-foot",
+                    Button {
+                        flavor: ButtonFlavor::Success,
+                        disabled: *disable_submit,
+                        onclick: |_| {
+                            do_submit()
+                        },
+                        "Create"
+                    }
+                    Button {
+                        onclick: |_| do_close(),
+                        "Cancel"
                     }
                 }
             }

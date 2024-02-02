@@ -5,6 +5,8 @@ use hooks::{toasts::use_toasts_provider, use_grpc_client_provider};
 use log::LevelFilter;
 use pages::Routes;
 
+use crate::components::with_toasts::WithToasts;
+
 pub mod components;
 pub mod hooks;
 pub mod pages;
@@ -18,6 +20,8 @@ fn App(cx: Scope) -> Element {
     use_toasts_provider(cx);
     use_grpc_client_provider(cx);
     cx.render(rsx! {
-        Router::<Routes> {}
+        WithToasts {
+            Router::<Routes> {}
+        }
     })
 }

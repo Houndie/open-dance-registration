@@ -15,12 +15,14 @@ use crate::{
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
     let grpc_client = use_grpc_client(cx).unwrap();
-    let toast_manager = use_toasts(cx).unwrap();
 
-    let event = use_future(cx, (), |_| {
-        to_owned!(grpc_client, id);
+    let toast_manager = use_toasts(cx).unwrap();
+    let nav = use_navigator(cx);
+
+    let event_success = use_future(cx, (id,), |(id,)| {
+        to_owned!(grpc_client, toast_manager, nav);
         async move {
-            let response = grpc_client
+            let result = grpc_client
                 .events
                 .query_events(Request::new(QueryEventsRequest {
                     query: Some(EventQuery {
@@ -29,46 +31,51 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         })),
                     }),
                 }))
-                .await
-                .map_err(|e| anyhow::Error::new(e))?;
+                .await;
 
-            response
-                .into_inner()
-                .events
-                .pop()
-                .ok_or_else(|| anyhow::anyhow!("No event returned, yet no error"))
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toast_manager
+                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    return None;
+                }
+            };
+
+            let evt = response.into_inner().events.pop();
+
+            if evt.is_none() {
+                nav.push(Routes::NotFound);
+                return None;
+            }
+
+            evt
         }
     });
 
-    let nav = use_navigator(cx);
+    let event = match event_success.value().map(|o| o.as_ref()).flatten() {
+        Some(evt) => evt,
+        None => return None,
+    };
 
-    match event.value() {
-        Some(rsp) => match rsp {
-            Ok(event) => cx.render(rsx! {
-                GenericPage {
-                    title: event.name.clone(),
-                    div {
-                        class: "row",
-                        div {
-                            class: "col",
-                            Button {
-                                flavor: ButtonFlavor::Info,
-                                onclick: |_| {
-                                    nav.push(Routes::RegistrationSchemaPage {
-                                        id: id.clone(),
-                                    });
-                                },
-                                "Modify Registration Schema",
-                            }
-                        }
+    cx.render(rsx! {
+        GenericPage {
+            title: event.name.clone(),
+            div {
+                class: "row",
+                div {
+                    class: "col",
+                    Button {
+                        flavor: ButtonFlavor::Info,
+                        onclick: |_| {
+                            nav.push(Routes::RegistrationSchemaPage {
+                                id: id.clone(),
+                            });
+                        },
+                        "Modify Registration Schema",
                     }
                 }
-            }),
-            Err(e) => {
-                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
-                None
             }
-        },
-        None => None,
-    }
+        }
+    })
 }

@@ -20,25 +20,29 @@ pub fn Page(cx: Scope) -> Element {
 
     let orgs = use_ref(cx, || Vec::new());
 
-    let rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(grpc_client, orgs);
+    let orgs_success: &UseFuture<bool> = use_future(cx, (), |_| {
+        to_owned!(grpc_client, orgs, toast_manager);
         async move {
-            let response = grpc_client
+            let result = grpc_client
                 .organizations
                 .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
                     query: None,
                 }))
-                .await
-                .map_err(|e| anyhow::Error::new(e))?;
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toast_manager
+                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    return false;
+                }
+            };
 
             orgs.with_mut(|orgs| *orgs = response.into_inner().organizations);
-            Ok(())
+            true
         }
     });
-
-    if let Some(err) = rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
-        toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(err.to_string()));
-    };
 
     let show_org_modal = use_state(cx, || false);
 
@@ -47,60 +51,68 @@ pub fn Page(cx: Scope) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "My Organizations".to_owned(),
-            Table {
-                is_striped: true,
-                is_fullwidth: true,
-                thead {
-                    tr {
-                        th {
-                            class: "col-auto",
-                            "Name"
-                        }
-                        th{
-                            style: "width: 1px",
-                        }
-                    }
-                }
-                tbody {
-                    orgs.read().iter().map(|e|{
-                        let id = e.id.clone();
-                        rsx!{
+            if matches!(orgs_success.value(), Some(true)) {
+                rsx! {
+                    Table {
+                        is_striped: true,
+                        is_fullwidth: true,
+                        thead {
                             tr {
-                                key: "{e.id}",
-                                td{
+                                th {
                                     class: "col-auto",
-                                    e.name.clone()
+                                    "Name"
                                 }
-                                td {
-                                    style: "width: 1px; white-space: nowrap;",
-                                    Button {
-                                        flavor: ButtonFlavor::Info,
-                                        onclick: move |_| {
-                                            nav.push(Routes::EventsPage{
-                                                org_id: id.clone(),
-                                            });
-                                        },
-                                        "Edit Organization"
-                                    }
+                                th{
+                                    style: "width: 1px",
                                 }
                             }
                         }
-                    })
+                        tbody {
+                            orgs.read().iter().map(|e|{
+                                let id = e.id.clone();
+                                rsx!{
+                                    tr {
+                                        key: "{e.id}",
+                                        td{
+                                            class: "col-auto",
+                                            e.name.clone()
+                                        }
+                                        td {
+                                            style: "width: 1px; white-space: nowrap;",
+                                            Button {
+                                                flavor: ButtonFlavor::Info,
+                                                onclick: move |_| {
+                                                    nav.push(Routes::EventsPage{
+                                                        org_id: id.clone(),
+                                                    });
+                                                },
+                                                "Edit Organization"
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    Button {
+                        flavor: ButtonFlavor::Info,
+                        onclick: move |_| show_org_modal.set(true),
+                        "Create New Organization"
+                    }
+                    if **show_org_modal {
+                        rsx!{
+                            OrganizationModal {
+                                do_submit: |organization| {
+                                    show_org_modal.set(false);
+                                    orgs.with_mut(|organizations| organizations.push(organization));
+                                },
+                                do_close: || show_org_modal.set(false),
+                            }
+                        }
+                    }
                 }
             }
-            Button {
-                flavor: ButtonFlavor::Info,
-                onclick: move |_| show_org_modal.set(true),
-                "Create New Organization"
-            }
         }
-        if **show_org_modal { rsx!(OrganizationModal {
-            do_submit: |organization| {
-                show_org_modal.set(false);
-                orgs.with_mut(|organizations| organizations.push(organization));
-            },
-            do_close: || show_org_modal.set(false),
-        }) }
     })
 }
 

@@ -1,5 +1,6 @@
 pub mod event;
 pub mod events;
+pub mod not_found;
 pub mod organizations;
 pub mod registration_schema;
 
@@ -7,6 +8,7 @@ use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use event::Page as EventPage;
 use events::Page as EventsPage;
+use not_found::Page as NotFound;
 use organizations::Page as OrganizationsPage;
 use registration_schema::Page as RegistrationSchemaPage;
 
@@ -15,7 +17,7 @@ pub enum Routes {
     #[route("/")]
     OrganizationsPage,
 
-    #[route("/events")]
+    #[route("/organizations/:org_id")]
     EventsPage { org_id: String },
 
     #[route("/events/:id")]
@@ -23,4 +25,7 @@ pub enum Routes {
 
     #[route("/events/:id/registration_schema")]
     RegistrationSchemaPage { id: String },
+
+    #[route("/404")]
+    NotFound,
 }

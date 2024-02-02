@@ -22,10 +22,12 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
 
     let toast_manager = use_toasts(cx).unwrap();
 
-    let organizations_rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(grpc_client, org_id);
+    let nav = use_navigator(cx);
+
+    let organizations_rsp = use_future(cx, (), |_| {
+        to_owned!(grpc_client, org_id, nav, toast_manager);
         async move {
-            let response = grpc_client
+            let result = grpc_client
                 .organizations
                 .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
                     query: Some(OrganizationQuery {
@@ -34,106 +36,123 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                         })),
                     }),
                 }))
-                .await
-                .map_err(|e| anyhow::Error::new(e))?;
+                .await;
 
-            if response.into_inner().organizations.is_empty() {
-                return Err(anyhow::anyhow!("No organization returned for id"));
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toast_manager.write().0.new_error(e.to_string());
+                    return None;
+                }
+            };
+
+            let org = response.into_inner().organizations.pop();
+
+            if org.is_none() {
+                nav.push(Routes::NotFound);
+                return None;
             }
 
-            Ok(())
+            org
         }
     });
 
-    if let Some(err) = organizations_rsp
-        .value()
-        .map(|rsp| rsp.as_ref().err())
-        .flatten()
-    {
-        toast_manager.write_silent().0.new_error(err.to_string());
+    let org = match organizations_rsp.value().map(|o| o.as_ref()).flatten() {
+        Some(org) => org,
+        None => return None,
     };
 
     let events = use_ref(cx, || Vec::new());
 
-    let events_rsp: &UseFuture<Result<(), anyhow::Error>> = use_future(cx, (), |_| {
-        to_owned!(grpc_client, events);
+    let events_rsp: &UseFuture<bool> = use_future(cx, (), |_| {
+        to_owned!(grpc_client, events, toast_manager);
         async move {
-            let response = grpc_client
+            let result = grpc_client
                 .events
                 .query_events(tonic::Request::new(QueryEventsRequest { query: None }))
-                .await
-                .map_err(|e| anyhow::Error::new(e))?;
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toast_manager
+                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    return false;
+                }
+            };
 
             events.with_mut(|events| *events = response.into_inner().events);
-            Ok(())
+            true
         }
     });
 
-    if let Some(err) = events_rsp.value().map(|rsp| rsp.as_ref().err()).flatten() {
-        toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(err.to_string()));
-    };
-
     let show_event_modal = use_state(cx, || false);
-
-    let nav = use_navigator(cx);
     cx.render(rsx! {
         GenericPage {
-            title: "My Events".to_owned(),
-            Table {
-                is_striped: true,
-                is_fullwidth: true,
-                thead {
-                    tr {
-                        th {
-                            class: "col-auto",
-                            "Name"
-                        }
-                        th{
-                            style: "width: 1px",
-                        }
-                    }
-                }
-                tbody {
-                    events.read().iter().map(|e|{
-                        let id = e.id.clone();
-                        rsx!{
+            title: org.name.clone(),
+            if matches!(events_rsp.value(), Some(true)) {
+                rsx! {
+                    Table {
+                        is_striped: true,
+                        is_fullwidth: true,
+                        thead {
                             tr {
-                                key: "{e.id}",
-                                td{
+                                th {
                                     class: "col-auto",
-                                    e.name.clone()
+                                    "Name"
                                 }
-                                td {
-                                    style: "width: 1px; white-space: nowrap;",
-                                    Button {
-                                        flavor: ButtonFlavor::Info,
-                                        onclick: move |_| {
-                                            nav.push(Routes::EventPage{
-                                                id: id.clone(),
-                                            });
-                                        },
-                                        "Edit Event"
-                                    }
+                                th{
+                                    style: "width: 1px",
                                 }
                             }
                         }
-                    })
+                        tbody {
+                            events.read().iter().map(|e|{
+                                let id = e.id.clone();
+                                rsx!{
+                                    tr {
+                                        key: "{e.id}",
+                                        td{
+                                            class: "col-auto",
+                                            e.name.clone()
+                                        }
+                                        td {
+                                            style: "width: 1px; white-space: nowrap;",
+                                            Button {
+                                                flavor: ButtonFlavor::Info,
+                                                onclick: move |_| {
+                                                    nav.push(Routes::EventPage{
+                                                        id: id.clone(),
+                                                    });
+                                                },
+                                                "Edit Event"
+                                            }
+                                        }
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    Button {
+                        flavor: ButtonFlavor::Info,
+                        onclick: move |_| show_event_modal.set(true),
+                        "Create New Event"
+                    }
+                    if **show_event_modal {
+                        rsx!{
+                            EventModal {
+                                org_id: org_id.clone(),
+                                do_submit: |event| {
+                                    show_event_modal.set(false);
+                                    events.with_mut(|events| events.push(event));
+                                },
+                                do_close: || show_event_modal.set(false),
+                            }
+                        }
+                    }
                 }
             }
-            Button {
-                flavor: ButtonFlavor::Info,
-                onclick: move |_| show_event_modal.set(true),
-                "Create New Event"
-            }
         }
-        if **show_event_modal { rsx!(EventModal {
-            org_id: org_id.clone(),
-            do_submit: |event| {
-                show_event_modal.set(false);
-                events.with_mut(|events| events.push(event));
-            },
-            do_close: || show_event_modal.set(false),
-        }) }
     })
 }
 

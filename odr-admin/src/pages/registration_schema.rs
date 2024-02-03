@@ -1,19 +1,27 @@
+use std::collections::BTreeSet;
+
 use crate::{
     components::{
-        form::{Button, ButtonFlavor, CheckInput, SelectInput, TextInput, TextInputType},
+        form::{
+            Button, ButtonFlavor, CheckInput, CheckStyle, Field, SelectInput, TextInput,
+            TextInputType,
+        },
         modal::Modal,
         page::Page as GenericPage,
     },
     hooks::toasts::use_toasts,
 };
-use common::proto::{multi_select_type, CheckboxType, RegistrationSchemaItem, SelectOption};
+use common::proto::{
+    multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
+    CheckboxType, MultiSelectType, RegistrationSchemaItem, RegistrationSchemaItemType,
+    SelectOption, SelectType, TextType,
+};
 use dioxus::prelude::*;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
-    log::info!("{}", id); // temporarily silencing warning
     let show_schema_item_modal = use_state(cx, || false);
     cx.render(rsx! {
         GenericPage {
@@ -53,16 +61,20 @@ enum SelectDisplayType {
     Dropdown,
 }
 
+#[derive(EnumIter, strum_macros::Display)]
+enum MultiSelectDisplayType {
+    Checkboxes,
+    MultiselectBox,
+}
+
 #[derive(Default)]
 struct FieldsSelect {
-    default: u32,
     display: usize,
 }
 
 #[derive(Default)]
 struct FieldsMultiSelect {
-    default: Vec<u32>,
-    display: multi_select_type::Display,
+    display: usize,
 }
 
 #[derive(Default)]
@@ -77,6 +89,7 @@ struct ItemFields {
     text_type: FieldsText,
     checkbox_type: CheckboxType,
     select_type: FieldsSelect,
+    defaults: BTreeSet<usize>,
     multi_select_type: FieldsMultiSelect,
     options: Vec<SelectOption>,
 }
@@ -91,6 +104,7 @@ impl Default for ItemFields {
             select_type: FieldsSelect::default(),
             multi_select_type: FieldsMultiSelect::default(),
             options: Vec::default(),
+            defaults: BTreeSet::default(),
         }
     }
 }
@@ -115,129 +129,198 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     let type_selects = use_const(cx, || enum_selects::<ItemFieldsType>());
     let text_display_selects = use_const(cx, || enum_selects::<TextDisplayType>());
     let select_display_selects = use_const(cx, || enum_selects::<SelectDisplayType>());
+    let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
 
     cx.render(rsx!(Modal {
         title: "New Field",
-        do_submit: || { () },
+        do_submit: || {
+            let field_pin = fields.read();
+            let item = RegistrationSchemaItem {
+                id: "".to_owned(),
+                name: field_pin.name.clone(),
+                r#type: Some(RegistrationSchemaItemType{
+                    r#type: Some(match type_selects[field_pin.typ].0 {
+                        ItemFieldsType::Text => ItemType::Text(TextType {
+                            default: field_pin.text_type.default.clone(),
+                            display: match text_display_selects[field_pin.text_type.display].0 {
+                                TextDisplayType::Small => text_type::Display::Small,
+                                TextDisplayType::Large => text_type::Display::Large,
+                            } as i32,
+                        }),
+                        ItemFieldsType::Checkbox => ItemType::Checkbox(CheckboxType {
+                            default: field_pin.checkbox_type.default,
+                        }),
+                        ItemFieldsType::Select => ItemType::Select(SelectType{
+                            default: field_pin.defaults.first().copied().unwrap_or(0) as u32,
+                            display: match select_display_selects[field_pin.select_type.display].0 {
+                                SelectDisplayType::Radio => select_type::Display::Radio,
+                                SelectDisplayType::Dropdown => select_type::Display::Dropdown,
+                            } as i32,
+                            options: field_pin.options.iter().map(|option| SelectOption{
+                                id: "".to_owned(),
+                                name: option.name.clone(),
+                                product_id: "".to_owned(),
+                            }).collect(),
+                        }),
+                        ItemFieldsType::MultiSelect => ItemType::MultiSelect(MultiSelectType{
+                            defaults: field_pin.defaults.iter().map(|idx| *idx as u32).collect(),
+                            display: match multi_select_display_selects[field_pin.multi_select_type.display].0 {
+                                MultiSelectDisplayType::Checkboxes => multi_select_type::Display::Checkboxes,
+                                MultiSelectDisplayType::MultiselectBox => multi_select_type::Display::MultiselectBox,
+                            } as i32,
+                            options: field_pin.options.iter().map(|option| SelectOption{
+                                id: "".to_owned(),
+                                name: option.name.clone(),
+                                product_id: "".to_owned(),
+                            }).collect(),
+                        }),
+                    }),
+                }),
+            };
+
+            do_submit(item);
+        },
         do_close: do_close,
         disable_submit: false,
         form {
-            TextInput{
+            Field {
                 label: "Name",
-                value: TextInputType::Text(fields.read().name.clone()),
-                oninput: |evt: FormEvent| fields.write().name = evt.value.clone(),
+                TextInput{
+                    value: TextInputType::Text(fields.read().name.clone()),
+                    oninput: |evt: FormEvent| fields.write().name = evt.value.clone(),
+                }
             }
-            SelectInput {
+            Field {
                 label: "Type",
-                options: type_selects.iter().map(|(_, estr)| estr).cloned().collect(),
-                onchange: {
-                    let toaster = toaster.clone();
-                    move |evt: FormEvent| {
-                        let idx = match evt.value.parse::<usize>() {
-                            Ok(idx) => idx,
-                            Err(e) => {
-                                toaster.write().new_error(format!("{}", e));
-                                return;
-                            },
-                        };
-                        fields.write().typ = idx;
-                    }
-                },
-                value: fields.read().typ,
+                SelectInput {
+                    options: type_selects.iter().map(|(_, estr)| estr).cloned().collect(),
+                    onchange: {
+                        let toaster = toaster.clone();
+                        move |evt: FormEvent| {
+                            let idx = match evt.value.parse::<usize>() {
+                                Ok(idx) => idx,
+                                Err(e) => {
+                                    toaster.write().new_error(format!("{}", e));
+                                    return;
+                                },
+                            };
+                            let requires_truncation = if matches!(type_selects[idx].0, ItemFieldsType::Select) {
+                                fields.read().defaults.first().copied()
+                            } else {
+                                None
+                            };
+
+                            fields.with_mut(|fields| {
+                                fields.typ = idx;
+                                if let Some(default) = requires_truncation {
+                                    fields.defaults.clear();
+                                    fields.defaults.insert(default);
+                                }
+                            })
+                        }
+                    },
+                    value: fields.read().typ,
+                }
             }
             div {
-                class: "border rounded p-3",
+                class: "box",
 
                 match type_selects[fields.read().typ].0 {
                     ItemFieldsType::Text => rsx!(
-                        TextInput{
+                        Field {
                             label: "Default",
-                            value: TextInputType::Text(fields.read().text_type.default.clone()),
-                            oninput: |evt: FormEvent| fields.write().text_type.default = evt.value.clone(),
+                            TextInput{
+                                value: TextInputType::Text(fields.read().text_type.default.clone()),
+                                oninput: |evt: FormEvent| fields.write().text_type.default = evt.value.clone(),
+                            }
                         }
-                        SelectInput {
+                        Field {
                             label: "Display",
-                            options: text_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
-                            onchange: {
-                                let toaster = toaster.clone();
-                                move |evt: FormEvent| {
-                                    let idx = match evt.value.parse::<usize>() {
-                                        Ok(idx) => idx,
-                                        Err(e) => {
-                                            toaster.write().new_error(format!("{}", e));
-                                            return;
-                                        },
-                                    };
-                                    fields.write().text_type.display = idx
-                                }
-                            },
-                            value: fields.read().text_type.display,
+                            SelectInput {
+                                options: text_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
+                                onchange: {
+                                    let toaster = toaster.clone();
+                                    move |evt: FormEvent| {
+                                        let idx = match evt.value.parse::<usize>() {
+                                            Ok(idx) => idx,
+                                            Err(e) => {
+                                                toaster.write().new_error(format!("{}", e));
+                                                return;
+                                            },
+                                        };
+                                        fields.write().text_type.display = idx
+                                    }
+                                },
+                                value: fields.read().text_type.display,
+                            }
                         }
                     ),
 
                     ItemFieldsType::Checkbox => {
-                        log::info!("B1 {}", fields.read().checkbox_type.default);
                         rsx!(
-                        CheckInput{
-                            label: "Default",
-                            value: fields.read().checkbox_type.default,
-                            onclick: |_| fields.with_mut(|fields| fields.checkbox_type.default = !fields.checkbox_type.default),
-                        }
-                    )},
+                            Field {
+                                label: "Default",
+                                CheckInput{
+                                    style: CheckStyle::Checkbox,
+                                    value: fields.read().checkbox_type.default,
+                                    onclick: |_| fields.with_mut(|fields| fields.checkbox_type.default = !fields.checkbox_type.default),
+                                }
+                            }
+                        )
+                    },
 
                     ItemFieldsType::Select => rsx!(
-                        SelectInput {
+                        Field {
                             label: "Display",
-                            options: select_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
-                            onchange: {
-                                let toaster = toaster.clone();
-                                move |evt: FormEvent| {
-                                    let idx = match evt.value.parse::<usize>() {
-                                        Ok(idx) => idx,
-                                        Err(e) => {
-                                            toaster.write().new_error(format!("{}", e));
-                                            return;
-                                        },
-                                    };
-                                    fields.write().select_type.display = idx
-                                }
-                            },
-                            value: fields.read().select_type.display,
+                            SelectInput {
+                                options: select_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
+                                onchange: {
+                                    let toaster = toaster.clone();
+                                    move |evt: FormEvent| {
+                                        let idx = match evt.value.parse::<usize>() {
+                                            Ok(idx) => idx,
+                                            Err(e) => {
+                                                toaster.write().new_error(format!("{}", e));
+                                                return;
+                                            },
+                                        };
+                                        fields.write().select_type.display = idx
+                                    }
+                                },
+                                value: fields.read().select_type.display,
+                            }
+                        }
+                        Field {
+                            label: "",
+                            CheckInput{
+                                style: CheckStyle::Radio,
+                                label: "No defaults",
+                                value: fields.read().defaults.is_empty(),
+                                onclick: |_| fields.write().defaults.clear(),
+                            }
                         }
                         fields.read().options.iter().enumerate().map(|(idx, option)| {
-                            log::info!("{} {}", fields.read().select_type.default as usize, idx);
-                            rsx!(
-                                div {
-                                    class: "d-flex",
-                                    div {
-                                        class: "flex-grow-1",
-                                        TextInput {
-                                            key: "{idx}",
-                                            label: "Name",
-                                            value: TextInputType::Text(option.name.clone()),
-                                            oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
-                                        }
+                            rsx!{
+                                Field {
+                                    label: "Name",
+                                    TextInput{
+                                        value: TextInputType::Text(option.name.clone()),
+                                        is_expanded: true,
+                                        oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
                                     }
-                                    div {
-                                        class: "align-self-end ps-1",
-                                        CheckInput{
-                                            label: "Default",
-                                            value: fields.read().select_type.default as usize == idx,
-                                            onclick: move |_| {
-                                                let num = match idx.try_into() {
-                                                    Ok(idx) => idx,
-                                                    Err(_) => {
-                                                        fields.needs_update();
-                                                        return;
-                                                    },
-                                                };
-
-                                                fields.write().select_type.default = num;
-                                            }
+                                    CheckInput{
+                                        style: CheckStyle::Radio,
+                                        label: "Default",
+                                        value: fields.read().defaults.contains(&idx),
+                                        onclick: move |_| {
+                                            fields.with_mut(|fields| {
+                                                fields.defaults.clear();
+                                                fields.defaults.insert(idx);
+                                            })
                                         }
                                     }
                                 }
-                            )
+                            }
                         })
                         Button {
                             flavor: ButtonFlavor::Info,
@@ -245,7 +328,65 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                             "Add Option"
                         }
                     ),
-                    ItemFieldsType::MultiSelect => rsx!(div{}),
+                    ItemFieldsType::MultiSelect => rsx!{
+                        Field {
+                            label: "Display",
+                            SelectInput {
+                                options: multi_select_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
+                                onchange: {
+                                    to_owned!(toaster);
+                                    move |evt: FormEvent| {
+                                        let idx = match evt.value.parse::<usize>() {
+                                            Ok(idx) => idx,
+                                            Err(e) => {
+                                                toaster.write().new_error(format!("{}", e));
+                                                return;
+                                            },
+                                        };
+                                        fields.write().multi_select_type.display = idx
+                                    }
+                                },
+                                value: fields.read().multi_select_type.display,
+                            }
+                        }
+                        Field {
+                            label: "",
+                            Button {
+                                flavor: ButtonFlavor::Info,
+                                onclick: |_| fields.write().defaults.clear(),
+                                "Clear Defaults",
+                            }
+                        }
+                        fields.read().options.iter().enumerate().map(|(idx, option)| {
+                            rsx!{
+                                Field {
+                                    label: "Name",
+                                    TextInput{
+                                        value: TextInputType::Text(option.name.clone()),
+                                        is_expanded: true,
+                                        oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
+                                    }
+                                    CheckInput{
+                                        style: CheckStyle::Checkbox,
+                                        label: "Default",
+                                        value: fields.read().defaults.contains(&idx),
+                                        onclick: move |_| {
+                                            fields.with_mut(|fields| {
+                                                if !fields.defaults.remove(&idx) {
+                                                    fields.defaults.insert(idx);
+                                                };
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        })
+                        Button {
+                            flavor: ButtonFlavor::Info,
+                            onclick: |_| fields.write().options.push(SelectOption::default()),
+                            "Add Option"
+                        }
+                    },
                 }
             }
         }

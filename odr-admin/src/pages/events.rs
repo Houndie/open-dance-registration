@@ -7,7 +7,7 @@ use dioxus_router::prelude::*;
 
 use crate::{
     components::{
-        form::{Button, ButtonFlavor, TextInput, TextInputType},
+        form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
         modal::Modal,
         page::Page as GenericPage,
         table::Table,
@@ -208,11 +208,12 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
             disable_submit: **submitted,
             title: "Create new Event",
             form {
-                TextInput {
-                    oninput: move |evt: FormEvent| event_name.set(evt.value.clone()),
-                    value: TextInputType::Text(event_name.get().clone()),
+                Field {
                     label: "Event Name",
-                    input_id: "create-event-name-input",
+                    TextInput {
+                        oninput: move |evt: FormEvent| event_name.set(evt.value.clone()),
+                        value: TextInputType::Text(event_name.get().clone()),
+                    }
                 }
             }
         }

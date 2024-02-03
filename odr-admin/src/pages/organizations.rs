@@ -4,7 +4,7 @@ use dioxus_router::hooks::use_navigator;
 
 use crate::{
     components::{
-        form::{Button, ButtonFlavor, TextInput, TextInputType},
+        form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
         modal::Modal,
         page::Page as GenericPage,
         table::Table,
@@ -165,10 +165,12 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
             form {
                 div {
                     class: "mb-3",
-                    TextInput {
-                        value: TextInputType::Text(organization_name.get().clone()),
+                    Field {
                         label: "Organization Name",
-                        oninput: move |evt: FormEvent| organization_name.set(evt.value.clone()),
+                        TextInput {
+                            value: TextInputType::Text(organization_name.get().clone()),
+                            oninput: move |evt: FormEvent| organization_name.set(evt.value.clone()),
+                        }
                     }
                 }
             }

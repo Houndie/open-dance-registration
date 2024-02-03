@@ -28,12 +28,10 @@ impl ToastManager {
     }
 }
 
-pub struct ToastsContext(pub ToastManager);
-
 pub fn use_toasts_provider(cx: &ScopeState) {
-    use_shared_state_provider(cx, || ToastsContext(ToastManager::default()))
+    use_shared_state_provider(cx, || ToastManager::default())
 }
 
-pub fn use_toasts(cx: &ScopeState) -> Option<&UseSharedState<ToastsContext>> {
-    use_shared_state::<ToastsContext>(cx)
+pub fn use_toasts(cx: &ScopeState) -> Option<&UseSharedState<ToastManager>> {
+    use_shared_state::<ToastManager>(cx)
 }

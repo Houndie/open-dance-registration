@@ -20,12 +20,12 @@ use crate::{
 pub fn Page(cx: Scope, org_id: String) -> Element {
     let grpc_client = use_grpc_client(cx).unwrap();
 
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
 
     let nav = use_navigator(cx);
 
     let organizations_rsp = use_future(cx, (), |_| {
-        to_owned!(grpc_client, org_id, nav, toast_manager);
+        to_owned!(grpc_client, org_id, nav, toaster);
         async move {
             let result = grpc_client
                 .organizations
@@ -41,7 +41,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
             let response = match result {
                 Ok(rsp) => rsp,
                 Err(e) => {
-                    toast_manager.write().0.new_error(e.to_string());
+                    toaster.write().new_error(e.to_string());
                     return None;
                 }
             };
@@ -65,7 +65,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
     let events = use_ref(cx, || Vec::new());
 
     let events_rsp: &UseFuture<bool> = use_future(cx, (), |_| {
-        to_owned!(grpc_client, events, toast_manager);
+        to_owned!(grpc_client, events, toaster);
         async move {
             let result = grpc_client
                 .events
@@ -75,13 +75,12 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
             let response = match result {
                 Ok(rsp) => rsp,
                 Err(e) => {
-                    toast_manager
-                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    toaster.write().new_error(e.to_string());
                     return false;
                 }
             };
 
-            events.with_mut(|events| *events = response.into_inner().events);
+            *events.write() = response.into_inner().events;
             true
         }
     });
@@ -144,7 +143,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                                 org_id: org_id.clone(),
                                 do_submit: |event| {
                                     show_event_modal.set(false);
-                                    events.with_mut(|events| events.push(event));
+                                    events.write().push(event);
                                 },
                                 do_close: || show_event_modal.set(false),
                             }
@@ -167,7 +166,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
     let client = use_grpc_client(cx).unwrap();
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
 
     {
         let mut created_mut = created.write_silent();
@@ -182,7 +181,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
         Modal{
             do_submit: move || {
                 cx.spawn({
-                    to_owned!(client, event_name, created, toast_manager, org_id, submitted);
+                    to_owned!(client, event_name, created, toaster, org_id, submitted);
                     async move {
                         submitted.set(true);
 
@@ -197,7 +196,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
                         match rsp {
                             Ok(rsp) => created.set(Some(rsp.into_inner().events.remove(0))),
                             Err(e) => {
-                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                                toaster.write().new_error(e.to_string());
                                 submitted.set(false);
                             },
                         }

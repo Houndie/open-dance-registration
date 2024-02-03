@@ -110,7 +110,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
     let fields = use_ref(cx, || ItemFields::default());
     let type_selects = use_const(cx, || enum_selects::<ItemFieldsType>());
     let text_display_selects = use_const(cx, || enum_selects::<TextDisplayType>());
@@ -125,22 +125,22 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
             TextInput{
                 label: "Name",
                 value: TextInputType::Text(fields.read().name.clone()),
-                oninput: |evt: FormEvent| fields.with_mut(|fields| fields.name = evt.value.clone()),
+                oninput: |evt: FormEvent| fields.write().name = evt.value.clone(),
             }
             SelectInput {
                 label: "Type",
                 options: type_selects.iter().map(|(_, estr)| estr).cloned().collect(),
                 onchange: {
-                    let toast_manager = toast_manager.clone();
+                    let toaster = toaster.clone();
                     move |evt: FormEvent| {
                         let idx = match evt.value.parse::<usize>() {
                             Ok(idx) => idx,
                             Err(e) => {
-                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
+                                toaster.write().new_error(format!("{}", e));
                                 return;
                             },
                         };
-                        fields.with_mut(|fields| fields.typ = idx)
+                        fields.write().typ = idx;
                     }
                 },
                 value: fields.read().typ,
@@ -153,22 +153,22 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         TextInput{
                             label: "Default",
                             value: TextInputType::Text(fields.read().text_type.default.clone()),
-                            oninput: |evt: FormEvent| fields.with_mut(|fields| fields.text_type.default = evt.value.clone()),
+                            oninput: |evt: FormEvent| fields.write().text_type.default = evt.value.clone(),
                         }
                         SelectInput {
                             label: "Display",
                             options: text_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
                             onchange: {
-                                let toast_manager = toast_manager.clone();
+                                let toaster = toaster.clone();
                                 move |evt: FormEvent| {
                                     let idx = match evt.value.parse::<usize>() {
                                         Ok(idx) => idx,
                                         Err(e) => {
-                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
+                                            toaster.write().new_error(format!("{}", e));
                                             return;
                                         },
                                     };
-                                    fields.with_mut(|fields| fields.text_type.display = idx)
+                                    fields.write().text_type.display = idx
                                 }
                             },
                             value: fields.read().text_type.display,
@@ -190,16 +190,16 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                             label: "Display",
                             options: select_display_selects.iter().map(|(_, estr)| estr).cloned().collect(),
                             onchange: {
-                                let toast_manager = toast_manager.clone();
+                                let toaster = toaster.clone();
                                 move |evt: FormEvent| {
                                     let idx = match evt.value.parse::<usize>() {
                                         Ok(idx) => idx,
                                         Err(e) => {
-                                            toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(format!("{}", e)));
+                                            toaster.write().new_error(format!("{}", e));
                                             return;
                                         },
                                     };
-                                    fields.with_mut(|fields| fields.select_type.display = idx)
+                                    fields.write().select_type.display = idx
                                 }
                             },
                             value: fields.read().select_type.display,
@@ -215,7 +215,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                             key: "{idx}",
                                             label: "Name",
                                             value: TextInputType::Text(option.name.clone()),
-                                            oninput: move |evt: FormEvent| fields.with_mut(|fields| fields.options[idx].name = evt.value.clone()),
+                                            oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
                                         }
                                     }
                                     div {
@@ -232,7 +232,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                                     },
                                                 };
 
-                                                fields.with_mut(|fields| fields.select_type.default = num);
+                                                fields.write().select_type.default = num;
                                             }
                                         }
                                     }
@@ -241,7 +241,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         })
                         Button {
                             flavor: ButtonFlavor::Info,
-                            onclick: |_| fields.with_mut(|fields| fields.options.push(SelectOption::default())),
+                            onclick: |_| fields.write().options.push(SelectOption::default()),
                             "Add Option"
                         }
                     ),

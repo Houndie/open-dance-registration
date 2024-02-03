@@ -16,12 +16,12 @@ use crate::{
 pub fn Page(cx: Scope) -> Element {
     let grpc_client = use_grpc_client(cx).unwrap();
 
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
 
     let orgs = use_ref(cx, || Vec::new());
 
     let orgs_success: &UseFuture<bool> = use_future(cx, (), |_| {
-        to_owned!(grpc_client, orgs, toast_manager);
+        to_owned!(grpc_client, orgs, toaster);
         async move {
             let result = grpc_client
                 .organizations
@@ -33,13 +33,12 @@ pub fn Page(cx: Scope) -> Element {
             let response = match result {
                 Ok(rsp) => rsp,
                 Err(e) => {
-                    toast_manager
-                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    toaster.write().new_error(e.to_string());
                     return false;
                 }
             };
 
-            orgs.with_mut(|orgs| *orgs = response.into_inner().organizations);
+            *orgs.write() = response.into_inner().organizations;
             true
         }
     });
@@ -104,7 +103,7 @@ pub fn Page(cx: Scope) -> Element {
                             OrganizationModal {
                                 do_submit: |organization| {
                                     show_org_modal.set(false);
-                                    orgs.with_mut(|organizations| organizations.push(organization));
+                                    orgs.write().push(organization);
                                 },
                                 do_close: || show_org_modal.set(false),
                             }
@@ -126,7 +125,7 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
     let submitted = use_state(cx, || false);
     let created = use_ref(cx, || None);
     let client = use_grpc_client(cx).unwrap();
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
 
     {
         let mut created_mut = created.write_silent();
@@ -142,7 +141,7 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
             do_submit: move || {
                 cx.spawn({
                     submitted.set(true);
-                    to_owned!(client, organization_name, created, toast_manager);
+                    to_owned!(client, organization_name, created, toaster);
                     async move {
                         let rsp = client.organizations.upsert_organizations(UpsertOrganizationsRequest{
                             organizations: vec![Organization{
@@ -154,7 +153,7 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
                         match rsp {
                             Ok(rsp) => created.set(Some(rsp.into_inner().organizations.remove(0))),
                             Err(e) => {
-                                toast_manager.with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                                toaster.write().new_error(e.to_string());
                             },
                         }
                     }

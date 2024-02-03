@@ -16,11 +16,11 @@ use crate::{
 pub fn Page(cx: Scope, id: String) -> Element {
     let grpc_client = use_grpc_client(cx).unwrap();
 
-    let toast_manager = use_toasts(cx).unwrap();
+    let toaster = use_toasts(cx).unwrap();
     let nav = use_navigator(cx);
 
     let event_success = use_future(cx, (id,), |(id,)| {
-        to_owned!(grpc_client, toast_manager, nav);
+        to_owned!(grpc_client, toaster, nav);
         async move {
             let result = grpc_client
                 .events
@@ -36,8 +36,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
             let response = match result {
                 Ok(rsp) => rsp,
                 Err(e) => {
-                    toast_manager
-                        .with_mut(|toast_manager| toast_manager.0.new_error(e.to_string()));
+                    toaster.write().new_error(e.to_string());
                     return None;
                 }
             };

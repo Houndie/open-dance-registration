@@ -10,6 +10,8 @@ pub enum TextInputType {
 pub fn TextInput<'a>(
     cx: Scope,
     oninput: EventHandler<'a, FormEvent>,
+    onblur: Option<EventHandler<'a, FocusEvent>>,
+    invalid: Option<Option<String>>,
     value: TextInputType,
     is_expanded: Option<bool>,
 ) -> Element<'a> {
@@ -30,16 +32,37 @@ pub fn TextInput<'a>(
         class
     };
 
+    let invalid = invalid.as_ref().map(|o| o.as_ref()).flatten();
+
+    let input_class = "input".to_owned();
+    let input_class = if invalid.is_some() {
+        format!("{} is-danger", input_class)
+    } else {
+        input_class
+    };
+
     cx.render(rsx!(
         div {
             class: "{class}",
             div {
                 class: "control",
                 input {
-                    class: "input",
+                    class: "{input_class}",
                     value: "{value_str}",
                     "type": typ,
                     oninput: move |evt| oninput.call(evt),
+                    onblur: move |evt| match onblur {
+                        Some(onblur) => onblur.call(evt),
+                        None => (),
+                    },
+                }
+            }
+            if let Some(invalid) = invalid {
+                rsx!{
+                    p {
+                        class: "help is-danger",
+                        "{invalid}"
+                    }
                 }
             }
         }

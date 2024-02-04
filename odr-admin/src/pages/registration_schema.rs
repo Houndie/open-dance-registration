@@ -25,9 +25,22 @@ use dioxus_router::hooks::use_navigator;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
+fn default_registration_schema_item() -> RegistrationSchemaItem {
+    RegistrationSchemaItem {
+        id: String::default(),
+        name: String::default(),
+        r#type: Some(RegistrationSchemaItemType {
+            r#type: Some(ItemType::Text(TextType {
+                default: String::default(),
+                display: text_type::Display::Small as i32,
+            })),
+        }),
+    }
+}
+
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
-    let show_schema_item_modal = use_state(cx, || false);
+    let show_schema_item_modal = use_state(cx, || None);
 
     let toaster = use_toasts(cx).unwrap();
     let nav = use_navigator(cx);
@@ -131,20 +144,27 @@ pub fn Page(cx: Scope, id: String) -> Element {
                     }
                 }
                 tbody {
-                    schema.read().items.iter().map(|e| {
-                        let _id = e.id.clone();
+                    schema.read().items.iter().enumerate().map(|(idx, i)| {
+                        let item = i.clone();
+                        let key = if item.id == "" {
+                            format!("new-{}", idx)
+                        } else {
+                            item.id.clone()
+                        };
+
+                        let show_schema_item_modal = show_schema_item_modal.clone();
                         rsx!{
                             tr {
-                                key: "{e.id}",
+                                key: "{key}",
                                 td{
                                     class: "col-auto",
-                                    "{e.name}"
+                                    "{item.name}"
                                 }
                                 td{
                                     style: "width: 1px",
                                     Button {
                                         flavor: ButtonFlavor::Info,
-                                        onclick: |_| {},
+                                        onclick: move |_| show_schema_item_modal.set(Some(item.clone())),
                                         "Edit"
                                     }
                                 }
@@ -156,17 +176,30 @@ pub fn Page(cx: Scope, id: String) -> Element {
 
             Button {
                 flavor: ButtonFlavor::Info,
-                onclick: |_| show_schema_item_modal.set(true),
+                onclick: |_| show_schema_item_modal.set(Some(default_registration_schema_item())),
                 "Add Field"
             }
         }
-        if **show_schema_item_modal {
+        if let Some(item) = show_schema_item_modal.get() {
             rsx!(NewSchemaItemModal{
+                initial: item.clone(),
                 do_submit: |item| {
                     let mut send_schema = schema.read().clone();
-                    send_schema.items.push(item.clone());
+                    if item.id == "" {
+                        send_schema.items.push(item.clone());
+                    } else {
+                        let idx = send_schema.items.iter().position(|i| i.id == item.id);
+                        match idx {
+                            Some(idx) => send_schema.items[idx] = item.clone(),
+                            None => {
+                                toaster.write().new_error("Item not found".to_owned());
+                                return;
+                            },
+                        }
+                    }
+
                     cx.spawn({
-                        to_owned!(grpc_client, toaster);
+                        to_owned!(grpc_client, toaster, send_schema);
                         async move { 
                             let rsp = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
                                 registration_schemas: vec![send_schema],
@@ -180,10 +213,10 @@ pub fn Page(cx: Scope, id: String) -> Element {
                             }
                         }
                     });
-                    schema.write().items.push(item);
-                    show_schema_item_modal.set(false);
+                    *schema.write() = send_schema;
+                    show_schema_item_modal.set(None);
                 },
-                do_close: || show_schema_item_modal.set(false),
+                do_close: || show_schema_item_modal.set(None),
             })
         }
     })
@@ -232,7 +265,9 @@ struct FieldsText {
 }
 
 struct ItemFields {
+    id: String,
     name: String,
+    name_touched: bool,
     typ: usize,
     text_type: FieldsText,
     checkbox_type: CheckboxType,
@@ -245,7 +280,9 @@ struct ItemFields {
 impl Default for ItemFields {
     fn default() -> Self {
         ItemFields {
+            id: String::default(),
             name: String::default(),
+            name_touched: false,
             typ: 0,
             text_type: FieldsText::default(),
             checkbox_type: CheckboxType::default(),
@@ -269,22 +306,55 @@ fn enum_selects<Enum: IntoEnumIterator + std::fmt::Display>() -> Vec<(Enum, Stri
 #[component]
 fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
+    initial: Option<RegistrationSchemaItem>,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
     let toaster = use_toasts(cx).unwrap();
-    let fields = use_ref(cx, || ItemFields::default());
     let type_selects = use_const(cx, || enum_selects::<ItemFieldsType>());
     let text_display_selects = use_const(cx, || enum_selects::<TextDisplayType>());
     let select_display_selects = use_const(cx, || enum_selects::<SelectDisplayType>());
     let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
+    let fields = use_ref(cx, || match initial {
+        Some(item) => {
+            let item = item.clone();
+
+            let (typ, text_type, checkbox_type, defaults, select_type, multi_select_type, options) = match item.r#type.unwrap().r#type.unwrap() {
+                ItemType::Text(text) => (0, FieldsText {
+                    default: text.default,
+                    display: text.display as usize,
+                }, CheckboxType::default(), BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
+                ItemType::Checkbox(checkbox) => (1, FieldsText::default(), checkbox, BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
+                ItemType::Select(select) => (2, FieldsText::default(), CheckboxType::default(), BTreeSet::from([select.default as usize]), FieldsSelect {
+                    display: select.display as usize,
+                }, FieldsMultiSelect::default(), select.options),
+                ItemType::MultiSelect(multiselect) => (3, FieldsText::default(), CheckboxType::default(), multiselect.defaults.into_iter().map(|d| d as usize).collect(), FieldsSelect::default(), FieldsMultiSelect{
+                    display: multiselect.display as usize,
+                }, multiselect.options),
+            };
+
+            ItemFields {
+                id: item.id,
+                name: item.name,
+                name_touched: false,
+                typ,
+                text_type,
+                checkbox_type,
+                defaults,
+                select_type,
+                multi_select_type,
+                options,
+            }
+        },
+        None => ItemFields::default(),
+    });
 
     cx.render(rsx!(Modal {
         title: "New Field",
         do_submit: || {
             let field_pin = fields.read();
             let item = RegistrationSchemaItem {
-                id: "".to_owned(),
+                id: field_pin.id.clone(),
                 name: field_pin.name.clone(),
                 r#type: Some(RegistrationSchemaItemType{
                     r#type: Some(match type_selects[field_pin.typ].0 {
@@ -304,11 +374,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                 SelectDisplayType::Radio => select_type::Display::Radio,
                                 SelectDisplayType::Dropdown => select_type::Display::Dropdown,
                             } as i32,
-                            options: field_pin.options.iter().map(|option| SelectOption{
-                                id: "".to_owned(),
-                                name: option.name.clone(),
-                                product_id: "".to_owned(),
-                            }).collect(),
+                            options: field_pin.options.clone(),
                         }),
                         ItemFieldsType::MultiSelect => ItemType::MultiSelect(MultiSelectType{
                             defaults: field_pin.defaults.iter().map(|idx| *idx as u32).collect(),
@@ -316,11 +382,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                 MultiSelectDisplayType::Checkboxes => multi_select_type::Display::Checkboxes,
                                 MultiSelectDisplayType::MultiselectBox => multi_select_type::Display::MultiselectBox,
                             } as i32,
-                            options: field_pin.options.iter().map(|option| SelectOption{
-                                id: "".to_owned(),
-                                name: option.name.clone(),
-                                product_id: "".to_owned(),
-                            }).collect(),
+                            options: field_pin.options.clone(),
                         }),
                     }),
                 }),
@@ -335,7 +397,18 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                 label: "Name",
                 TextInput{
                     value: TextInputType::Text(fields.read().name.clone()),
-                    oninput: |evt: FormEvent| fields.write().name = evt.value.clone(),
+                    oninput: |evt: FormEvent| {
+                        fields.with_mut(|fields| {
+                            fields.name = evt.value.clone();
+                            fields.name_touched = false;
+                        })
+                    },
+                    onblur: |_| fields.write().name_touched = true,
+                    invalid: if fields.read().name_touched && fields.read().name == "" {
+                            Some("Name is required".to_owned())
+                        } else {
+                            None
+                        },
                 }
             }
             Field {
@@ -353,7 +426,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                 },
                             };
                             let requires_truncation = if matches!(type_selects[idx].0, ItemFieldsType::Select) {
-                                fields.read().defaults.first().copied()
+                                Some(fields.read().defaults.first().copied().unwrap_or(0))
                             } else {
                                 None
                             };
@@ -438,18 +511,10 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                 value: fields.read().select_type.display,
                             }
                         }
-                        Field {
-                            label: "",
-                            CheckInput{
-                                style: CheckStyle::Radio,
-                                label: "No defaults",
-                                value: fields.read().defaults.is_empty(),
-                                onclick: |_| fields.write().defaults.clear(),
-                            }
-                        }
                         fields.read().options.iter().enumerate().map(|(idx, option)| {
                             rsx!{
                                 Field {
+                                    key: "{idx}",
                                     label: "Name",
                                     TextInput{
                                         value: TextInputType::Text(option.name.clone()),
@@ -508,6 +573,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         fields.read().options.iter().enumerate().map(|(idx, option)| {
                             rsx!{
                                 Field {
+                                    key: "{idx}",
                                     label: "Name",
                                     TextInput{
                                         value: TextInputType::Text(option.name.clone()),

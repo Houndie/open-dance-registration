@@ -275,6 +275,7 @@ struct ItemFields {
     defaults: BTreeSet<usize>,
     multi_select_type: FieldsMultiSelect,
     options: Vec<SelectOption>,
+    validation_error: Option<String>,
 }
 
 impl Default for ItemFields {
@@ -290,6 +291,7 @@ impl Default for ItemFields {
             multi_select_type: FieldsMultiSelect::default(),
             options: Vec::default(),
             defaults: BTreeSet::default(),
+            validation_error: None,
         }
     }
 }
@@ -344,6 +346,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                 select_type,
                 multi_select_type,
                 options,
+                validation_error: None,
             }
         },
         None => ItemFields::default(),
@@ -352,41 +355,50 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     cx.render(rsx!(Modal {
         title: "New Field",
         do_submit: || {
-            let field_pin = fields.read();
-            let item = RegistrationSchemaItem {
-                id: field_pin.id.clone(),
-                name: field_pin.name.clone(),
-                r#type: Some(RegistrationSchemaItemType{
-                    r#type: Some(match type_selects[field_pin.typ].0 {
-                        ItemFieldsType::Text => ItemType::Text(TextType {
-                            default: field_pin.text_type.default.clone(),
-                            display: match text_display_selects[field_pin.text_type.display].0 {
-                                TextDisplayType::Small => text_type::Display::Small,
-                                TextDisplayType::Large => text_type::Display::Large,
-                            } as i32,
-                        }),
-                        ItemFieldsType::Checkbox => ItemType::Checkbox(CheckboxType {
-                            default: field_pin.checkbox_type.default,
-                        }),
-                        ItemFieldsType::Select => ItemType::Select(SelectType{
-                            default: field_pin.defaults.first().copied().unwrap_or(0) as u32,
-                            display: match select_display_selects[field_pin.select_type.display].0 {
-                                SelectDisplayType::Radio => select_type::Display::Radio,
-                                SelectDisplayType::Dropdown => select_type::Display::Dropdown,
-                            } as i32,
-                            options: field_pin.options.clone(),
-                        }),
-                        ItemFieldsType::MultiSelect => ItemType::MultiSelect(MultiSelectType{
-                            defaults: field_pin.defaults.iter().map(|idx| *idx as u32).collect(),
-                            display: match multi_select_display_selects[field_pin.multi_select_type.display].0 {
-                                MultiSelectDisplayType::Checkboxes => multi_select_type::Display::Checkboxes,
-                                MultiSelectDisplayType::MultiselectBox => multi_select_type::Display::MultiselectBox,
-                            } as i32,
-                            options: field_pin.options.clone(),
+            if fields.read().name == "" {
+                fields.with_mut(|fields| {
+                    fields.name_touched = true;
+                    fields.validation_error = Some("One or more fields have errors".to_owned())
+                });
+                return;
+            }
+
+            let item = fields.with(|fields| {
+                RegistrationSchemaItem {
+                    id: fields.id.clone(),
+                    name: fields.name.clone(),
+                    r#type: Some(RegistrationSchemaItemType{
+                        r#type: Some(match type_selects[fields.typ].0 {
+                            ItemFieldsType::Text => ItemType::Text(TextType {
+                                default: fields.text_type.default.clone(),
+                                display: match text_display_selects[fields.text_type.display].0 {
+                                    TextDisplayType::Small => text_type::Display::Small,
+                                    TextDisplayType::Large => text_type::Display::Large,
+                                } as i32,
+                            }),
+                            ItemFieldsType::Checkbox => ItemType::Checkbox(CheckboxType {
+                                default: fields.checkbox_type.default,
+                            }),
+                            ItemFieldsType::Select => ItemType::Select(SelectType{
+                                default: fields.defaults.first().copied().unwrap_or(0) as u32,
+                                display: match select_display_selects[fields.select_type.display].0 {
+                                    SelectDisplayType::Radio => select_type::Display::Radio,
+                                    SelectDisplayType::Dropdown => select_type::Display::Dropdown,
+                                } as i32,
+                                options: fields.options.clone(),
+                            }),
+                            ItemFieldsType::MultiSelect => ItemType::MultiSelect(MultiSelectType{
+                                defaults: fields.defaults.iter().map(|idx| *idx as u32).collect(),
+                                display: match multi_select_display_selects[fields.multi_select_type.display].0 {
+                                    MultiSelectDisplayType::Checkboxes => multi_select_type::Display::Checkboxes,
+                                    MultiSelectDisplayType::MultiselectBox => multi_select_type::Display::MultiselectBox,
+                                } as i32,
+                                options: fields.options.clone(),
+                            }),
                         }),
                     }),
-                }),
-            };
+                }
+            });
 
             do_submit(item);
         },
@@ -401,6 +413,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         fields.with_mut(|fields| {
                             fields.name = evt.value.clone();
                             fields.name_touched = false;
+                            fields.validation_error = None;
                         })
                     },
                     onblur: |_| fields.write().name_touched = true,
@@ -601,6 +614,14 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                             "Add Option"
                         }
                     },
+                }
+            }
+            if let Some(err) = fields.read().validation_error.as_ref() {
+                rsx!{
+                    p {
+                        class: "help is-danger",
+                        "{err}"
+                    }
                 }
             }
         }

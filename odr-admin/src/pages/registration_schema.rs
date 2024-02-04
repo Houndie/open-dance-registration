@@ -8,24 +8,152 @@ use crate::{
         },
         modal::Modal,
         page::Page as GenericPage,
+        table::Table,
     },
-    hooks::toasts::use_toasts,
+    hooks::{toasts::use_toasts, use_grpc_client},
+    pages::Routes,
 };
 use common::proto::{
-    multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
-    CheckboxType, MultiSelectType, RegistrationSchemaItem, RegistrationSchemaItemType,
-    SelectOption, SelectType, TextType,
+    event_query, multi_select_type, registration_schema_item_type::Type as ItemType,
+    registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery,
+    MultiSelectType, QueryEventsRequest, QueryRegistrationSchemasRequest, RegistrationSchema,
+    RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption,
+    SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest,
 };
 use dioxus::prelude::*;
+use dioxus_router::hooks::use_navigator;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
     let show_schema_item_modal = use_state(cx, || false);
+
+    let toaster = use_toasts(cx).unwrap();
+    let nav = use_navigator(cx);
+    let grpc_client = use_grpc_client(cx).unwrap();
+
+    let event = use_future(cx, (), |_| {
+        to_owned!(grpc_client, id, nav, toaster);
+        async move {
+            let result = grpc_client
+                .events
+                .query_events(tonic::Request::new(QueryEventsRequest {
+                    query: Some(EventQuery {
+                        query: Some(event_query::Query::Id(StringQuery {
+                            operator: Some(string_query::Operator::Equals(id)),
+                        })),
+                    }),
+                }))
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toaster.write().new_error(e.to_string());
+                    return None;
+                }
+            };
+
+            let event = response.into_inner().events.pop();
+
+            if event.is_none() {
+                nav.push(Routes::NotFound);
+                return None;
+            }
+
+            event
+        }
+    });
+
+    let _event = match event.value().map(|e| e.as_ref()).flatten() {
+        Some(event) => event,
+        None => return None,
+    };
+
+    let schema = use_ref(cx, RegistrationSchema::default);
+
+    let schema_loaded = use_future(cx, (), |_| {
+        to_owned!(grpc_client, id, toaster, schema);
+        async move {
+            let result = grpc_client
+                .registration_schema
+                .query_registration_schemas(tonic::Request::new(QueryRegistrationSchemasRequest {
+                    query: Some(RegistrationSchemaQuery {
+                        query: Some(registration_schema_query::Query::EventId(StringQuery {
+                            operator: Some(string_query::Operator::Equals(id.clone())),
+                        })),
+                    }),
+                }))
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toaster.write().new_error(e.to_string());
+                    return false;
+                }
+            };
+
+            *schema.write() = response
+                .into_inner()
+                .registration_schemas
+                .pop()
+                .unwrap_or_else(|| {
+                    let mut schema = RegistrationSchema::default();
+                    schema.event_id = id;
+                    schema
+                });
+
+            true
+        }
+    });
+
+    if !schema_loaded.value().unwrap_or(&false) {
+        return None;
+    }
+
     cx.render(rsx! {
         GenericPage {
             title: "Modify Registration Schema".to_owned(),
+            Table {
+                is_striped: true,
+                is_fullwidth: true,
+                thead {
+                    tr {
+                        th {
+                            class: "col-auto",
+                            "Item"
+                        }
+                        th{
+                            style: "width: 1px",
+                        }
+                    }
+                }
+                tbody {
+                    schema.read().items.iter().map(|e| {
+                        let _id = e.id.clone();
+                        rsx!{
+                            tr {
+                                key: "{e.id}",
+                                td{
+                                    class: "col-auto",
+                                    "{e.name}"
+                                }
+                                td{
+                                    style: "width: 1px",
+                                    Button {
+                                        flavor: ButtonFlavor::Info,
+                                        onclick: |_| {},
+                                        "Edit"
+                                    }
+                                }
+                            }
+                        }
+                    })
+                }
+            }
+
             Button {
                 flavor: ButtonFlavor::Info,
                 onclick: |_| show_schema_item_modal.set(true),
@@ -34,7 +162,27 @@ pub fn Page(cx: Scope, id: String) -> Element {
         }
         if **show_schema_item_modal {
             rsx!(NewSchemaItemModal{
-                do_submit: |item| () ,
+                do_submit: |item| {
+                    let mut send_schema = schema.read().clone();
+                    send_schema.items.push(item.clone());
+                    cx.spawn({
+                        to_owned!(grpc_client, toaster);
+                        async move { 
+                            let rsp = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
+                                registration_schemas: vec![send_schema],
+                            }).await;
+
+                            match rsp {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    toaster.write().new_error(e.to_string());
+                                }
+                            }
+                        }
+                    });
+                    schema.write().items.push(item);
+                    show_schema_item_modal.set(false);
+                },
                 do_close: || show_schema_item_modal.set(false),
             })
         }

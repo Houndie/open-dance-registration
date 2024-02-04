@@ -773,23 +773,27 @@ impl Store for SqliteStore {
             )
             .collect();
 
-            let query = format!("{} WHERE {}", base_options_query, where_clause);
+            if where_clause == "" {
+                Vec::new()
+            } else {
+                let query = format!("{} WHERE {}", base_options_query, where_clause);
 
-            let query_builder = sqlx::query_as(&query);
-            let query_builder = select_items
-                .iter()
-                .fold(query_builder, |query_builder, (_, _, item)| {
-                    query_builder.bind(&item.id)
-                });
+                let query_builder = sqlx::query_as(&query);
+                let query_builder = select_items
+                    .iter()
+                    .fold(query_builder, |query_builder, (_, _, item)| {
+                        query_builder.bind(&item.id)
+                    });
 
-            let rows: Vec<OptionRow> = query_builder
-                .fetch_all(&*self.pool)
-                .await
-                .map_err(|e| Error::FetchError(e))?;
+                let rows: Vec<OptionRow> = query_builder
+                    .fetch_all(&*self.pool)
+                    .await
+                    .map_err(|e| Error::FetchError(e))?;
 
-            rows.into_iter()
-                .map(|row| row.to_option())
-                .collect::<Result<Vec<_>, _>>()?
+                rows.into_iter()
+                    .map(|row| row.to_option())
+                    .collect::<Result<Vec<_>, _>>()?
+            }
         };
 
         let schemas = items_to_schema(items, options);
@@ -1470,12 +1474,14 @@ mod tests {
     enum QueryTest {
         All,
         EventId,
+        NoOptions,
         CompoundQuery,
         NoResults,
     }
 
     #[test_case(QueryTest::All ; "all")]
     #[test_case(QueryTest::EventId ; "event id")]
+    #[test_case(QueryTest::NoOptions ; "no options")]
     #[test_case(QueryTest::CompoundQuery ; "compound query")]
     #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
@@ -1496,6 +1502,10 @@ mod tests {
             QueryTest::EventId => TestCase {
                 query: Some(Query::EventId(LogicalQuery::Equals(init.event_1.clone()))),
                 expected: vec![schemas[0].clone()],
+            },
+            QueryTest::NoOptions => TestCase {
+                query: Some(Query::EventId(LogicalQuery::Equals(init.event_2.clone()))),
+                expected: vec![schemas[1].clone()],
             },
             QueryTest::CompoundQuery => TestCase {
                 query: Some(Query::Compound(CompoundQuery {

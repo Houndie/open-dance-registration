@@ -1,6 +1,7 @@
 use common::proto::{
     event_service_client::EventServiceClient,
     organization_service_client::OrganizationServiceClient,
+    registration_schema_service_client::RegistrationSchemaServiceClient,
 };
 use dioxus::prelude::*;
 
@@ -10,6 +11,7 @@ pub mod toasts;
 pub struct GrpcContext {
     pub events: EventServiceClient<tonic_web_wasm_client::Client>,
     pub organizations: OrganizationServiceClient<tonic_web_wasm_client::Client>,
+    pub registration_schema: RegistrationSchemaServiceClient<tonic_web_wasm_client::Client>,
 }
 
 impl GrpcContext {
@@ -17,7 +19,8 @@ impl GrpcContext {
         let web_client = tonic_web_wasm_client::Client::new(base_url);
         Self {
             events: EventServiceClient::new(web_client.clone()),
-            organizations: OrganizationServiceClient::new(web_client),
+            organizations: OrganizationServiceClient::new(web_client.clone()),
+            registration_schema: RegistrationSchemaServiceClient::new(web_client),
         }
     }
 }

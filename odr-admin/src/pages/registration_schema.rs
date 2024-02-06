@@ -188,17 +188,17 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 "Add Field"
             }
         }
-        if let Some(item) = show_schema_item_modal.get() {
+        if let Some((key, item)) = show_schema_item_modal.get() {
             rsx!(NewSchemaItemModal{
                 initial: item.clone(),
-                do_submit: |key, item| {
+                do_submit: |item| {
                     let mut send_schema = schema.read().clone();
                     if item.id == "" {
-                        send_schema.items.push((key, item.clone()));
+                        send_schema.items.push((key.clone(), item.clone()));
                     } else {
                         let idx = send_schema.items.iter().position(|(_, i)| i.id == item.id);
                         match idx {
-                            Some(idx) => send_schema.items[idx] = (key, item.clone()),
+                            Some(idx) => send_schema.items[idx] = (key.clone(), item.clone()),
                             None => {
                                 toaster.write().new_error("Item not found".to_owned());
                                 return;
@@ -319,9 +319,9 @@ fn enum_selects<Enum: IntoEnumIterator + std::fmt::Display>() -> Vec<(Enum, Stri
 }
 
 #[component]
-fn NewSchemaItemModal<DoSubmit: Fn(Uuid, RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
+fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
-    initial: Option<(Uuid, RegistrationSchemaItem)>,
+    initial: RegistrationSchemaItem,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
@@ -330,43 +330,36 @@ fn NewSchemaItemModal<DoSubmit: Fn(Uuid, RegistrationSchemaItem) -> (), DoClose:
     let text_display_selects = use_const(cx, || enum_selects::<TextDisplayType>());
     let select_display_selects = use_const(cx, || enum_selects::<SelectDisplayType>());
     let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
-    let fields = use_ref(cx, || match initial {
-        Some((_, item)) => {
-            let item = item.clone();
+    let fields = use_ref(cx, || {
+        let item = initial.clone();
 
-            let (typ, text_type, checkbox_type, defaults, select_type, multi_select_type, options) = match item.r#type.unwrap().r#type.unwrap() {
-                ItemType::Text(text) => (0, FieldsText {
-                    default: text.default,
-                    display: text.display as usize,
-                }, CheckboxType::default(), BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
-                ItemType::Checkbox(checkbox) => (1, FieldsText::default(), checkbox, BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
-                ItemType::Select(select) => (2, FieldsText::default(), CheckboxType::default(), BTreeSet::from([select.default as usize]), FieldsSelect {
-                    display: select.display as usize,
-                }, FieldsMultiSelect::default(), select.options),
-                ItemType::MultiSelect(multiselect) => (3, FieldsText::default(), CheckboxType::default(), multiselect.defaults.into_iter().map(|d| d as usize).collect(), FieldsSelect::default(), FieldsMultiSelect{
-                    display: multiselect.display as usize,
-                }, multiselect.options),
-            };
+        let (typ, text_type, checkbox_type, defaults, select_type, multi_select_type, options) = match item.r#type.unwrap().r#type.unwrap() {
+            ItemType::Text(text) => (0, FieldsText {
+                default: text.default,
+                display: text.display as usize,
+            }, CheckboxType::default(), BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
+            ItemType::Checkbox(checkbox) => (1, FieldsText::default(), checkbox, BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
+            ItemType::Select(select) => (2, FieldsText::default(), CheckboxType::default(), BTreeSet::from([select.default as usize]), FieldsSelect {
+                display: select.display as usize,
+            }, FieldsMultiSelect::default(), select.options),
+            ItemType::MultiSelect(multiselect) => (3, FieldsText::default(), CheckboxType::default(), multiselect.defaults.into_iter().map(|d| d as usize).collect(), FieldsSelect::default(), FieldsMultiSelect{
+                display: multiselect.display as usize,
+            }, multiselect.options),
+        };
 
-            ItemFields {
-                id: item.id,
-                name: item.name,
-                name_touched: false,
-                typ,
-                text_type,
-                checkbox_type,
-                defaults,
-                select_type,
-                multi_select_type,
-                options,
-                validation_error: None,
-            }
-        },
-        None => ItemFields::default(),
-    });
-    let key = use_state(cx, || match initial {
-        Some((key, _)) => key.clone(),
-        None => Uuid::new_v4(),
+        ItemFields {
+            id: item.id,
+            name: item.name,
+            name_touched: false,
+            typ,
+            text_type,
+            checkbox_type,
+            defaults,
+            select_type,
+            multi_select_type,
+            options,
+            validation_error: None,
+        }
     });
 
     cx.render(rsx!(Modal {
@@ -417,7 +410,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(Uuid, RegistrationSchemaItem) -> (), DoClose:
                 }
             });
 
-            do_submit(key.get().clone(), item);
+            do_submit(item);
         },
         do_close: do_close,
         disable_submit: false,

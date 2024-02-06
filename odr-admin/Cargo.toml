@@ -18,3 +18,4 @@ anyhow = "1.0.79"
 strum_macros = "0.25.3"
 strum = "0.25.0"
 futures = "0.3.30"
+uuid = { version = "1.7.0", features = ["v4", "js"] }

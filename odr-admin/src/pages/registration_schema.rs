@@ -24,6 +24,7 @@ use dioxus::prelude::*;
 use dioxus_router::hooks::use_navigator;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
+use uuid::Uuid;
 
 fn default_registration_schema_item() -> RegistrationSchemaItem {
     RegistrationSchemaItem {
@@ -36,6 +37,12 @@ fn default_registration_schema_item() -> RegistrationSchemaItem {
             })),
         }),
     }
+}
+
+#[derive(Default, Clone)]
+struct Schema {
+    items: Vec<(Uuid, RegistrationSchemaItem)>,
+    event_id: String,
 }
 
 #[component]
@@ -84,7 +91,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
         None => return None,
     };
 
-    let schema = use_ref(cx, RegistrationSchema::default);
+    let schema = use_ref(cx, Schema::default);
 
     let schema_loaded = use_future(cx, (), |_| {
         to_owned!(grpc_client, id, toaster, schema);
@@ -108,7 +115,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 }
             };
 
-            *schema.write() = response
+            let registration_schema = response
                 .into_inner()
                 .registration_schemas
                 .pop()
@@ -117,6 +124,11 @@ pub fn Page(cx: Scope, id: String) -> Element {
                     schema.event_id = id;
                     schema
                 });
+
+            *schema.write() = Schema {
+                items: registration_schema.items.iter().map(|item| (Uuid::new_v4(), item.clone())).collect(),
+                event_id: registration_schema.event_id,
+            };
 
             true
         }
@@ -144,13 +156,9 @@ pub fn Page(cx: Scope, id: String) -> Element {
                     }
                 }
                 tbody {
-                    schema.read().items.iter().enumerate().map(|(idx, i)| {
+                    schema.read().items.iter().map(|(key, i)| {
                         let item = i.clone();
-                        let key = if item.id == "" {
-                            format!("new-{}", idx)
-                        } else {
-                            item.id.clone()
-                        };
+                        let key = key.clone();
 
                         let show_schema_item_modal = show_schema_item_modal.clone();
                         rsx!{
@@ -164,7 +172,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
                                     style: "width: 1px",
                                     Button {
                                         flavor: ButtonFlavor::Info,
-                                        onclick: move |_| show_schema_item_modal.set(Some(item.clone())),
+                                        onclick: move |_| show_schema_item_modal.set(Some((key.clone(), item.clone()))),
                                         "Edit"
                                     }
                                 }
@@ -176,21 +184,21 @@ pub fn Page(cx: Scope, id: String) -> Element {
 
             Button {
                 flavor: ButtonFlavor::Info,
-                onclick: |_| show_schema_item_modal.set(Some(default_registration_schema_item())),
+                onclick: |_| show_schema_item_modal.set(Some((Uuid::new_v4(), default_registration_schema_item()))),
                 "Add Field"
             }
         }
         if let Some(item) = show_schema_item_modal.get() {
             rsx!(NewSchemaItemModal{
                 initial: item.clone(),
-                do_submit: |item| {
+                do_submit: |key, item| {
                     let mut send_schema = schema.read().clone();
                     if item.id == "" {
-                        send_schema.items.push(item.clone());
+                        send_schema.items.push((key, item.clone()));
                     } else {
-                        let idx = send_schema.items.iter().position(|i| i.id == item.id);
+                        let idx = send_schema.items.iter().position(|(_, i)| i.id == item.id);
                         match idx {
-                            Some(idx) => send_schema.items[idx] = item.clone(),
+                            Some(idx) => send_schema.items[idx] = (key, item.clone()),
                             None => {
                                 toaster.write().new_error("Item not found".to_owned());
                                 return;
@@ -198,11 +206,16 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         }
                     }
 
+                    let registration_schema = RegistrationSchema {
+                        event_id: send_schema.event_id.clone(),
+                        items: send_schema.items.iter().cloned().map(|(_, i)| i).collect(),
+                    };
+
                     cx.spawn({
-                        to_owned!(grpc_client, toaster, send_schema);
+                        to_owned!(grpc_client, toaster, registration_schema);
                         async move { 
                             let rsp = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
-                                registration_schemas: vec![send_schema],
+                                registration_schemas: vec![registration_schema],
                             }).await;
 
                             match rsp {
@@ -306,9 +319,9 @@ fn enum_selects<Enum: IntoEnumIterator + std::fmt::Display>() -> Vec<(Enum, Stri
 }
 
 #[component]
-fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
+fn NewSchemaItemModal<DoSubmit: Fn(Uuid, RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
-    initial: Option<RegistrationSchemaItem>,
+    initial: Option<(Uuid, RegistrationSchemaItem)>,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
@@ -318,7 +331,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     let select_display_selects = use_const(cx, || enum_selects::<SelectDisplayType>());
     let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
     let fields = use_ref(cx, || match initial {
-        Some(item) => {
+        Some((_, item)) => {
             let item = item.clone();
 
             let (typ, text_type, checkbox_type, defaults, select_type, multi_select_type, options) = match item.r#type.unwrap().r#type.unwrap() {
@@ -350,6 +363,10 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
             }
         },
         None => ItemFields::default(),
+    });
+    let key = use_state(cx, || match initial {
+        Some((key, _)) => key.clone(),
+        None => Uuid::new_v4(),
     });
 
     cx.render(rsx!(Modal {
@@ -400,7 +417,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                 }
             });
 
-            do_submit(item);
+            do_submit(key.get().clone(), item);
         },
         do_close: do_close,
         disable_submit: false,

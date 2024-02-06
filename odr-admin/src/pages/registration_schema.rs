@@ -48,6 +48,7 @@ struct Schema {
 #[component]
 pub fn Page(cx: Scope, id: String) -> Element {
     let show_schema_item_modal = use_state(cx, || None);
+    let show_delete_item_modal = use_state(cx, || None);
 
     let toaster = use_toasts(cx).unwrap();
     let nav = use_navigator(cx);
@@ -153,10 +154,13 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         th{
                             style: "width: 1px",
                         }
+                        th{
+                            style: "width: 1px",
+                        }
                     }
                 }
                 tbody {
-                    schema.read().items.iter().map(|(key, i)| {
+                    schema.read().items.iter().enumerate().map(|(idx, (key, i))| {
                         let item = i.clone();
                         let key = key.clone();
 
@@ -174,6 +178,13 @@ pub fn Page(cx: Scope, id: String) -> Element {
                                         flavor: ButtonFlavor::Info,
                                         onclick: move |_| show_schema_item_modal.set(Some((key.clone(), item.clone()))),
                                         "Edit"
+                                    }
+                                }
+                                td{
+                                    Button {
+                                        flavor: ButtonFlavor::Danger,
+                                        onclick: move |_| { show_delete_item_modal.set(Some(idx));},
+                                        "Delete"
                                     }
                                 }
                             }
@@ -230,6 +241,36 @@ pub fn Page(cx: Scope, id: String) -> Element {
                     show_schema_item_modal.set(None);
                 },
                 do_close: || show_schema_item_modal.set(None),
+            })
+        }
+        if let Some(idx) = show_delete_item_modal.get() {
+            rsx!(DeleteItemModal{
+                do_submit: move || {
+                    let registration_schema = RegistrationSchema {
+                        event_id: schema.read().event_id.clone(),
+                        items: schema.read().items.iter().enumerate().filter(|(i, _)| i != idx).map(|(_, (_, i))| i).cloned().collect(),
+                    };
+
+                    cx.spawn({
+                        to_owned!(grpc_client, toaster, registration_schema);
+                        async move { 
+                            let rsp = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
+                                registration_schemas: vec![registration_schema],
+                            }).await;
+
+                            match rsp {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    toaster.write().new_error(e.to_string());
+                                }
+                            }
+                        }
+                    });
+
+                    schema.write().items.remove(*idx);
+                    show_delete_item_modal.set(None);
+                },
+                do_close: || show_delete_item_modal.set(None),
             })
         }
     })
@@ -634,6 +675,20 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                     }
                 }
             }
+        }
+    }))
+}
+
+#[component]
+fn DeleteItemModal<DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(cx: Scope, do_submit: DoSubmit, do_close: DoClose) -> Element {
+
+    cx.render(rsx!(Modal {
+        title: "Delete Field",
+        do_submit: do_submit,
+        do_close: do_close,
+        disable_submit: false,
+        p {
+            "Are you sure you want to delete this field?"
         }
     }))
 }

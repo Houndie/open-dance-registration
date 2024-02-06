@@ -146,6 +146,7 @@ pub fn CheckInput<'a>(
 pub enum ButtonFlavor {
     Info,
     Success,
+    Danger,
 }
 
 #[component]
@@ -162,6 +163,7 @@ pub fn Button<'a>(
         None => {}
         Some(ButtonFlavor::Info) => class.push_str(" is-info"),
         Some(ButtonFlavor::Success) => class.push_str(" is-success"),
+        Some(ButtonFlavor::Danger) => class.push_str(" is-danger"),
     };
 
     cx.render(rsx!(

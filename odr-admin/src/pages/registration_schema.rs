@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::{collections::{BTreeSet, HashMap}, rc::Rc};
 
 use crate::{
     components::{
@@ -43,6 +43,27 @@ fn default_registration_schema_item() -> RegistrationSchemaItem {
 struct Schema {
     items: Vec<(Uuid, RegistrationSchemaItem)>,
     event_id: String,
+}
+
+impl From<Schema> for RegistrationSchema {
+    fn from(schema: Schema) -> Self {
+        RegistrationSchema {
+            event_id: schema.event_id,
+            items: schema.items.into_iter().map(|(_, i)| i).collect(),
+        }
+    }
+}
+
+struct DragData {
+    dragged: usize,
+    new_location: usize,
+    line_location: Option<LineLocation>,
+}
+
+struct LineLocation {
+    top: f64,
+    left: f64,
+    width: f64,
 }
 
 #[component]
@@ -139,14 +160,35 @@ pub fn Page(cx: Scope, id: String) -> Element {
         return None;
     }
 
+    let table_row_refs: &UseRef<HashMap<Uuid, Rc<MountedData>>> = use_ref(cx, HashMap::default);
+    let table_left_right = use_state(cx, || None);
+    let drag_data: &UseState<Option<DragData>> = use_state(cx, || None);
+    let grabbing_cursor = use_state(cx, || false);
+    let cursor = if *grabbing_cursor.get() {
+        "cursor: grabbing; cursor: -moz-grabbing; cursor: -webkit-grabbing;"
+    } else {
+        "cursor: auto"
+    }.to_owned();
+
     cx.render(rsx! {
         GenericPage {
             title: "Modify Registration Schema".to_owned(),
+            style: cursor,
             Table {
+                onmounted: move |d: MountedEvent| { 
+                    to_owned!(table_left_right, d);
+                    cx.spawn(async move {
+                        let rect = d.data.get_client_rect().await.unwrap();
+                        table_left_right.set(Some((rect.min_x(), rect.max_x())));
+                    });
+                },
                 is_striped: true,
                 is_fullwidth: true,
                 thead {
                     tr {
+                        th{
+                            style: "width: 1px",
+                        }
                         th {
                             class: "col-auto",
                             "Item"
@@ -168,6 +210,66 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         rsx!{
                             tr {
                                 key: "{key}",
+                                onmounted: move |d| { table_row_refs.write().insert(key, d.data); },
+                                ondragover: move |dragover| {
+                                    to_owned!(table_row_refs, drag_data, toaster);
+                                    cx.spawn(async move {
+                                        if drag_data.get().is_none() {
+                                            return;
+                                        }
+
+                                        let row_refs = table_row_refs.read();
+                                        let row_ref = match row_refs.get(&key) {
+                                            Some(row_ref) => row_ref,
+                                            None => return,
+                                        };
+
+                                        let rect = match row_ref.get_client_rect().await {
+                                            Ok(rect) => rect,
+                                            Err(e) => {
+                                                toaster.write().new_error(e.to_string());
+                                                return
+                                            },
+                                        };
+
+                                        if let Some(line_location) = drag_data.get() {
+                                            let (new_location, top) = if dragover.mouse.page_coordinates().y < rect.min_y() + rect.height() / 2.0 {
+                                                let new_location = if line_location.dragged < idx {
+                                                    idx - 1
+                                                } else {
+                                                    idx
+                                                };
+                                                    
+                                                (new_location, rect.min_y())
+                                            } else {
+                                                let new_location = if line_location.dragged <= idx {
+                                                    idx
+                                                } else {
+                                                    idx + 1
+                                                };
+
+                                                (new_location, rect.max_y())
+                                            };
+
+                                            drag_data.set(Some(DragData{
+                                                dragged: line_location.dragged,
+                                                new_location: new_location,
+                                                line_location: Some(LineLocation{
+                                                    top: top,
+                                                    left: rect.min_x(),
+                                                    width: rect.width(),
+                                                }),
+                                            }));
+                                        }
+
+                                    });
+                                },
+                                GrabCell {
+                                    schema: schema.clone(),
+                                    drag_data: drag_data.clone(),
+                                    grabbing_cursor: grabbing_cursor.clone(),
+                                    idx: idx,
+                                }
                                 td{
                                     class: "col-auto",
                                     "{item.name}"
@@ -197,6 +299,13 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 flavor: ButtonFlavor::Info,
                 onclick: |_| show_schema_item_modal.set(Some((Uuid::new_v4(), default_registration_schema_item()))),
                 "Add Field"
+            }
+        }
+        if let Some(absolute_location) = drag_data.get().as_ref().and_then(|d| d.line_location.as_ref()) {
+            rsx!{
+                hr {
+                    style: "position: fixed; top: {absolute_location.top}px; left: {absolute_location.left}px; height: 5px; width: {absolute_location.width}px; margin-top: 0; margin-bottom: 0; background-color: black;",
+                }
             }
         }
         if let Some((key, item)) = show_schema_item_modal.get() {
@@ -268,10 +377,75 @@ pub fn Page(cx: Scope, id: String) -> Element {
                     });
 
                     schema.write().items.remove(*idx);
+                    table_row_refs.write().remove(&schema.read().items[*idx].0);
                     show_delete_item_modal.set(None);
                 },
                 do_close: || show_delete_item_modal.set(None),
             })
+        }
+    })
+}
+
+#[component]
+fn GrabCell(cx: Scope, schema: UseRef<Schema>, drag_data: UseState<Option<DragData>>, idx: usize, grabbing_cursor: UseState<bool>) -> Element {
+    let toaster = use_toasts(cx).unwrap();
+    let grpc_client = use_grpc_client(cx).unwrap();
+    let style = if *grabbing_cursor.get() {
+        "grabbing"
+    } else {
+        "grab"
+    };
+
+    cx.render(rsx!{
+        td{
+            style: "width: 1px",
+            draggable: true,
+            onmousedown: |_| grabbing_cursor.set(true),
+            onmouseup: |_| grabbing_cursor.set(false),
+            ondragstart: move |_| {
+                drag_data.set(Some(DragData{
+                    dragged: *idx,
+                    new_location: *idx,
+                    line_location: None,
+                }));
+            },
+            ondragend: move |_| {
+                grabbing_cursor.set(false);
+                cx.spawn({
+                    to_owned!(drag_data, schema, grpc_client, toaster);
+                    async move {
+                        let data = match drag_data.get() {
+                            Some(d) => d,
+                            None => return,
+                        };
+
+                        if data.dragged == data.new_location {
+                            drag_data.set(None);
+                            return;
+                        }
+
+                        let mut schema_copy = schema.read().clone();
+                        if data.dragged < data.new_location {
+                            schema_copy.items[data.dragged..=data.new_location].rotate_left(1);
+                        } else {
+                            schema_copy.items[data.new_location..=data.dragged].rotate_right(1);
+                        }
+
+                        *schema.write() = schema_copy.clone();
+                        drag_data.set(None);
+
+                        let res = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
+                            registration_schemas: vec![schema_copy.into()],
+                        }).await;
+
+                        if let Err(e) = res {
+                            toaster.write().new_error(e.to_string());
+                        }
+                    }
+                });
+            },
+            cursor: "{style}",
+            "⣶",
         }
     })
 }

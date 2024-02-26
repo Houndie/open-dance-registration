@@ -6,6 +6,7 @@ pub fn Table<'a>(
     children: Element<'a>,
     is_striped: Option<bool>,
     is_fullwidth: Option<bool>,
+    onmounted: Option<EventHandler<'a, MountedEvent>>,
 ) -> Element {
     let mut class = "table".to_owned();
 
@@ -24,6 +25,11 @@ pub fn Table<'a>(
     cx.render(rsx! {
         table {
             class: "{class}",
+            onmounted: move |d| {
+                if let Some(onmounted) = onmounted {
+                    onmounted.call(d);
+                };
+            },
             &children
         }
     })

@@ -10,7 +10,7 @@ use crate::{
         page::Page as GenericPage,
         table::Table,
     },
-    hooks::{toasts::use_toasts, use_grpc_client},
+    hooks::{toasts::{use_toasts, ToastManager}, use_grpc_client},
     pages::Routes,
 };
 use common::proto::{
@@ -22,6 +22,7 @@ use common::proto::{
 };
 use dioxus::prelude::*;
 use dioxus_router::hooks::use_navigator;
+use futures::{join, Future};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use uuid::Uuid;
@@ -54,12 +55,14 @@ impl From<Schema> for RegistrationSchema {
     }
 }
 
+#[derive(Clone)]
 struct DragData {
     dragged: usize,
     new_location: usize,
     line_location: Option<LineLocation>,
 }
 
+#[derive(Clone)]
 struct LineLocation {
     top: f64,
     left: f64,
@@ -161,7 +164,6 @@ pub fn Page(cx: Scope, id: String) -> Element {
     }
 
     let table_row_refs: &UseRef<HashMap<Uuid, Rc<MountedData>>> = use_ref(cx, HashMap::default);
-    let table_left_right = use_state(cx, || None);
     let drag_data: &UseState<Option<DragData>> = use_state(cx, || None);
     let grabbing_cursor = use_state(cx, || false);
     let cursor = if *grabbing_cursor.get() {
@@ -175,13 +177,6 @@ pub fn Page(cx: Scope, id: String) -> Element {
             title: "Modify Registration Schema".to_owned(),
             style: cursor,
             Table {
-                onmounted: move |d: MountedEvent| { 
-                    to_owned!(table_left_right, d);
-                    cx.spawn(async move {
-                        let rect = d.data.get_client_rect().await.unwrap();
-                        table_left_right.set(Some((rect.min_x(), rect.max_x())));
-                    });
-                },
                 is_striped: true,
                 is_fullwidth: true,
                 thead {
@@ -214,61 +209,42 @@ pub fn Page(cx: Scope, id: String) -> Element {
                                 ondragover: move |dragover| {
                                     to_owned!(table_row_refs, drag_data, toaster);
                                     cx.spawn(async move {
-                                        if drag_data.get().is_none() {
-                                            return;
-                                        }
-
-                                        let row_refs = table_row_refs.read();
-                                        let row_ref = match row_refs.get(&key) {
-                                            Some(row_ref) => row_ref,
-                                            None => return,
-                                        };
-
-                                        let rect = match row_ref.get_client_rect().await {
-                                            Ok(rect) => rect,
-                                            Err(e) => {
-                                                toaster.write().new_error(e.to_string());
-                                                return
-                                            },
-                                        };
-
-                                        if let Some(line_location) = drag_data.get() {
-                                            let (new_location, top) = if dragover.mouse.page_coordinates().y < rect.min_y() + rect.height() / 2.0 {
-                                                let new_location = if line_location.dragged < idx {
-                                                    idx - 1
-                                                } else {
-                                                    idx
-                                                };
-                                                    
-                                                (new_location, rect.min_y())
-                                            } else {
-                                                let new_location = if line_location.dragged <= idx {
-                                                    idx
-                                                } else {
-                                                    idx + 1
-                                                };
-
-                                                (new_location, rect.max_y())
-                                            };
-
-                                            drag_data.set(Some(DragData{
-                                                dragged: line_location.dragged,
-                                                new_location: new_location,
-                                                line_location: Some(LineLocation{
-                                                    top: top,
-                                                    left: rect.min_x(),
-                                                    width: rect.width(),
-                                                }),
-                                            }));
-                                        }
-
+                                        ondragover(dragover, drag_data.clone(), table_row_refs.clone(), toaster, idx, key, None, None).await;
                                     });
                                 },
-                                GrabCell {
-                                    schema: schema.clone(),
-                                    drag_data: drag_data.clone(),
-                                    grabbing_cursor: grabbing_cursor.clone(),
-                                    idx: idx,
+                                td {
+                                    {
+                                        to_owned!(schema, toaster, grpc_client);
+                                        rsx! {
+                                            OptionGrab {
+                                                drag_data: drag_data.clone(),
+                                                grabbing_cursor: grabbing_cursor.clone(),
+                                                idx: idx,
+                                                do_dragend: move |data| {
+                                                    to_owned!(schema, data, grpc_client, toaster);
+                                                    async move {
+                                                        let mut schema_copy = schema.read().clone();
+                                                        if data.dragged < data.new_location {
+                                                            schema_copy.items[data.dragged..=data.new_location].rotate_left(1);
+                                                        } else {
+                                                            schema_copy.items[data.new_location..=data.dragged].rotate_right(1);
+                                                        }
+
+                                                        *schema.write() = schema_copy.clone();
+
+
+                                                        let res = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
+                                                            registration_schemas: vec![schema_copy.into()],
+                                                        }).await;
+
+                                                        if let Err(e) = res {
+                                                            toaster.write().new_error(e.to_string());
+                                                        }
+                                                    }
+                                                },
+                                            }
+                                        }
+                                    }
                                 }
                                 td{
                                     class: "col-auto",
@@ -311,6 +287,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
         if let Some((key, item)) = show_schema_item_modal.get() {
             rsx!(NewSchemaItemModal{
                 initial: item.clone(),
+                grabbing_cursor: grabbing_cursor.clone(),
                 do_submit: |item| {
                     let mut send_schema = schema.read().clone();
                     if item.id == "" {
@@ -386,70 +363,6 @@ pub fn Page(cx: Scope, id: String) -> Element {
     })
 }
 
-#[component]
-fn GrabCell(cx: Scope, schema: UseRef<Schema>, drag_data: UseState<Option<DragData>>, idx: usize, grabbing_cursor: UseState<bool>) -> Element {
-    let toaster = use_toasts(cx).unwrap();
-    let grpc_client = use_grpc_client(cx).unwrap();
-    let style = if *grabbing_cursor.get() {
-        "grabbing"
-    } else {
-        "grab"
-    };
-
-    cx.render(rsx!{
-        td{
-            style: "width: 1px",
-            draggable: true,
-            onmousedown: |_| grabbing_cursor.set(true),
-            onmouseup: |_| grabbing_cursor.set(false),
-            ondragstart: move |_| {
-                drag_data.set(Some(DragData{
-                    dragged: *idx,
-                    new_location: *idx,
-                    line_location: None,
-                }));
-            },
-            ondragend: move |_| {
-                grabbing_cursor.set(false);
-                cx.spawn({
-                    to_owned!(drag_data, schema, grpc_client, toaster);
-                    async move {
-                        let data = match drag_data.get() {
-                            Some(d) => d,
-                            None => return,
-                        };
-
-                        if data.dragged == data.new_location {
-                            drag_data.set(None);
-                            return;
-                        }
-
-                        let mut schema_copy = schema.read().clone();
-                        if data.dragged < data.new_location {
-                            schema_copy.items[data.dragged..=data.new_location].rotate_left(1);
-                        } else {
-                            schema_copy.items[data.new_location..=data.dragged].rotate_right(1);
-                        }
-
-                        *schema.write() = schema_copy.clone();
-                        drag_data.set(None);
-
-                        let res = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
-                            registration_schemas: vec![schema_copy.into()],
-                        }).await;
-
-                        if let Err(e) = res {
-                            toaster.write().new_error(e.to_string());
-                        }
-                    }
-                });
-            },
-            cursor: "{style}",
-            "⣶",
-        }
-    })
-}
-
 #[derive(EnumIter, strum_macros::Display)]
 enum ItemFieldsType {
     Text,
@@ -476,22 +389,29 @@ enum MultiSelectDisplayType {
     MultiselectBox,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct FieldsSelect {
     display: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct FieldsMultiSelect {
     display: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct FieldsText {
     default: String,
     display: usize,
 }
 
+#[derive(Default, Clone, Debug)]
+struct FieldSelectOption {
+    key: Uuid,
+    option: SelectOption,
+}
+
+#[derive(Clone)]
 struct ItemFields {
     id: String,
     name: String,
@@ -502,7 +422,7 @@ struct ItemFields {
     select_type: FieldsSelect,
     defaults: BTreeSet<usize>,
     multi_select_type: FieldsMultiSelect,
-    options: Vec<SelectOption>,
+    options: Vec<FieldSelectOption>,
     validation_error: Option<String>,
 }
 
@@ -539,12 +459,16 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     initial: RegistrationSchemaItem,
     do_submit: DoSubmit,
     do_close: DoClose,
+    grabbing_cursor: UseState<bool>,
 ) -> Element {
     let toaster = use_toasts(cx).unwrap();
     let type_selects = use_const(cx, || enum_selects::<ItemFieldsType>());
     let text_display_selects = use_const(cx, || enum_selects::<TextDisplayType>());
     let select_display_selects = use_const(cx, || enum_selects::<SelectDisplayType>());
     let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
+    let drag_data: &UseState<Option<DragData>> = use_state(cx, || None);
+    let field_refs: &UseRef<HashMap<Uuid, Rc<MountedData>>> = use_ref(cx, HashMap::default);
+
     let fields = use_ref(cx, || {
         let item = initial.clone();
 
@@ -554,12 +478,31 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                 display: text.display as usize,
             }, CheckboxType::default(), BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
             ItemType::Checkbox(checkbox) => (1, FieldsText::default(), checkbox, BTreeSet::default(), FieldsSelect::default(), FieldsMultiSelect::default(), Vec::default()),
-            ItemType::Select(select) => (2, FieldsText::default(), CheckboxType::default(), BTreeSet::from([select.default as usize]), FieldsSelect {
+            ItemType::Select(select) => {
+                let options = select.options.into_iter().map(|option| {
+                    let key = Uuid::new_v4();
+                    FieldSelectOption {
+                        key,
+                        option,
+                    }
+                }).collect();
+
+                (2, FieldsText::default(), CheckboxType::default(), BTreeSet::from([select.default as usize]), FieldsSelect {
                 display: select.display as usize,
-            }, FieldsMultiSelect::default(), select.options),
-            ItemType::MultiSelect(multiselect) => (3, FieldsText::default(), CheckboxType::default(), multiselect.defaults.into_iter().map(|d| d as usize).collect(), FieldsSelect::default(), FieldsMultiSelect{
+            }, FieldsMultiSelect::default(), options)
+            },
+            ItemType::MultiSelect(multiselect) => {
+                let options = multiselect.options.into_iter().map(|option| {
+                    let key = Uuid::new_v4();
+                    FieldSelectOption {
+                        key,
+                        option,
+                    }
+                }).collect();
+                (3, FieldsText::default(), CheckboxType::default(), multiselect.defaults.into_iter().map(|d| d as usize).collect(), FieldsSelect::default(), FieldsMultiSelect{
                 display: multiselect.display as usize,
-            }, multiselect.options),
+            }, options)
+            },
         };
 
         ItemFields {
@@ -610,7 +553,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                     SelectDisplayType::Radio => select_type::Display::Radio,
                                     SelectDisplayType::Dropdown => select_type::Display::Dropdown,
                                 } as i32,
-                                options: fields.options.clone(),
+                                options: fields.options.iter().map(|o| o.option.clone()).collect(),
                             }),
                             ItemFieldsType::MultiSelect => ItemType::MultiSelect(MultiSelectType{
                                 defaults: fields.defaults.iter().map(|idx| *idx as u32).collect(),
@@ -618,7 +561,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                     MultiSelectDisplayType::Checkboxes => multi_select_type::Display::Checkboxes,
                                     MultiSelectDisplayType::MultiselectBox => multi_select_type::Display::MultiselectBox,
                                 } as i32,
-                                options: fields.options.clone(),
+                                options: fields.options.iter().map(|o| o.option.clone()).collect(),
                             }),
                         }),
                     }),
@@ -750,16 +693,26 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                             }
                         }
                         fields.read().options.iter().enumerate().map(|(idx, option)| {
+                            let key = option.key;
+                            let prev_key = idx.checked_sub(1).and_then(|idx| fields.read().options.get(idx).map(|o| o.key));
+                            let next_key = fields.read().options.get(idx + 1).map(|o| o.key);
                             rsx!{
                                 Field {
-                                    key: "{idx}",
+                                    onmounted: move |d: MountedEvent| { field_refs.write().insert(key, d.data); },
+                                    ondragover: move |dragover: DragEvent| {
+                                        to_owned!(field_refs, drag_data, toaster);
+                                        cx.spawn(async move {
+                                            ondragover(dragover, drag_data.clone(), field_refs.clone(), toaster, idx, key, prev_key, next_key).await;
+                                        });
+                                    },
+                                    key: "{key}",
                                     label: "Name",
                                     TextInput{
-                                        value: TextInputType::Text(option.name.clone()),
+                                        value: TextInputType::Text(option.option.name.clone()),
                                         is_expanded: true,
-                                        oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
+                                        oninput: move |evt: FormEvent| fields.write().options[idx].option.name = evt.value.clone(),
                                     }
-                                    CheckInput{
+                                    CheckInput{ 
                                         style: CheckStyle::Radio,
                                         label: "Default",
                                         value: fields.read().defaults.contains(&idx),
@@ -770,12 +723,35 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                             })
                                         }
                                     }
+                                    {
+                                        let fields = fields.clone();
+                                        rsx! {
+                                            div {
+                                                class: "field",
+                                                OptionGrab {
+                                                    idx: idx,
+                                                    drag_data: drag_data.clone(),
+                                                    grabbing_cursor: grabbing_cursor.clone(),
+                                                    do_dragend: move |data| {
+                                                        to_owned!(fields, data);
+                                                        async move {
+                                                            if data.dragged < data.new_location {
+                                                                fields.write().options[data.dragged..=data.new_location].rotate_left(1);
+                                                            } else {
+                                                                fields.write().options[data.new_location..=data.dragged].rotate_right(1);
+                                                            };
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         })
                         Button {
                             flavor: ButtonFlavor::Info,
-                            onclick: |_| fields.write().options.push(SelectOption::default()),
+                            onclick: |_| fields.write().options.push(FieldSelectOption::default()),
                             "Add Option"
                         }
                     ),
@@ -811,12 +787,12 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         fields.read().options.iter().enumerate().map(|(idx, option)| {
                             rsx!{
                                 Field {
-                                    key: "{idx}",
+                                    key: "{option.key}",
                                     label: "Name",
                                     TextInput{
-                                        value: TextInputType::Text(option.name.clone()),
+                                        value: TextInputType::Text(option.option.name.clone()),
                                         is_expanded: true,
-                                        oninput: move |evt: FormEvent| fields.write().options[idx].name = evt.value.clone(),
+                                        oninput: move |evt: FormEvent| fields.write().options[idx].option.name = evt.value.clone(),
                                     }
                                     CheckInput{
                                         style: CheckStyle::Checkbox,
@@ -835,7 +811,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                         })
                         Button {
                             flavor: ButtonFlavor::Info,
-                            onclick: |_| fields.write().options.push(SelectOption::default()),
+                            onclick: |_| fields.write().options.push(FieldSelectOption::default()),
                             "Add Option"
                         }
                     },
@@ -846,6 +822,13 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                     p {
                         class: "help is-danger",
                         "{err}"
+                    }
+                }
+            }
+            if let Some(absolute_location) = drag_data.get().as_ref().and_then(|d| d.line_location.as_ref()) {
+                rsx!{
+                    hr {
+                        style: "position: fixed; top: {absolute_location.top}px; left: {absolute_location.left}px; height: 5px; width: {absolute_location.width}px; margin-top: 0; margin-bottom: 0; background-color: black;",
                     }
                 }
             }
@@ -865,4 +848,174 @@ fn DeleteItemModal<DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(cx: Scope, do_subm
             "Are you sure you want to delete this field?"
         }
     }))
+}
+
+async fn ondragover(dragover: DragEvent, drag_data: UseState<Option<DragData>>, dom_refs: UseRef<HashMap<Uuid, Rc<MountedData>>>, toaster: UseSharedState<ToastManager>, idx: usize, key: Uuid, prev_key: Option<Uuid>, next_key: Option<Uuid>) {
+    if drag_data.get().is_none() {
+        return;
+    }
+
+    let row_refs = dom_refs.read();
+    let row_ref = match row_refs.get(&key) {
+        Some(row_ref) => row_ref,
+        None => return,
+    };
+
+    let prev_ref = match prev_key {
+        Some(prev_key) => match row_refs.get(&prev_key) {
+            Some(prev_ref) => Some(prev_ref),
+            None => return,
+        },
+        None => None,
+    };
+
+    let next_ref = match next_key {
+        Some(next_key) => match row_refs.get(&next_key) {
+            Some(next_ref) => Some(next_ref),
+            None => return,
+        },
+        None => None,
+    };
+
+    let rect_future = row_ref.get_client_rect();
+    let prev_rect_future = async {
+        match prev_ref {
+            Some(prev_ref) => Some(prev_ref.get_client_rect().await),
+            None => None,
+        }
+    };
+    let next_rect_future = async {
+        match next_ref {
+            Some(next_ref) => Some(next_ref.get_client_rect().await),
+            None => None,
+        }
+    };
+
+    let (rect, prev_rect, next_rect) = join!{
+        rect_future,
+        prev_rect_future,
+        next_rect_future,
+    };
+
+    let rect = match rect {
+        Ok(rect) => rect,
+        Err(e) => {
+            toaster.write().new_error(e.to_string());
+            return
+        },
+    };
+
+    let prev_rect = match prev_rect.transpose() {
+        Ok(rect) => rect,
+        Err(e) => {
+            toaster.write().new_error(e.to_string());
+            return
+        },
+    };
+
+    let next_rect = match next_rect.transpose() {
+        Ok(rect) => rect,
+        Err(e) => {
+            toaster.write().new_error(e.to_string());
+            return
+        },
+    };
+
+    if let Some(line_location) = drag_data.get() {
+        let (new_location, top) = if dragover.mouse.page_coordinates().y < rect.min_y() + rect.height() / 2.0 {
+            let new_location = if line_location.dragged < idx {
+                idx - 1
+            } else {
+                idx
+            };
+
+            let position = match prev_rect {
+                Some(prev_rect) => (prev_rect.max_y() + rect.min_y()) / 2.0,
+                None => rect.min_y(),
+            };
+                
+            (new_location, position)
+        } else {
+            let new_location = if line_location.dragged <= idx {
+                idx
+            } else {
+                idx + 1
+            };
+
+            let position = match next_rect {
+                Some(next_rect) => (next_rect.min_y() + rect.max_y()) / 2.0,
+                None => rect.max_y(),
+            };
+
+            (new_location, position)
+        };
+
+        drag_data.set(Some(DragData{
+            dragged: line_location.dragged,
+            new_location,
+            line_location: Some(LineLocation{
+                top,
+                left: rect.min_x(),
+                width: rect.width(),
+            }),
+        }));
+    }
+}
+
+#[derive(Props)]
+struct OptionGrabProps<F, Fut> 
+    where F: Fn(&DragData) -> Fut + Clone + 'static, Fut: Future<Output = ()> + 'static,
+{
+    idx: usize,
+    drag_data: UseState<Option<DragData>>,
+    grabbing_cursor: UseState<bool>,
+    do_dragend: F,
+}
+
+fn OptionGrab<F, Fut>(cx: Scope<OptionGrabProps<F, Fut>>) -> Element
+    where F: Fn(&DragData) -> Fut + Clone + 'static, Fut: Future<Output = ()> + 'static,
+{
+    let style = if *cx.props.grabbing_cursor.get() {
+        "grabbing"
+    } else {
+        "grab"
+    };
+
+    cx.render(rsx!{
+        div{
+            style: "width: 1px",
+            draggable: true,
+            onmousedown: |_| cx.props.grabbing_cursor.set(true),
+            onmouseup: |_| cx.props.grabbing_cursor.set(false),
+            ondragstart: move |_| {
+                cx.props.drag_data.set(Some(DragData{
+                    dragged: cx.props.idx,
+                    new_location: cx.props.idx,
+                    line_location: None,
+                }));
+            },
+            ondragend: move |_| {
+                cx.props.grabbing_cursor.set(false);
+                cx.spawn({
+                    to_owned!(cx.props.drag_data, cx.props.do_dragend);
+                    async move {
+                        let data = match drag_data.get() {
+                            Some(d) => d,
+                            None => return,
+                        };
+
+                        drag_data.set(None);
+
+                        if data.dragged == data.new_location {
+                            return;
+                        }
+
+                        (do_dragend)(data).await;
+                    }
+                });
+            },
+            cursor: "{style}",
+            "⣶",
+        }
+    })
 }

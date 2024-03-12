@@ -178,9 +178,23 @@ pub fn Button<'a>(
 }
 
 #[component]
-pub fn Field<'a>(cx: Scope, label: &'a str, children: Element<'a>) -> Element {
+pub fn Field<'a>(
+    cx: Scope,
+    onmounted: Option<EventHandler<'a, MountedEvent>>,
+    ondragover: Option<EventHandler<'a, DragEvent>>,
+    label: &'a str,
+    children: Element<'a>,
+) -> Element {
     cx.render(rsx!(
         div {
+            onmounted: move |evt| match onmounted {
+                Some(onmounted) => onmounted.call(evt),
+                None => (),
+            },
+            ondragover: move |evt| match ondragover {
+                Some(ondragover) => ondragover.call(evt),
+                None => (),
+            },
             class: "field is-horizontal",
             div {
                 class: "field-label is-normal",

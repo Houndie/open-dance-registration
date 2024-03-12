@@ -746,6 +746,17 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                             }
                                         }
                                     }
+                                    div {
+                                        class: "field",
+                                        button {
+                                            class: "delete",
+                                            "type": "button",
+                                            "aria-label": "close",
+                                            onclick: move |_| {
+                                                fields.write().options.remove(idx);
+                                            },
+                                        }
+                                    }
                                 }
                             }
                         })

@@ -817,6 +817,40 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
                                             })
                                         }
                                     }
+                                    {
+                                        let fields = fields.clone();
+                                        rsx! {
+                                            div {
+                                                class: "field",
+                                                OptionGrab {
+                                                    idx: idx,
+                                                    drag_data: drag_data.clone(),
+                                                    grabbing_cursor: grabbing_cursor.clone(),
+                                                    do_dragend: move |data| {
+                                                        to_owned!(fields, data);
+                                                        async move {
+                                                            if data.dragged < data.new_location {
+                                                                fields.write().options[data.dragged..=data.new_location].rotate_left(1);
+                                                            } else {
+                                                                fields.write().options[data.new_location..=data.dragged].rotate_right(1);
+                                                            };
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
+                                    div {
+                                        class: "field",
+                                        button {
+                                            class: "delete",
+                                            "type": "button",
+                                            "aria-label": "close",
+                                            onclick: move |_| {
+                                                fields.write().options.remove(idx);
+                                            },
+                                        }
+                                    }
                                 }
                             }
                         })

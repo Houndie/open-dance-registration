@@ -51,9 +51,10 @@ CREATE TABLE registration_items
 	id            TEXT NOT NULL PRIMARY KEY,
 	registration  TEXT NOT NULL,
 	schema_item   TEXT NOT NULL,
-	value_type    TEXT CHECK( value_type IN ("StringValue", "BooleanValue", "UnsignedNumberValue", "RepeatedUnsignedNumberValue") ) NOT NULL,
 	value         TEXT NOT NULL,
-	FOREIGN KEY (registration) REFERENCES registrations (id) ON DELETE CASCADE
+	FOREIGN KEY (registration) REFERENCES registrations (id) ON DELETE CASCADE,
+	FOREIGN KEY (schema_item) REFERENCES registration_schema_items (id) ON DELETE CASCADE
+
 );
 
 CREATE TABLE users

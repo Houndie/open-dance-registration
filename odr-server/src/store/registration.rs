@@ -1,6 +1,6 @@
-use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
+use std::{collections::HashMap, iter, sync::Arc};
 
-use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
+use common::proto::{Registration, RegistrationItem};
 use sqlx::SqlitePool;
 
 use super::{
@@ -26,41 +26,18 @@ impl RegistrationRow {
 
 #[derive(sqlx::FromRow)]
 struct RegistrationItemRow {
-    id: String,
     registration: String,
     schema_item: String,
-    value_type: String,
     value: String,
 }
 
 impl RegistrationItemRow {
     fn to_registration_item(self) -> Result<(String, RegistrationItem), Error> {
-        let value = match self.value_type.as_str() {
-            "StringValue" => registration_item::Value::StringValue(self.value),
-            "BooleanValue" => registration_item::Value::BooleanValue(
-                bool::from_str(&self.value).map_err(|_| Error::ColumnParseError("value"))?,
-            ),
-            "UnsignedNumberValue" => registration_item::Value::UnsignedNumberValue(
-                u32::from_str(&self.value).map_err(|_| Error::ColumnParseError("value"))?,
-            ),
-            "RepeatedUnsignedNumberValue" => {
-                registration_item::Value::RepeatedUnsignedNumberValue(RepeatedUint32 {
-                    value: self
-                        .value
-                        .split(",")
-                        .map(|s| u32::from_str(s))
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|_| Error::ColumnParseError("value"))?,
-                })
-            }
-            _ => return Err(Error::ColumnParseError("value_type")),
-        };
         Ok((
             self.registration,
             RegistrationItem {
-                id: self.id,
                 schema_item_id: self.schema_item,
-                value: Some(value),
+                value: self.value,
             },
         ))
     }
@@ -173,33 +150,14 @@ pub trait Store: Send + Sync + 'static {
 fn bind_item<'q>(
     query_builder: QueryBuilder<'q>,
     registration_id: &'q str,
+    item_id: &'q str,
     item: &'q RegistrationItem,
 ) -> QueryBuilder<'q> {
-    let query_builder = query_builder
-        .bind(&item.id)
-        .bind(registration_id)
-        .bind(&item.schema_item_id);
-
-    let query_builder = match item.value.as_ref().unwrap() {
-        registration_item::Value::StringValue(v) => query_builder.bind("StringValue").bind(v),
-        registration_item::Value::BooleanValue(v) => {
-            query_builder.bind("BooleanValue").bind(v.to_string())
-        }
-        registration_item::Value::UnsignedNumberValue(v) => query_builder
-            .bind("UnsignedNumberValue")
-            .bind(v.to_string()),
-        registration_item::Value::RepeatedUnsignedNumberValue(v) => {
-            query_builder.bind("RepeatedUnsignedNumberValue").bind(
-                itertools::Itertools::intersperse(
-                    v.value.iter().map(|u| u.to_string()),
-                    ",".to_owned(),
-                )
-                .collect::<String>(),
-            )
-        }
-    };
-
     query_builder
+        .bind(item_id)
+        .bind(registration_id)
+        .bind(&item.schema_item_id)
+        .bind(&item.value)
 }
 
 #[tonic::async_trait]
@@ -222,35 +180,90 @@ impl Store for SqliteStore {
         let (inserts_and_items, updates_and_items): (Vec<_>, Vec<_>) =
             registrations_and_items.partition(|((_, r), _)| r.id == "");
 
-        if !updates_and_items.is_empty() {
+        let (updates, insert_items, update_items) = if !updates_and_items.is_empty() {
             ids_in_table(
                 &*self.pool,
                 "registrations",
                 updates_and_items.iter().map(|((_, r), _)| r.id.as_str()),
             )
             .await?;
-        }
 
-        let (updates, items_from_updates): (Vec<_>, Vec<_>) = updates_and_items.into_iter().unzip();
+            let where_clause = itertools::Itertools::intersperse(
+                updates_and_items.iter().map(|(_, items)| {
+                    let item_clause = itertools::Itertools::intersperse(
+                        iter::repeat("schema_item = ?").take(items.len()),
+                        " OR ",
+                    )
+                    .collect::<String>();
 
-        let (insert_items, update_items): (Vec<_>, Vec<_>) = updates
-            .iter()
-            .map(|(idx, _)| idx)
-            .zip(items_from_updates.into_iter())
-            .map(|(registration_idx, items)| {
-                items
-                    .into_iter()
-                    .enumerate()
-                    .map(|(item_idx, item)| (*registration_idx, item_idx, item))
-            })
-            .flatten()
-            .partition(|(_, _, item)| item.id == "");
+                    format!("registration = ? AND ({})", item_clause)
+                }),
+                " OR ".to_owned(),
+            )
+            .collect::<String>();
+
+            let query = format!(
+                "SELECT registration, schema_item, id FROM registration_items WHERE {}",
+                where_clause
+            );
+
+            let query_builder = sqlx::query_as(&query);
+            let query_builder =
+                updates_and_items
+                    .iter()
+                    .fold(query_builder, |query_builder, ((_, r), items)| {
+                        let query_builder = query_builder.bind(&r.id);
+                        items.iter().fold(query_builder, |query_builder, item| {
+                            query_builder.bind(&item.schema_item_id)
+                        })
+                    });
+
+            let rows: Vec<(String, String, String)> = query_builder
+                .fetch_all(&*self.pool)
+                .await
+                .map_err(|e| Error::FetchError(e))?;
+
+            let mut id_map = rows
+                .into_iter()
+                .map(|(registration, schema_item, id)| ((registration, schema_item), id))
+                .collect::<HashMap<_, _>>();
+
+            let (updates, items_from_updates): (Vec<_>, Vec<_>) =
+                updates_and_items.into_iter().unzip();
+
+            let mut insert_items = Vec::new();
+            let mut update_items = Vec::new();
+
+            updates
+                .iter()
+                .map(|(idx, r)| (idx, &r.id))
+                .zip(items_from_updates.into_iter())
+                .for_each(|((registration_idx, registration_id), items)| {
+                    for (item_idx, item) in items.into_iter().enumerate() {
+                        let item_id =
+                            id_map.remove(&(registration_id.clone(), item.schema_item_id.clone()));
+
+                        match item_id {
+                            Some(item_id) => {
+                                update_items.push((*registration_idx, item_idx, item, item_id))
+                            }
+                            None => insert_items.push((*registration_idx, item_idx, item)),
+                        }
+                    }
+                });
+
+            (updates, insert_items, update_items)
+        } else {
+            (Vec::new(), Vec::new(), Vec::new())
+        };
 
         if !update_items.is_empty() {
             ids_in_table(
                 &*self.pool,
                 "registration_items",
-                update_items.iter().map(|(_, _, item)| item.id.as_str()),
+                update_items
+                    .iter()
+                    .map(|(_, _, _, item_id)| item_id.as_str()),
             )
             .await?;
         }
@@ -275,10 +288,7 @@ impl Store for SqliteStore {
             })
             .flatten()
             .chain(insert_items.into_iter())
-            .map(|(registration_idx, item_idx, mut item)| {
-                item.id = new_id();
-                (registration_idx, item_idx, item)
-            })
+            .map(|(registration_idx, item_idx, item)| (registration_idx, item_idx, item, new_id()))
             .collect::<Vec<_>>();
 
         let mut tx = self
@@ -356,19 +366,26 @@ impl Store for SqliteStore {
 
         if !insert_items.is_empty() {
             let values_clause: String = itertools::Itertools::intersperse(
-                std::iter::repeat("(?, ?, ?, ?, ?)").take(insert_items.len()),
+                std::iter::repeat("(?, ?, ?, ?)").take(insert_items.len()),
                 ", ",
             )
             .collect();
 
             let query = format!(
-                "INSERT INTO registration_items(id, registration, schema_item, value_type, value) VALUES {}", values_clause);
+                "INSERT INTO registration_items(id, registration, schema_item, value) VALUES {}",
+                values_clause
+            );
 
             let query_builder = sqlx::query(&query);
             let query_builder = insert_items.iter().fold(
                 query_builder,
-                |query_builder, (registration_idx, _, item)| {
-                    bind_item(query_builder, &outputs[*registration_idx].id, item)
+                |query_builder, (registration_idx, _, item, item_id)| {
+                    bind_item(
+                        query_builder,
+                        &outputs[*registration_idx].id,
+                        &item_id,
+                        item,
+                    )
                 },
             );
             query_builder
@@ -379,19 +396,18 @@ impl Store for SqliteStore {
 
         if !update_items.is_empty() {
             let values_clause: String = itertools::Itertools::intersperse(
-                std::iter::repeat("(?, ?, ?, ?, ?)").take(update_items.len()),
+                std::iter::repeat("(?, ?, ?, ?)").take(update_items.len()),
                 ", ",
             )
             .collect();
 
             let query = format!(
-                "WITH mydata(id, registration, schema_item, value_type, value) 
+                "WITH mydata(id, registration, schema_item, value) 
                 AS (VALUES {})
                 UPDATE registration_items
                 SET
                     registration = mydata.registration,
                     schema_item = mydata.schema_item,
-                    value_type = mydata.value_type,
                     value = mydata.value
                 FROM mydata
                 WHERE registration_items.id = mydata.id",
@@ -401,8 +417,13 @@ impl Store for SqliteStore {
             let query_builder = sqlx::query(&query);
             let query_builder = update_items.iter().fold(
                 query_builder,
-                |query_builder, (registration_idx, _, item)| {
-                    bind_item(query_builder, &outputs[*registration_idx].id, item)
+                |query_builder, (registration_idx, _, item, item_id)| {
+                    bind_item(
+                        query_builder,
+                        &outputs[*registration_idx].id,
+                        &item_id,
+                        item,
+                    )
                 },
             );
 
@@ -419,48 +440,48 @@ impl Store for SqliteStore {
         insert_items
             .into_iter()
             .chain(update_items.into_iter())
-            .for_each(|(registration_idx, item_idx, item)| {
+            .for_each(|(registration_idx, item_idx, item, item_id)| {
                 if items_by_registration[registration_idx].len() <= item_idx {
                     items_by_registration[registration_idx]
                         .resize_with(item_idx + 1, Default::default)
                 }
 
-                items_by_registration[registration_idx][item_idx] = Some(item);
+                items_by_registration[registration_idx][item_idx] = Some((item, item_id));
             });
-
-        let outputs = outputs
-            .into_iter()
-            .zip(items_by_registration.into_iter())
-            .map(|(mut registration, items)| {
-                registration.items = items.into_iter().map(|item| item.unwrap()).collect();
-                registration
-            })
-            .collect::<Vec<_>>();
 
         {
             let where_clause = itertools::Itertools::intersperse(
-                outputs.iter().map(|r| {
-                    let registration_clause = itertools::Itertools::intersperse(
-                        std::iter::once("registration = ?")
-                            .chain(std::iter::repeat("id != ?").take(r.items.len())),
-                        " AND ",
-                    )
-                    .collect::<String>();
+                outputs
+                    .iter()
+                    .zip(items_by_registration.iter())
+                    .map(|(_, items)| {
+                        let registration_clause = itertools::Itertools::intersperse(
+                            std::iter::once("registration = ?")
+                                .chain(std::iter::repeat("id != ?").take(items.len())),
+                            " AND ",
+                        )
+                        .collect::<String>();
 
-                    format!("({})", registration_clause)
-                }),
+                        format!("({})", registration_clause)
+                    }),
                 " OR ".to_owned(),
             )
             .collect::<String>();
 
             let query = format!("DELETE FROM registration_items WHERE {}", where_clause);
             let query_builder = sqlx::query(&query);
-            let query_builder = outputs.iter().fold(query_builder, |query_builder, r| {
-                let query_builder = query_builder.bind(&r.id);
-                r.items.iter().fold(query_builder, |query_builder, item| {
-                    query_builder.bind(&item.id)
-                })
-            });
+            let query_builder = outputs.iter().zip(items_by_registration.iter()).fold(
+                query_builder,
+                |query_builder, (r, items)| {
+                    let query_builder = query_builder.bind(&r.id);
+                    items
+                        .iter()
+                        .map(|item| item.as_ref().unwrap())
+                        .fold(query_builder, |query_builder, (_, item_id)| {
+                            query_builder.bind(item_id)
+                        })
+                },
+            );
             query_builder
                 .execute(&mut *tx)
                 .await
@@ -468,6 +489,15 @@ impl Store for SqliteStore {
         }
 
         tx.commit().await.map_err(|e| Error::TransactionFailed(e))?;
+
+        let outputs = outputs
+            .into_iter()
+            .zip(items_by_registration.into_iter())
+            .map(|(mut registration, items)| {
+                registration.items = items.into_iter().map(|item| item.unwrap().0).collect();
+                registration
+            })
+            .collect::<Vec<_>>();
 
         Ok(outputs)
     }
@@ -508,7 +538,7 @@ impl Store for SqliteStore {
             .collect();
 
             let query = format!(
-                "SELECT id, registration, schema_item, value_type, value FROM registration_items WHERE {}",
+                "SELECT id, registration, schema_item, value FROM registration_items WHERE {}",
                 where_clause
             );
 
@@ -566,7 +596,7 @@ impl Store for SqliteStore {
 mod tests {
     use std::{str::FromStr, sync::Arc};
 
-    use common::proto::{registration_item, Registration, RegistrationItem, RepeatedUint32};
+    use common::proto::{Registration, RegistrationItem};
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
@@ -580,6 +610,11 @@ mod tests {
     struct Init {
         event_1: String,
         event_2: String,
+        schema_id_1: String,
+        schema_id_2: String,
+        schema_id_3: String,
+        schema_id_4: String,
+        schema_id_5: String,
         db: SqlitePool,
     }
 
@@ -620,9 +655,111 @@ mod tests {
             .await
             .unwrap();
 
+        let schema_id_1 = new_id();
+        let schema_id_2 = new_id();
+        let schema_id_3 = new_id();
+        let schema_id_4 = new_id();
+        let schema_id_5 = new_id();
+
+        let query_builder = sqlx::query(
+            "INSERT INTO registration_schema_items( id, 
+            event, 
+            idx, 
+            name, 
+            item_type, 
+            text_type_default, 
+            text_type_display, 
+            checkbox_type_default, 
+            select_type_default, 
+            select_type_display, 
+            multi_select_type_defaults, 
+            multi_select_type_display) VALUES 
+            ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+            ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+            ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+            ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+            ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+
+        let query_builder = query_builder
+            .bind(&schema_id_1)
+            .bind(&id_1)
+            .bind(0)
+            .bind("schema 1 name")
+            .bind("TextType")
+            .bind(Some("default"))
+            .bind(Some("SMALL"))
+            .bind::<Option<i32>>(None)
+            .bind::<Option<i32>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None);
+
+        let query_builder = query_builder
+            .bind(&schema_id_2)
+            .bind(&id_1)
+            .bind(1)
+            .bind("schema 2 name")
+            .bind("CheckboxType")
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind(Some(1))
+            .bind::<Option<i32>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None);
+
+        let query_builder = query_builder
+            .bind(&schema_id_3)
+            .bind(&id_2)
+            .bind(1)
+            .bind("schema 3 name")
+            .bind("SelectType")
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<i32>>(None)
+            .bind(Some(0))
+            .bind(Some("RADIO"))
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None);
+
+        let query_builder = query_builder
+            .bind(&schema_id_4)
+            .bind(&id_2)
+            .bind(1)
+            .bind("schema 4 name")
+            .bind("MultiSelectType")
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<i32>>(None)
+            .bind::<Option<i32>>(None)
+            .bind::<Option<String>>(None)
+            .bind("1,2")
+            .bind("MULTISELECT_BOX");
+
+        let query_builder = query_builder
+            .bind(&schema_id_5)
+            .bind(&id_1)
+            .bind(1)
+            .bind("schema 5 name")
+            .bind("CheckboxType")
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind(Some(1))
+            .bind::<Option<i32>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None)
+            .bind::<Option<String>>(None);
+
+        query_builder.execute(&db).await.unwrap();
         Init {
             event_1: id_1,
             event_2: id_2,
+            schema_id_1,
+            schema_id_2,
+            schema_id_3,
+            schema_id_4,
+            schema_id_5,
             db,
         }
     }
@@ -630,18 +767,18 @@ mod tests {
     async fn test_data(init: &Init) -> Vec<Registration> {
         let registration1_id = new_id();
         let item1_id = new_id();
-        let item1_schema_item_id = "schema 1".to_owned();
+        let item1_schema_item_id = &init.schema_id_1;
         let item1_value = "value";
         let item2_id = new_id();
-        let item2_schema_item_id = "schema 2".to_owned();
-        let item2_value = true;
+        let item2_schema_item_id = &init.schema_id_2;
+        let item2_value = "yes";
         let registration2_id = new_id();
         let item3_id = new_id();
-        let item3_schema_item_id = "schema 3".to_owned();
-        let item3_value: u32 = 1;
+        let item3_schema_item_id = &init.schema_id_3;
+        let item3_value = "1";
         let item4_id = new_id();
-        let item4_schema_item_id = "schema 4".to_owned();
-        let item4_value: Vec<u32> = vec![1, 2, 3];
+        let item4_schema_item_id = &init.schema_id_4;
+        let item4_value = "1,2,3";
 
         {
             let query = sqlx::query("INSERT INTO registrations(id, event) VALUES (?, ?), (?, ?);");
@@ -657,36 +794,26 @@ mod tests {
 
         {
             let query = sqlx::query(
-                "INSERT INTO registration_items(id, registration, schema_item, value_type, value) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?);",
+                "INSERT INTO registration_items(id, registration, schema_item, value) VALUES (?, ?, ?, ?),(?, ?, ?, ?),(?, ?, ?, ?),(?, ?, ?, ?);",
             );
 
             let query = query
                 .bind(&item1_id)
                 .bind(&registration1_id)
                 .bind(&item1_schema_item_id)
-                .bind("StringValue")
                 .bind(&item1_value)
                 .bind(&item2_id)
                 .bind(&registration1_id)
                 .bind(&item2_schema_item_id)
-                .bind("BooleanValue")
-                .bind(item2_value.to_string())
+                .bind(item2_value)
                 .bind(&item3_id)
                 .bind(&registration2_id)
                 .bind(&item3_schema_item_id)
-                .bind("UnsignedNumberValue")
-                .bind(item3_value.to_string())
+                .bind(item3_value)
                 .bind(&item4_id)
                 .bind(&registration2_id)
                 .bind(&item4_schema_item_id)
-                .bind("RepeatedUnsignedNumberValue")
-                .bind(
-                    itertools::Itertools::intersperse(
-                        item4_value.iter().map(|u| u.to_string()),
-                        ",".to_owned(),
-                    )
-                    .collect::<String>(),
-                );
+                .bind(&item4_value);
 
             query.execute(&init.db).await.unwrap();
         }
@@ -697,16 +824,12 @@ mod tests {
                 event_id: init.event_1.clone(),
                 items: vec![
                     RegistrationItem {
-                        id: item1_id,
-                        schema_item_id: item1_schema_item_id,
-                        value: Some(registration_item::Value::StringValue(
-                            item1_value.to_owned(),
-                        )),
+                        schema_item_id: item1_schema_item_id.clone(),
+                        value: item1_value.to_owned(),
                     },
                     RegistrationItem {
-                        id: item2_id,
-                        schema_item_id: item2_schema_item_id,
-                        value: Some(registration_item::Value::BooleanValue(item2_value)),
+                        schema_item_id: item2_schema_item_id.clone(),
+                        value: item2_value.to_owned(),
                     },
                 ],
             },
@@ -715,16 +838,12 @@ mod tests {
                 event_id: init.event_2.clone(),
                 items: vec![
                     RegistrationItem {
-                        id: item3_id,
-                        schema_item_id: item3_schema_item_id,
-                        value: Some(registration_item::Value::UnsignedNumberValue(item3_value)),
+                        schema_item_id: item3_schema_item_id.clone(),
+                        value: item3_value.to_owned(),
                     },
                     RegistrationItem {
-                        id: item4_id,
-                        schema_item_id: item4_schema_item_id,
-                        value: Some(registration_item::Value::RepeatedUnsignedNumberValue(
-                            RepeatedUint32 { value: item4_value },
-                        )),
+                        schema_item_id: item4_schema_item_id.clone(),
+                        value: item4_value.to_owned(),
                     },
                 ],
             },
@@ -736,7 +855,8 @@ mod tests {
     fn sort_registrations(mut registrations: Vec<Registration>) -> Vec<Registration> {
         registrations.sort_by(|l, r| l.id.cmp(&r.id));
         for r in registrations.iter_mut() {
-            r.items.sort_by(|l, r| l.id.cmp(&r.id));
+            r.items
+                .sort_by(|l, r| l.schema_item_id.cmp(&r.schema_item_id));
         }
 
         registrations
@@ -751,14 +871,12 @@ mod tests {
                 event_id: init.event_1,
                 items: vec![
                     RegistrationItem {
-                        id: "".to_owned(),
-                        schema_item_id: "schema 1".to_owned(),
-                        value: Some(registration_item::Value::StringValue("value".to_owned())),
+                        schema_item_id: init.schema_id_1.clone(),
+                        value: "value".to_owned(),
                     },
                     RegistrationItem {
-                        id: "".to_owned(),
-                        schema_item_id: "schema 2".to_owned(),
-                        value: Some(registration_item::Value::BooleanValue(true)),
+                        schema_item_id: init.schema_id_2.clone(),
+                        value: "yes".to_owned(),
                     },
                 ],
             },
@@ -767,18 +885,12 @@ mod tests {
                 event_id: init.event_2,
                 items: vec![
                     RegistrationItem {
-                        id: "".to_owned(),
-                        schema_item_id: "schema 3".to_owned(),
-                        value: Some(registration_item::Value::UnsignedNumberValue(1)),
+                        schema_item_id: init.schema_id_3.clone(),
+                        value: "1".to_owned(),
                     },
                     RegistrationItem {
-                        id: "".to_owned(),
-                        schema_item_id: "schema 4".to_owned(),
-                        value: Some(registration_item::Value::RepeatedUnsignedNumberValue(
-                            RepeatedUint32 {
-                                value: vec![1, 2, 3],
-                            },
-                        )),
+                        schema_item_id: init.schema_id_4.clone(),
+                        value: "1,2,3".to_owned(),
                     },
                 ],
             },
@@ -795,15 +907,6 @@ mod tests {
             .zip(returned_registrations.iter())
             .map(|(mut registration, returned_registration)| {
                 registration.id = returned_registration.id.clone();
-                registration.items = registration
-                    .items
-                    .into_iter()
-                    .zip(returned_registration.items.iter())
-                    .map(|(mut item, returned_item)| {
-                        item.id = returned_item.id.clone();
-                        item
-                    })
-                    .collect();
 
                 registration
             })
@@ -839,13 +942,10 @@ mod tests {
     async fn update() {
         let init = init_db().await;
         let mut registrations = test_data(&init).await;
-        registrations[0].items[0].value = Some(registration_item::Value::StringValue(
-            "updated value".to_owned(),
-        ));
+        registrations[0].items[0].value = "updated value".to_owned();
         registrations[1].items[1] = RegistrationItem {
-            id: "".to_owned(),
-            schema_item_id: "schema 5".to_owned(),
-            value: Some(registration_item::Value::UnsignedNumberValue(2)),
+            schema_item_id: init.schema_id_5.clone(),
+            value: "2".to_owned(),
         };
 
         let db = Arc::new(init.db);
@@ -853,7 +953,6 @@ mod tests {
         let store = SqliteStore::new(db.clone());
 
         let returned_registrations = store.upsert(registrations.clone()).await.unwrap();
-        registrations[1].items[1].id = returned_registrations[1].items[1].id.clone();
 
         assert_eq!(registrations, returned_registrations);
 
@@ -884,11 +983,9 @@ mod tests {
     enum UpdateDoesNotExistTests {
         BadRegistrationId,
         BadEventId,
-        BadItemId,
     }
     #[test_case(UpdateDoesNotExistTests::BadRegistrationId ; "bad registration id")]
     #[test_case(UpdateDoesNotExistTests::BadEventId ; "bad event id")]
-    #[test_case(UpdateDoesNotExistTests::BadItemId ; "bad item id")]
     #[tokio::test]
     async fn update_does_not_exist(test_name: UpdateDoesNotExistTests) {
         let init = init_db().await;
@@ -915,12 +1012,6 @@ mod tests {
                 let id = new_id();
                 let mut registration = test_data[0].clone();
                 registration.event_id = id.clone();
-                TestCase { id, registration }
-            }
-            UpdateDoesNotExistTests::BadItemId => {
-                let id = new_id();
-                let mut registration = test_data[0].clone();
-                registration.items[0].id = id.clone();
                 TestCase { id, registration }
             }
         };

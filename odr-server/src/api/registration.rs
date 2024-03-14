@@ -3,8 +3,7 @@ use std::sync::Arc;
 use common::proto::{
     self, compound_registration_query, registration_query, DeleteRegistrationsRequest,
     DeleteRegistrationsResponse, QueryRegistrationsRequest, QueryRegistrationsResponse,
-    Registration, RegistrationItem, RegistrationQuery, UpsertRegistrationsRequest,
-    UpsertRegistrationsResponse,
+    Registration, RegistrationQuery, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -25,21 +24,9 @@ impl<StoreType: Store> Service<StoreType> {
     }
 }
 
-fn validate_registration_item(item: &RegistrationItem) -> Result<(), ValidationError> {
-    if item.value.is_none() {
-        return Err(ValidationError::new_empty("value"));
-    };
-
-    Ok(())
-}
-
 fn validate_registration(registration: &Registration) -> Result<(), ValidationError> {
     if registration.event_id.is_empty() {
         return Err(ValidationError::new_empty("event_id"));
-    }
-
-    for (i, item) in registration.items.iter().enumerate() {
-        validate_registration_item(item).map_err(|e| e.with_context(&format!("items[{}]", i)))?;
     }
 
     Ok(())

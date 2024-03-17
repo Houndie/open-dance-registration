@@ -50,6 +50,9 @@ pub fn Page(cx: Scope) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "My Organizations".to_owned(),
+            breadcrumb: vec![
+                ("Home".to_owned(), None)
+            ],
             if matches!(orgs_success.value(), Some(true)) {
                 rsx! {
                     Table {

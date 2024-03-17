@@ -14,7 +14,7 @@ use organizations::Page as OrganizationsPage;
 use registration::Page as RegistrationPage;
 use registration_schema::Page as RegistrationSchemaPage;
 
-#[derive(Routable, Clone)]
+#[derive(Clone, PartialEq, Routable)]
 pub enum Routes {
     #[route("/")]
     OrganizationsPage,

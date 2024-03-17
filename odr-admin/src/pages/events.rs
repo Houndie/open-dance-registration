@@ -89,6 +89,10 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: org.name.clone(),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::OrganizationsPage)),
+                (org.name.clone(), None),
+            ],
             if matches!(events_rsp.value(), Some(true)) {
                 rsx! {
                     Table {

@@ -14,11 +14,7 @@ use crate::{
     pages::Routes,
 };
 use common::proto::{
-    event_query, multi_select_type, registration_schema_item_type::Type as ItemType,
-    registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery,
-    MultiSelectType, QueryEventsRequest, QueryRegistrationSchemasRequest, RegistrationSchema,
-    RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption,
-    SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest,
+    event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest
 };
 use dioxus::prelude::*;
 use dioxus_router::hooks::use_navigator;
@@ -111,8 +107,50 @@ pub fn Page(cx: Scope, id: String) -> Element {
         }
     });
 
-    let _event = match event.value().map(|e| e.as_ref()).flatten() {
+    let event = match event.value().map(|e| e.as_ref()).flatten() {
         Some(event) => event,
+        None => return None,
+    };
+
+    let org_id = &event.organization_id;
+
+    let org = use_future(cx, (), |_| {
+        to_owned!(grpc_client, org_id, toaster);
+        async move {
+            let result = grpc_client
+                .organizations
+                .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
+                    query: Some(OrganizationQuery {
+                        query: Some(organization_query::Query::Id(StringQuery {
+                            operator: Some(string_query::Operator::Equals(org_id)),
+                        })),
+                    }),
+                }))
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toaster.write().new_error(e.to_string());
+                    return None;
+                }
+            };
+
+            let org = response.into_inner().organizations.pop();
+
+            if org.is_none() {
+                toaster
+                    .write()
+                    .new_error("Organization not found".to_string());
+                return None;
+            }
+
+            org
+        }
+    });
+
+    let org = match org.value().map(|o| o.as_ref()).flatten() {
+        Some(org) => org,
         None => return None,
     };
 
@@ -176,6 +214,12 @@ pub fn Page(cx: Scope, id: String) -> Element {
         GenericPage {
             title: "Modify Registration Schema".to_owned(),
             style: cursor,
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::OrganizationsPage)),
+                (org.name.clone(), Some(Routes::EventsPage { org_id: org.id.clone() })),
+                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                ("Registration Schema".to_owned(), None),
+            ],
             Table {
                 is_striped: true,
                 is_fullwidth: true,

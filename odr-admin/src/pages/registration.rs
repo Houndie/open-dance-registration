@@ -1,10 +1,11 @@
 use std::collections::{BTreeSet, HashMap};
 
 use common::proto::{
-    event_query, registration_query, registration_schema_item_type, registration_schema_query,
-    string_query, EventQuery, QueryEventsRequest, QueryRegistrationSchemasRequest,
-    QueryRegistrationsRequest, Registration, RegistrationItem, RegistrationQuery,
-    RegistrationSchema, RegistrationSchemaQuery, StringQuery, UpsertRegistrationsRequest,
+    event_query, organization_query, registration_query, registration_schema_item_type,
+    registration_schema_query, string_query, EventQuery, OrganizationQuery, QueryEventsRequest,
+    QueryOrganizationsRequest, QueryRegistrationSchemasRequest, QueryRegistrationsRequest,
+    Registration, RegistrationItem, RegistrationQuery, RegistrationSchema, RegistrationSchemaQuery,
+    StringQuery, UpsertRegistrationsRequest,
 };
 use dioxus::prelude::*;
 use dioxus_router::hooks::use_navigator;
@@ -63,7 +64,7 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
     let toaster = use_toasts(cx).unwrap();
     let nav = use_navigator(cx);
 
-    let event_found = use_future(cx, (), |_| {
+    let event = use_future(cx, (), |_| {
         to_owned!(grpc_client, event_id, nav, toaster);
         async move {
             let result = grpc_client
@@ -81,21 +82,24 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return false;
+                    return None;
                 }
             };
 
-            if response.into_inner().events.len() == 0 {
+            let event = response.into_inner().events.pop();
+
+            if event.is_none() {
                 nav.push(Routes::NotFound);
-                return false;
+                return None;
             }
 
-            true
+            event
         }
     });
 
-    if !event_found.value().unwrap_or(&false) {
-        return None;
+    let event = match event.value().map(|e| e.as_ref()).flatten() {
+        Some(event) => event,
+        None => return None,
     };
 
     let schema = use_future(cx, (), |_| {
@@ -133,6 +137,48 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
             )
         }
     });
+
+    let org_id = &event.organization_id;
+
+    let org = use_future(cx, (), |_| {
+        to_owned!(grpc_client, org_id, toaster);
+        async move {
+            let result = grpc_client
+                .organizations
+                .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
+                    query: Some(OrganizationQuery {
+                        query: Some(organization_query::Query::Id(StringQuery {
+                            operator: Some(string_query::Operator::Equals(org_id)),
+                        })),
+                    }),
+                }))
+                .await;
+
+            let response = match result {
+                Ok(rsp) => rsp,
+                Err(e) => {
+                    toaster.write().new_error(e.to_string());
+                    return None;
+                }
+            };
+
+            let org = response.into_inner().organizations.pop();
+
+            if org.is_none() {
+                toaster
+                    .write()
+                    .new_error("Organization not found".to_string());
+                return None;
+            }
+
+            org
+        }
+    });
+
+    let org = match org.value().map(|o| o.as_ref()).flatten() {
+        Some(org) => org,
+        None => return None,
+    };
 
     let registrations: &UseRef<Vec<TableRegistration>> = use_ref(cx, Vec::new);
 
@@ -183,6 +229,12 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
     cx.render(rsx! {
         GenericPage {
             title: "View Registrations".to_owned(),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::OrganizationsPage)),
+                (org.name.clone(), Some(Routes::EventsPage { org_id: org.id.clone() })),
+                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                ("Registrations".to_owned(), None),
+            ],
             Button {
                 flavor: ButtonFlavor::Info,
                 onclick: |_| {

@@ -74,6 +74,18 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         "Modify Registration Schema",
                     }
                 }
+                div {
+                    class: "col",
+                    Button {
+                        flavor: ButtonFlavor::Info,
+                        onclick: |_| {
+                            nav.push(Routes::RegistrationPage {
+                                event_id: id.clone(),
+                            });
+                        },
+                        "View Registrations",
+                    }
+                }
             }
         }
     })

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use dioxus::prelude::*;
 
 #[derive(Clone)]
@@ -78,21 +80,48 @@ pub fn SelectInput<'a>(
 ) -> Element<'a> {
     cx.render(rsx!(
         div {
-            class: "field",
-            div {
-                class: "control",
-                select {
-                    class: "select",
-                    onchange: move |evt| onchange.call(evt),
-                    value: "{value}",
-                    options.iter().enumerate().map(|(idx, v)| rsx!(
+            class: "select",
+            select {
+                onchange: move |evt| onchange.call(evt),
+                value: "{value}",
+                options.iter().enumerate().map(|(idx, v)| {
+                    rsx!(
                         option {
                             key: "{idx}",
                             value: "{idx}",
                             "{v}"
                         }
-                    ))
-                }
+                    )
+                })
+            }
+        }
+    ))
+}
+
+#[component]
+pub fn MultiSelectInput<DoSelect: Fn(usize, MouseEvent) -> ()>(
+    cx: Scope,
+    do_select: DoSelect,
+    options: Vec<String>,
+    value: HashSet<usize>,
+) -> Element<'a> {
+    cx.render(rsx!(
+        div {
+            class: "select is-multiple",
+            select {
+                multiple: true,
+                options.iter().enumerate().map(|(idx, v)| {
+                    let selected = value.contains(&idx);
+                    rsx!(
+                        option {
+                            key: "{idx}",
+                            value: "{idx}",
+                            selected: selected,
+                            onclick: move |evt| do_select(idx, evt),
+                            "{v}"
+                        }
+                    )
+                })
             }
         }
     ))

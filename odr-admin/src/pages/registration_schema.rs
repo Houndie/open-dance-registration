@@ -288,9 +288,10 @@ pub fn Page(cx: Scope, id: String) -> Element {
             rsx!(NewSchemaItemModal{
                 initial: item.clone(),
                 grabbing_cursor: grabbing_cursor.clone(),
-                do_submit: |item| {
+                do_submit: move |item| {
                     let mut send_schema = schema.read().clone();
-                    if item.id == "" {
+                    let is_new = item.id == "";
+                    if is_new {
                         send_schema.items.push((key.clone(), item.clone()));
                     } else {
                         let idx = send_schema.items.iter().position(|(_, i)| i.id == item.id);
@@ -303,28 +304,35 @@ pub fn Page(cx: Scope, id: String) -> Element {
                         }
                     }
 
-                    let registration_schema = RegistrationSchema {
-                        event_id: send_schema.event_id.clone(),
-                        items: send_schema.items.iter().cloned().map(|(_, i)| i).collect(),
-                    };
-
                     cx.spawn({
-                        to_owned!(grpc_client, toaster, registration_schema);
+                        to_owned!(grpc_client, toaster, send_schema, show_schema_item_modal, schema);
                         async move { 
+
+                            let registration_schema = RegistrationSchema {
+                                event_id: send_schema.event_id.clone(),
+                                items: send_schema.items.iter().cloned().map(|(_, i)| i).collect(),
+                            };
+
                             let rsp = grpc_client.registration_schema.upsert_registration_schemas(UpsertRegistrationSchemasRequest{
                                 registration_schemas: vec![registration_schema],
                             }).await;
 
-                            match rsp {
-                                Ok(_) => {},
+                            let rsp = match rsp {
+                                Ok(rsp) => rsp,
                                 Err(e) => {
                                     toaster.write().new_error(e.to_string());
+                                    return
                                 }
+                            };
+
+                            if is_new {
+                                send_schema.items.last_mut().unwrap().1.id = rsp.into_inner().registration_schemas[0].items.pop().unwrap().id;
                             }
+
+                            *schema.write() = send_schema;
+                            show_schema_item_modal.set(None);
                         }
                     });
-                    *schema.write() = send_schema;
-                    show_schema_item_modal.set(None);
                 },
                 do_close: || show_schema_item_modal.set(None),
             })
@@ -405,10 +413,19 @@ struct FieldsText {
     display: usize,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 struct FieldSelectOption {
     key: Uuid,
     option: SelectOption,
+}
+
+impl FieldSelectOption {
+    fn default() -> Self {
+        FieldSelectOption {
+            key: Uuid::new_v4(),
+            option: SelectOption::default(),
+        }
+    }
 }
 
 #[derive(Clone)]

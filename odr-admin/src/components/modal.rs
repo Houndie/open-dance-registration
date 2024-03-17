@@ -10,6 +10,7 @@ pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
     title: &'a str,
     disable_submit: bool,
     children: Element<'a>,
+    success_text: &'a str,
 ) -> Element {
     cx.render(rsx! {
         div {
@@ -44,7 +45,7 @@ pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
                         onclick: |_| {
                             do_submit()
                         },
-                        "Create"
+                        "{success_text}"
                     }
                     Button {
                         onclick: |_| do_close(),

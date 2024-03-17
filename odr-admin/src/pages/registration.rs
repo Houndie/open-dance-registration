@@ -178,7 +178,7 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
         None => return None,
     };
 
-    let show_modal = use_state(cx, || false);
+    let show_modal: &UseState<Option<TableRegistration>> = use_state(cx, || None);
 
     cx.render(rsx! {
         GenericPage {
@@ -186,7 +186,7 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
             Button {
                 flavor: ButtonFlavor::Info,
                 onclick: |_| {
-                    show_modal.set(true);
+                    show_modal.set(Some(TableRegistration::default()));
                 },
                 "Add Registration",
             }
@@ -195,6 +195,7 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                 is_fullwidth: true,
                 thead {
                     tr {
+                        th{}
                         schema.items.iter().map(|item| {
                             rsx! {
                                 th {
@@ -207,9 +208,19 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                 }
                 tbody {
                     registrations.read().iter().map(|registration| {
+                        let button_registration = registration.clone();
                         rsx! {
                             tr {
                                 key: "{registration.id}",
+                                td {
+                                    Button {
+                                        flavor: ButtonFlavor::Info,
+                                        onclick: move |_| {
+                                            show_modal.set(Some(button_registration.clone()));
+                                        },
+                                        "Edit"
+                                    }
+                                }
                                 schema.items.iter().map(|item| {
                                     rsx! {
                                         td {
@@ -224,7 +235,7 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                 }
             }
 
-            if **show_modal {
+            if let Some(modal_registration) = show_modal.get() {
                 rsx!{
                     RegistrationModal {
                         schema: schema,
@@ -247,15 +258,33 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                                         }
                                     };
 
-                                    registrations.write().extend(response.into_inner().registrations.into_iter().map(|r| r.into()));
+                                    let response_registration = match response.into_inner().registrations.pop() {
+                                        Some(r) => r,
+                                        None => {
+                                            toaster.write().new_error("No registration returned".to_owned());
+                                            return;
+                                        }
+                                    };
 
-                                    show_modal.set(false);
+                                    let position = registrations.read().iter().position(|r| r.id == response_registration.id);
+
+                                    match position {
+                                        Some(idx) => {
+                                            registrations.write()[idx] = response_registration.into();
+                                        }
+                                        None => {
+                                            registrations.write().push(response_registration.into());
+                                        }
+                                    }
+
+                                    show_modal.set(None);
                                 }
                             })
                         },
                         do_close: || {
-                            show_modal.set(false);
-                        }
+                            show_modal.set(None);
+                        },
+                        registration: modal_registration.clone(),
                     }
                 }
             }
@@ -293,6 +322,30 @@ impl SelectOption {
             other: "".to_owned(),
         }
     }
+
+    fn from_existing(options: Vec<String>, existing: String) -> Self {
+        let selected = options
+            .iter()
+            .position(|o| o == &existing)
+            .unwrap_or(options.len());
+
+        let other = if selected == options.len() {
+            existing
+        } else {
+            "".to_owned()
+        };
+
+        let options = options
+            .into_iter()
+            .chain(std::iter::once("Other".to_owned()))
+            .collect::<Vec<_>>();
+
+        Self {
+            options,
+            selected,
+            other,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -324,6 +377,30 @@ impl MultiSelectOption {
             selected,
             is_other: false,
             other: "".to_owned(),
+        }
+    }
+
+    fn from_existing(options: Vec<String>, existing: String) -> Self {
+        let selected = existing
+            .split(',')
+            .map(|s| options.iter().position(|o| o == s))
+            .collect::<Vec<_>>();
+
+        if selected.iter().any(|s| s.is_none()) {
+            let other = existing;
+            Self {
+                options,
+                selected: BTreeSet::new(),
+                is_other: true,
+                other,
+            }
+        } else {
+            Self {
+                options,
+                selected: selected.into_iter().map(|s| s.unwrap()).collect(),
+                is_other: false,
+                other: "".to_owned(),
+            }
         }
     }
 }
@@ -380,6 +457,7 @@ struct FormRegistrationItem {
 fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
     schema: &'a RegistrationSchema,
+    registration: TableRegistration,
     do_submit: DoSubmit,
     do_close: DoClose,
 ) -> Element {
@@ -395,39 +473,63 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                     .unwrap()
                 {
                     registration_schema_item_type::Type::Text(_) => {
-                        FormRegistrationItemValue::Text("".to_owned())
+                        FormRegistrationItemValue::Text(
+                            registration
+                                .items
+                                .get(&item.id)
+                                .cloned()
+                                .unwrap_or_default(),
+                        )
                     }
 
                     registration_schema_item_type::Type::Checkbox(checkbox) => {
-                        let selected = if checkbox.default { 1 } else { 0 };
+                        let options = vec!["No".to_owned(), "Yes".to_owned()];
+                        let select_option = match registration.items.get(&item.id) {
+                            Some(registration_item) => {
+                                SelectOption::from_existing(options, registration_item.clone())
+                            }
+                            None => {
+                                let selected = if checkbox.default { 1 } else { 0 };
+                                SelectOption::new(options, selected)
+                            }
+                        };
 
-                        FormRegistrationItemValue::Checkbox(SelectOption::new(
-                            vec!["No".to_owned(), "Yes".to_owned()],
-                            selected,
-                        ))
+                        FormRegistrationItemValue::Checkbox(select_option)
                     }
 
                     registration_schema_item_type::Type::Select(select) => {
-                        let selected = select.default as usize;
+                        let options = select.options.iter().map(|o| o.name.clone()).collect();
+                        let select_option = match registration.items.get(&item.id) {
+                            Some(registration_item) => {
+                                SelectOption::from_existing(options, registration_item.clone())
+                            }
+                            None => {
+                                let selected = select.default as usize;
+                                SelectOption::new(options, selected)
+                            }
+                        };
 
-                        FormRegistrationItemValue::Select(SelectOption::new(
-                            select.options.iter().map(|o| o.name.clone()).collect(),
-                            selected,
-                        ))
+                        FormRegistrationItemValue::Select(select_option)
                     }
 
                     registration_schema_item_type::Type::MultiSelect(select) => {
-                        let selected = select
-                            .defaults
-                            .iter()
-                            .cloned()
-                            .map(|d| d as usize)
-                            .collect();
+                        let options = select.options.iter().map(|o| o.name.clone()).collect();
+                        let select_option = match registration.items.get(&item.id) {
+                            Some(registration_item) => {
+                                MultiSelectOption::from_existing(options, registration_item.clone())
+                            }
+                            None => {
+                                let selected = select
+                                    .defaults
+                                    .iter()
+                                    .cloned()
+                                    .map(|d| d as usize)
+                                    .collect();
+                                MultiSelectOption::new(options, selected)
+                            }
+                        };
 
-                        FormRegistrationItemValue::MultiSelect(MultiSelectOption::new(
-                            select.options.iter().map(|o| o.name.clone()).collect(),
-                            selected,
-                        ))
+                        FormRegistrationItemValue::MultiSelect(select_option)
                     }
                 };
 
@@ -441,9 +543,15 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
     });
     let submitted = use_state(cx, || false);
 
+    let (title, success_text) = if registration.id.is_empty() {
+        ("Add Registration", "Create")
+    } else {
+        ("Edit Registration", "Update")
+    };
+
     cx.render(rsx! {
         Modal {
-            title: "Add Registration",
+            title: "{title}",
             do_close: do_close,
             do_submit: || {
                 submitted.set(true);
@@ -451,12 +559,13 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                     (item.schema_item_id.clone(), item.value.clone().into())
                 }).collect();
                 let r = TableRegistration {
-                    id: "".to_owned(),
+                    id: registration.id.clone(),
                     items,
                 };
                 do_submit(r)
             },
             disable_submit: **submitted,
+            success_text: "{success_text}",
 
             form {
                 form.read().iter().enumerate().map(|(idx, item)| {

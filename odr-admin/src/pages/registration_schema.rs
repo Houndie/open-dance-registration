@@ -285,7 +285,7 @@ pub fn Page(cx: Scope, id: String) -> Element {
             }
         }
         if let Some((key, item)) = show_schema_item_modal.get() {
-            rsx!(NewSchemaItemModal{
+            rsx!(SchemaItemModal{
                 initial: item.clone(),
                 grabbing_cursor: grabbing_cursor.clone(),
                 do_submit: move |item| {
@@ -471,7 +471,7 @@ fn enum_selects<Enum: IntoEnumIterator + std::fmt::Display>() -> Vec<(Enum, Stri
 }
 
 #[component]
-fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
+fn SchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() -> ()>(
     cx: Scope,
     initial: RegistrationSchemaItem,
     do_submit: DoSubmit,
@@ -485,6 +485,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
     let multi_select_display_selects = use_const(cx, || enum_selects::<MultiSelectDisplayType>());
     let drag_data: &UseState<Option<DragData>> = use_state(cx, || None);
     let field_refs: &UseRef<HashMap<Uuid, Rc<MountedData>>> = use_ref(cx, HashMap::default);
+    let success_text = use_const(cx, || if initial.id == "" { "Create" } else { "Update" });
 
     let fields = use_ref(cx, || {
         let item = initial.clone();
@@ -589,6 +590,7 @@ fn NewSchemaItemModal<DoSubmit: Fn(RegistrationSchemaItem) -> (), DoClose: Fn() 
         },
         do_close: do_close,
         disable_submit: false,
+        success_text: "{success_text}",
         form {
             Field {
                 label: "Name",
@@ -906,6 +908,7 @@ fn DeleteItemModal<DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(cx: Scope, do_subm
         do_submit: do_submit,
         do_close: do_close,
         disable_submit: false,
+        success_text: "Delete",
         p {
             "Are you sure you want to delete this field?"
         }

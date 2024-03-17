@@ -162,6 +162,7 @@ fn OrganizationModal<DoSubmit: Fn(Organization) -> (), DoClose: Fn() -> ()>(
             do_close: || do_close(),
             disable_submit: **submitted,
             title: "Create New Organization",
+            success_text: "Create",
             form {
                 div {
                     class: "mb-3",

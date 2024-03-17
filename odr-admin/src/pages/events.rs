@@ -207,6 +207,7 @@ fn EventModal<DoSubmit: Fn(proto::Event) -> (), DoClose: Fn() -> ()>(
             do_close: || do_close(),
             disable_submit: **submitted,
             title: "Create new Event",
+            success_text: "Create",
             form {
                 Field {
                     label: "Event Name",

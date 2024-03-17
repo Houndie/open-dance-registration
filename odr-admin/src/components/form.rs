@@ -85,8 +85,10 @@ pub fn SelectInput<'a>(
                 onchange: move |evt| onchange.call(evt),
                 value: "{value}",
                 options.iter().enumerate().map(|(idx, v)| {
+                    let selected = *value == idx;
                     rsx!(
                         option {
+                            selected: selected,
                             key: "{idx}",
                             value: "{idx}",
                             "{v}"

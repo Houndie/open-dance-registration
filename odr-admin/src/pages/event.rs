@@ -9,6 +9,7 @@ use tonic::Request;
 use crate::{
     components::{
         form::{Button, ButtonFlavor},
+        menu::event::{Menu, MenuItem},
         page::Page as GenericPage,
     },
     hooks::{toasts::use_toasts, use_grpc_client},
@@ -104,38 +105,20 @@ pub fn Page(cx: Scope, id: String) -> Element {
 
     cx.render(rsx! {
         GenericPage {
-            title: event.name.clone(),
+            title: "Event Home".to_string(),
             breadcrumb: vec![
                 ("Home".to_owned(), Some(Routes::OrganizationsPage)),
                 (org.name.clone(), Some(Routes::EventsPage { org_id: org.id.clone() })),
                 (event.name.clone(), None),
             ],
+            menu: cx.render(rsx!{
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id.clone(),
+                    highlight: MenuItem::EventHome,
+                }
+            }),
             div {
-                class: "row",
-                div {
-                    class: "col",
-                    Button {
-                        flavor: ButtonFlavor::Info,
-                        onclick: |_| {
-                            nav.push(Routes::RegistrationSchemaPage {
-                                id: id.clone(),
-                            });
-                        },
-                        "Modify Registration Schema",
-                    }
-                }
-                div {
-                    class: "col",
-                    Button {
-                        flavor: ButtonFlavor::Info,
-                        onclick: |_| {
-                            nav.push(Routes::RegistrationPage {
-                                event_id: id.clone(),
-                            });
-                        },
-                        "View Registrations",
-                    }
-                }
             }
         }
     })

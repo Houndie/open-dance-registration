@@ -16,6 +16,7 @@ use crate::{
             Button, ButtonFlavor, CheckInput, CheckStyle, Field, MultiSelectInput, SelectInput,
             TextInput, TextInputType,
         },
+        menu::event::{Menu, MenuItem},
         modal::Modal,
         page::Page as GenericPage,
         table::Table,
@@ -235,6 +236,13 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
                 (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
                 ("Registrations".to_owned(), None),
             ],
+            menu: cx.render(rsx!{
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id.clone(),
+                    highlight: MenuItem::Registrations,
+                }
+            }),
             Button {
                 flavor: ButtonFlavor::Info,
                 onclick: |_| {

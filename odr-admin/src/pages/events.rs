@@ -8,6 +8,7 @@ use dioxus_router::prelude::*;
 use crate::{
     components::{
         form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
+        menu::organization::{Menu, MenuItem},
         modal::Modal,
         page::Page as GenericPage,
         table::Table,
@@ -86,6 +87,14 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
     });
 
     let show_event_modal = use_state(cx, || false);
+
+    let menu = cx.render(rsx! {
+        Menu {
+            org_name: org.name.clone(),
+            org_id: org_id.clone(),
+            highlight: MenuItem::OrganizationHome,
+        }
+    });
     cx.render(rsx! {
         GenericPage {
             title: org.name.clone(),
@@ -93,6 +102,7 @@ pub fn Page(cx: Scope, org_id: String) -> Element {
                 ("Home".to_owned(), Some(Routes::OrganizationsPage)),
                 (org.name.clone(), None),
             ],
+            menu: menu,
             if matches!(events_rsp.value(), Some(true)) {
                 rsx! {
                     Table {

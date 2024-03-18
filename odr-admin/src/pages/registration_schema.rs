@@ -5,10 +5,7 @@ use crate::{
         form::{
             Button, ButtonFlavor, CheckInput, CheckStyle, Field, SelectInput, TextInput,
             TextInputType,
-        },
-        modal::Modal,
-        page::Page as GenericPage,
-        table::Table,
+        }, menu::event::{Menu, MenuItem}, modal::Modal, page::Page as GenericPage, table::Table
     },
     hooks::{toasts::{use_toasts, ToastManager}, use_grpc_client},
     pages::Routes,
@@ -220,6 +217,13 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
                 ("Registration Schema".to_owned(), None),
             ],
+            menu: cx.render(rsx!{
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id.clone(),
+                    highlight: MenuItem::RegistrationSchema,
+                }
+            }),
             Table {
                 is_striped: true,
                 is_fullwidth: true,

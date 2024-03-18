@@ -1,5 +1,6 @@
 pub mod breadcrumb;
 pub mod form;
+pub mod menu;
 pub mod modal;
 pub mod page;
 pub mod table;

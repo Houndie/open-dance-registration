@@ -5,6 +5,7 @@ use dioxus_router::hooks::use_navigator;
 use crate::{
     components::{
         form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
+        menu::site::{Menu, MenuItem},
         modal::Modal,
         page::Page as GenericPage,
         table::Table,
@@ -47,12 +48,19 @@ pub fn Page(cx: Scope) -> Element {
 
     let nav = use_navigator(cx);
 
+    let menu = cx.render(rsx! {
+        Menu {
+            highlight: MenuItem::Home,
+        }
+    });
+
     cx.render(rsx! {
         GenericPage {
             title: "My Organizations".to_owned(),
             breadcrumb: vec![
                 ("Home".to_owned(), None)
             ],
+            menu: menu,
             if matches!(orgs_success.value(), Some(true)) {
                 rsx! {
                     Table {

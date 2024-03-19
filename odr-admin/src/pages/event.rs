@@ -8,7 +8,6 @@ use tonic::Request;
 
 use crate::{
     components::{
-        form::{Button, ButtonFlavor},
         menu::event::{Menu, MenuItem},
         page::Page as GenericPage,
     },

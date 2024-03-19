@@ -18,6 +18,7 @@ pub trait Store: Send + Sync + 'static {
     async fn insert(&self, mut key: Key) -> Result<Key, Error>;
     async fn list(&self, ids: Vec<&str>) -> Result<Vec<Key>, Error>;
     async fn get_newest(&self) -> Result<Key, Error>;
+    async fn has(&self) -> Result<bool, Error>;
     async fn delete(&self, ids: Vec<String>) -> Result<(), Error>;
 }
 
@@ -89,6 +90,19 @@ impl Store for SqliteStore {
         .map_err(|e| Error::FetchError(e))?;
 
         row.try_into()
+    }
+
+    async fn has(&self) -> Result<bool, Error> {
+        let row: (bool,) = sqlx::query_as(
+            r#"
+            SELECT EXISTS(SELECT 1 FROM keys)
+            "#,
+        )
+        .fetch_one(&*self.pool)
+        .await
+        .map_err(|e| Error::FetchError(e))?;
+
+        Ok(row.0)
     }
 
     async fn list(&self, ids: Vec<&str>) -> Result<Vec<Key>, Error> {

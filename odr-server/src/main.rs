@@ -6,7 +6,7 @@ use api::{
     registration_schema::Service as SchemaService, user::Service as UserService,
 };
 use common::proto;
-use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
+use sqlx::SqlitePool;
 use store::{
     event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
     organization::SqliteStore as OrganizationStore, registration::SqliteStore as RegistrationStore,
@@ -19,6 +19,7 @@ use tonic::transport::{self, Server};
 pub mod api;
 pub mod keys;
 pub mod store;
+pub mod user;
 
 fn db_url() -> String {
     format!("sqlite://{}/odr-sqlite.db", env::temp_dir().display())
@@ -27,12 +28,8 @@ fn db_url() -> String {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = db_url();
-    if !Sqlite::database_exists(&db_url).await.unwrap_or(false) {
-        Sqlite::create_database(&db_url).await?;
-    }
 
     let db = Arc::new(SqlitePool::connect(&db_url).await?);
-    sqlx::migrate!().run(&(*db)).await?;
 
     let event_store = Arc::new(EventStore::new(db.clone()));
     let schema_store = Arc::new(SchemaStore::new(db.clone()));

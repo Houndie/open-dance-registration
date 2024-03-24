@@ -2,7 +2,11 @@ use dioxus::prelude::*;
 
 use crate::{
     components::form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
-    hooks::{toasts::use_toasts, use_grpc_client},
+    hooks::{
+        login::{use_login, Login},
+        toasts::use_toasts,
+        use_grpc_client,
+    },
 };
 
 use common::proto::LoginRequest;
@@ -22,6 +26,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
 
     let toaster = use_toasts(cx).unwrap();
     let grpc = use_grpc_client(cx).unwrap();
+    let is_logged_in = use_login(cx).unwrap();
     cx.render(rsx! {
         div {
             class: "dropdown {menu_is_active} is-right",
@@ -48,48 +53,58 @@ pub fn LoginMenu(cx: Scope) -> Element {
                     div {
                         class: "dropdown-item",
                         style: "min-width: 300px",
-                        strong {
-                            "Login"
-                        }
-                        form {
-                            Field {
-                                label: "Username",
-                                TextInput{
-                                    oninput: move |e: FormEvent| {
-                                        login_form.write().username = e.value.clone();
-                                    },
-                                    value: TextInputType::Text(login_form.read().username.clone()),
-                                }
+                        if is_logged_in.read().0 {
+                            rsx! {
+                                "You are logged in"
                             }
-                            Field {
-                                label: "Password",
-                                TextInput{
-                                    oninput: move |e: FormEvent| {
-                                        login_form.write().password = e.value.clone();
-                                    },
-                                    value: TextInputType::Password(login_form.read().password.clone()),
+                        } else {
+                            rsx! {
+                                strong {
+                                    "Login"
                                 }
-                            }
-                            Button {
-                                onclick: move |_| {
-                                    cx.spawn({
-                                        to_owned!(toaster, login_form, grpc);
-                                        async move {
-                                            if let Err(e) = grpc.authorization.login(login_form.with(|login_form| {
-                                                LoginRequest {
-                                                    email: login_form.username.clone(),
-                                                    password: login_form.password.clone(),
-                                                }
-                                            })).await {
-                                                toaster.write().new_error(e.to_string());
-                                                return
-                                            }
+                                form {
+                                    Field {
+                                        label: "Username",
+                                        TextInput{
+                                            oninput: move |e: FormEvent| {
+                                                login_form.write().username = e.value.clone();
+                                            },
+                                            value: TextInputType::Text(login_form.read().username.clone()),
                                         }
-                                    })
-                                },
-                                flavor: ButtonFlavor::Success,
-                                "Login"
-                            },
+                                    }
+                                    Field {
+                                        label: "Password",
+                                        TextInput{
+                                            oninput: move |e: FormEvent| {
+                                                login_form.write().password = e.value.clone();
+                                            },
+                                            value: TextInputType::Password(login_form.read().password.clone()),
+                                        }
+                                    }
+                                    Button {
+                                        onclick: move |_| {
+                                            cx.spawn({
+                                                to_owned!(toaster, login_form, grpc, is_logged_in);
+                                                async move {
+                                                    if let Err(e) = grpc.authorization.login(login_form.with(|login_form| {
+                                                        LoginRequest {
+                                                            email: login_form.username.clone(),
+                                                            password: login_form.password.clone(),
+                                                        }
+                                                    })).await {
+                                                        toaster.write().new_error(e.to_string());
+                                                        return
+                                                    };
+
+                                                    *is_logged_in.write() = Login(true);
+                                                }
+                                            })
+                                        },
+                                        flavor: ButtonFlavor::Success,
+                                        "Login"
+                                    },
+                                }
+                            }
                         }
                     }
                 }

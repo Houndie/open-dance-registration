@@ -47,6 +47,7 @@ impl<Store: KeyStore> KeyManager<Store> {
 
     pub async fn get_signing_key(&self) -> Result<(String, SigningKey), store::Error> {
         let key_data = self.store.get_newest().await?;
+
         Ok((key_data.id, key_data.key))
     }
 

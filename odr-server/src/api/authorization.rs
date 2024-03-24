@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use argon2::{Argon2, PasswordVerifier};
 use common::proto::{self, LoginRequest, LoginResponse};
-use cookie::{Cookie, SameSite};
+use cookie::{Cookie, Expiration, SameSite};
 use ed25519_dalek::pkcs8::{self, EncodePrivateKey};
-use http::header::{HeaderMap, SET_COOKIE};
-use jsonwebtoken::{Algorithm, EncodingKey};
+use http::header::{HeaderMap, COOKIE, SET_COOKIE};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
 
@@ -21,7 +21,6 @@ use crate::{
 
 use super::store_error_to_status;
 
-#[derive(Serialize, Deserialize)]
 struct Claims {
     iss: String,
     sub: String,
@@ -30,10 +29,63 @@ struct Claims {
     exp: chrono::DateTime<chrono::Utc>,
 }
 
+impl Serialize for Claims {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct SerializeClaims<'a> {
+            iss: &'a str,
+            sub: &'a str,
+            aud: &'a Audience,
+            iat: i64,
+            exp: i64,
+        }
+
+        let claims = SerializeClaims {
+            iss: &self.iss,
+            sub: &self.sub,
+            aud: &self.aud,
+            iat: self.iat.timestamp(),
+            exp: self.exp.timestamp(),
+        };
+
+        claims.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Claims {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct DeserializeClaims {
+            iss: String,
+            sub: String,
+            aud: Audience,
+            iat: i64,
+            exp: i64,
+        }
+
+        let claims = DeserializeClaims::deserialize(deserializer)?;
+
+        Ok(Claims {
+            iss: claims.iss,
+            sub: claims.sub,
+            aud: claims.aud,
+            iat: chrono::DateTime::<chrono::Utc>::from_timestamp(claims.iat, 0)
+                .ok_or_else(|| serde::de::Error::custom("invalid timestamp"))?,
+            exp: chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp, 0)
+                .ok_or_else(|| serde::de::Error::custom("invalid timestamp"))?,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize, strum::Display)]
 enum Audience {
     Access,
-    Refresh,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -152,6 +204,9 @@ impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::A
             .map_err(|e| Error::SigningError(e))?;
 
         let claims_cookie = Cookie::build((ACCESS_TOKEN_COOKIE, access_jwt.clone()))
+            .expires(Expiration::DateTime(
+                time::OffsetDateTime::from_unix_timestamp(access_claims.exp.timestamp()).unwrap(),
+            ))
             .secure(true)
             .http_only(true)
             .same_site(SameSite::Strict);
@@ -164,6 +219,43 @@ impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::A
         Ok(response)
     }
 
+    async fn is_logged_in(
+        &self,
+        mut request: Request<proto::IsLoggedInRequest>,
+    ) -> Result<Response<proto::IsLoggedInResponse>, Status> {
+        let metadata = std::mem::take(request.metadata_mut());
+        let headers = metadata.into_headers();
+        let cookies = headers.get_all(COOKIE);
+        let auth_cookie = cookies.iter().find_map(|cookie_header_value| {
+            let parsed = Cookie::parse(cookie_header_value.to_str().ok()?).ok()?;
+
+            if parsed.name() != ACCESS_TOKEN_COOKIE {
+                return None;
+            }
+
+            Some(parsed)
+        });
+
+        let auth_cookie = match auth_cookie {
+            Some(cookie) => cookie,
+            None => {
+                return Ok(Response::new(proto::IsLoggedInResponse {
+                    is_logged_in: false,
+                }))
+            }
+        };
+
+        match validate_token(&self.km, auth_cookie.value()).await {
+            Ok(_) => Ok(Response::new(proto::IsLoggedInResponse {
+                is_logged_in: true,
+            })),
+            Err(ValidationError::Unauthenticated) => Ok(Response::new(proto::IsLoggedInResponse {
+                is_logged_in: false,
+            })),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     async fn logout(
         &self,
         _request: Request<proto::LogoutRequest>,
@@ -172,4 +264,51 @@ impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::A
 
         Ok(response)
     }
+}
+
+enum ValidationError {
+    Unauthenticated,
+    StoreError(store::Error),
+}
+
+impl From<ValidationError> for Status {
+    fn from(err: ValidationError) -> Self {
+        match err {
+            ValidationError::Unauthenticated => {
+                Status::new(Code::Unauthenticated, "unauthenticated")
+            }
+            ValidationError::StoreError(e) => store_error_to_status(e),
+        }
+    }
+}
+
+async fn validate_token<KStore: KeyStore>(
+    km: &KeyManager<KStore>,
+    token: &str,
+) -> Result<(), ValidationError> {
+    let header = decode_header(token).map_err(|_| ValidationError::Unauthenticated)?;
+
+    let kid = header.kid.ok_or(ValidationError::Unauthenticated)?;
+
+    let key = match km.get_verifying_key(&kid).await {
+        Ok(key) => key,
+        Err(store::Error::IdDoesNotExist(_)) => {
+            return Err(ValidationError::Unauthenticated);
+        }
+        Err(e) => {
+            return Err(ValidationError::StoreError(e));
+        }
+    };
+
+    let decoding_key = DecodingKey::from_ed_der(key.to_bytes().as_slice());
+
+    let mut validation = Validation::new(Algorithm::EdDSA);
+    validation.set_audience(&[Audience::Access]);
+    validation.set_issuer(&[ISSUER]);
+    validation.validate_exp = true;
+
+    decode::<Claims>(token, &decoding_key, &validation)
+        .map_err(|_| ValidationError::Unauthenticated)?;
+
+    Ok(())
 }

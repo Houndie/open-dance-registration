@@ -3,6 +3,7 @@ package proto;
 
 service AuthorizationService {
 	rpc Login(LoginRequest) returns (LoginResponse) {}
+	rpc IsLoggedIn(IsLoggedInRequest) returns (IsLoggedInResponse) {}
 	rpc Logout(LogoutRequest) returns (LogoutResponse) {}
 }
 
@@ -16,3 +17,9 @@ message LoginResponse {}
 message LogoutRequest {}
 
 message LogoutResponse {}
+
+message IsLoggedInRequest {}
+
+message IsLoggedInResponse {
+	bool is_logged_in = 1;
+}

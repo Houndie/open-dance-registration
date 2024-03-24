@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::{components::breadcrumb::Breadcrumb, pages::Routes};
+use crate::{
+    components::{breadcrumb::Breadcrumb, login_menu::LoginMenu},
+    pages::Routes,
+};
 
 #[component]
 pub fn Page<'a>(
@@ -29,10 +32,20 @@ pub fn Page<'a>(
                 }
             }
             div {
-                style: "display: inline-block; padding: 20px;",
-                h1 {
-                    class: "title is-1",
-                    "{title}"
+                style: "display: inline-block; padding: 20px; width: calc(100% - 400px);",
+                div {
+                    class: "columns",
+                    div {
+                        class: "column",
+                        h1 {
+                            class: "title is-1",
+                            "{title}"
+                        }
+                    }
+                    div {
+                        class: "column is-one-third has-text-right",
+                        LoginMenu {}
+                    }
                 }
                 if let Some(breadcrumb) = breadcrumb {
                     rsx! {

@@ -5,6 +5,7 @@ use dioxus::prelude::*;
 #[derive(Clone)]
 pub enum TextInputType {
     Text(String),
+    Password(String),
     Number(i32),
 }
 
@@ -19,12 +20,14 @@ pub fn TextInput<'a>(
 ) -> Element<'a> {
     let value_str = match value {
         TextInputType::Text(text) => text.clone(),
+        TextInputType::Password(text) => text.clone(),
         TextInputType::Number(number) => format!("{}", number),
     };
 
     let typ = match value {
         TextInputType::Text(_) => "text",
         TextInputType::Number(_) => "number",
+        TextInputType::Password(_) => "password",
     };
 
     let class = "field".to_owned();

@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
-use hooks::{toasts::use_toasts_provider, use_grpc_client_provider};
+use hooks::{login::use_login_provider, toasts::use_toasts_provider, use_grpc_client_provider};
 use log::LevelFilter;
 use pages::Routes;
 
@@ -19,6 +19,7 @@ fn main() {
 fn App(cx: Scope) -> Element {
     use_toasts_provider(cx);
     use_grpc_client_provider(cx);
+    use_login_provider(cx);
     cx.render(rsx! {
         WithToasts {
             Router::<Routes> {}

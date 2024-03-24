@@ -12,6 +12,7 @@ use axum_extra::extract::{
     cookie::{Cookie, SameSite},
     CookieJar,
 };
+use common::rest::{LoginRequest, LoginResponse};
 use ed25519_dalek::pkcs8::{self, EncodePrivateKey, EncodePublicKey};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -25,17 +26,6 @@ use crate::{
         CompoundOperator, CompoundQuery,
     },
 };
-
-#[derive(Deserialize)]
-enum LoginRequest {
-    Credientials { email: String, password: String },
-    Cookie,
-}
-
-#[derive(Serialize)]
-struct LoginResponse {
-    token: String,
-}
 
 #[derive(Serialize, Deserialize)]
 struct Claims {
@@ -101,7 +91,7 @@ pub fn api_routes<KStore: KeyStore, UStore: UserStore>(
         post(
             |jar: CookieJar, Json(request): Json<LoginRequest>| async move {
                 let user_email = match request {
-                    LoginRequest::Credientials { email, password } => {
+                    LoginRequest::Credentials { email, password } => {
                         let mut users = user_store
                             .query(
                                 Some(Query::CompoundQuery(CompoundQuery {

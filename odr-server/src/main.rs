@@ -5,6 +5,10 @@ use api::{
     organization::Service as OrganizationService, registration::Service as RegistrationService,
     registration_schema::Service as SchemaService, user::Service as UserService,
 };
+use axum::http::{
+    header::{CONTENT_TYPE, COOKIE},
+    HeaderValue,
+};
 use common::proto;
 use sqlx::SqlitePool;
 use store::{
@@ -15,6 +19,7 @@ use store::{
 use thiserror::Error;
 use tokio::{net::TcpListener, task::JoinHandle};
 use tonic::transport::{self, Server};
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
 pub mod api;
 pub mod keys;
@@ -79,7 +84,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     });
 
-    let login_routes = api_routes(Arc::new(keys::KeyManager::new(key_store)), user_store);
+    let login_routes = api_routes(Arc::new(keys::KeyManager::new(key_store)), user_store)
+        .layer(
+            CorsLayer::new()
+                .allow_origin("http://localhost:8080".parse::<HeaderValue>().unwrap())
+                .allow_headers([COOKIE, CONTENT_TYPE])
+                .allow_credentials(true),
+        )
+        .layer(TraceLayer::new_for_http());
+
     let http_listener = TcpListener::bind("0.0.0.0:3000").await?;
 
     let http_thread: JoinHandle<Result<(), ServerError>> = tokio::spawn(async move {

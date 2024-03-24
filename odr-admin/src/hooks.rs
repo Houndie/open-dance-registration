@@ -5,7 +5,9 @@ use common::proto::{
     registration_service_client::RegistrationServiceClient,
 };
 use dioxus::prelude::*;
+use tonic_web_wasm_client::options::{Credentials, FetchOptions};
 
+pub mod login;
 pub mod toasts;
 
 #[derive(Clone)]
@@ -18,7 +20,10 @@ pub struct GrpcContext {
 
 impl GrpcContext {
     fn new(base_url: String) -> Self {
-        let web_client = tonic_web_wasm_client::Client::new(base_url);
+        let web_client = tonic_web_wasm_client::Client::new_with_options(
+            base_url,
+            FetchOptions::new().credentials(Credentials::Include),
+        );
         Self {
             events: EventServiceClient::new(web_client.clone()),
             organizations: OrganizationServiceClient::new(web_client.clone()),

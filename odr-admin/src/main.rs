@@ -41,7 +41,7 @@ fn use_check_login_state(cx: Scope) {
     use_future(cx, (), |_| {
         to_owned!(is_logged_in, grpc, toaster);
         async move {
-            let response = match grpc.authorization.is_logged_in(IsLoggedInRequest {}).await {
+            let response = match grpc.authentication.is_logged_in(IsLoggedInRequest {}).await {
                 Ok(response) => response,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());

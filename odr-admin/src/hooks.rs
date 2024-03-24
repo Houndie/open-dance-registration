@@ -1,5 +1,5 @@
 use common::proto::{
-    authorization_service_client::AuthorizationServiceClient,
+    authentication_service_client::AuthenticationServiceClient,
     event_service_client::EventServiceClient,
     organization_service_client::OrganizationServiceClient,
     registration_schema_service_client::RegistrationSchemaServiceClient,
@@ -17,7 +17,7 @@ pub struct GrpcContext {
     pub organizations: OrganizationServiceClient<tonic_web_wasm_client::Client>,
     pub registration_schema: RegistrationSchemaServiceClient<tonic_web_wasm_client::Client>,
     pub registration: RegistrationServiceClient<tonic_web_wasm_client::Client>,
-    pub authorization: AuthorizationServiceClient<tonic_web_wasm_client::Client>,
+    pub authentication: AuthenticationServiceClient<tonic_web_wasm_client::Client>,
 }
 
 impl GrpcContext {
@@ -31,7 +31,7 @@ impl GrpcContext {
             organizations: OrganizationServiceClient::new(web_client.clone()),
             registration_schema: RegistrationSchemaServiceClient::new(web_client.clone()),
             registration: RegistrationServiceClient::new(web_client.clone()),
-            authorization: AuthorizationServiceClient::new(web_client),
+            authentication: AuthenticationServiceClient::new(web_client),
         }
     }
 }

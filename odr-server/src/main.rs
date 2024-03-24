@@ -1,7 +1,7 @@
 use std::{env, sync::Arc};
 
 use api::{
-    authorization::Service as AuthorizationService, event::Service as EventService,
+    authentication::Service as AuthenticationService, event::Service as EventService,
     organization::Service as OrganizationService, registration::Service as RegistrationService,
     registration_schema::Service as SchemaService, user::Service as UserService,
 };
@@ -55,9 +55,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         OrganizationService::new(organization_store),
     );
 
-    let authorization_service =
-        proto::authorization_service_server::AuthorizationServiceServer::new(
-            AuthorizationService::new(key_manager, user_store.clone()),
+    let authentication_service =
+        proto::authentication_service_server::AuthenticationServiceServer::new(
+            AuthenticationService::new(key_manager, user_store.clone()),
         );
 
     let user_service =
@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(tonic_web::enable(registration_service))
         .add_service(tonic_web::enable(organization_service))
         .add_service(tonic_web::enable(user_service))
-        .add_service(tonic_web::enable(authorization_service))
+        .add_service(tonic_web::enable(authentication_service))
         .add_service(tonic_web::enable(reflection_service))
         .serve(grpc_addr)
         .await

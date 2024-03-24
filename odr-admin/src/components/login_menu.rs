@@ -60,7 +60,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         cx.spawn({
                                             to_owned!(show_menu, is_logged_in, toaster, grpc);
                                             async move {
-                                                if let Err(e) = grpc.authorization.logout(LogoutRequest{}).await {
+                                                if let Err(e) = grpc.authentication.logout(LogoutRequest{}).await {
                                                     toaster.write().new_error(e.to_string());
                                                     return
                                                 }
@@ -102,7 +102,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                             cx.spawn({
                                                 to_owned!(toaster, login_form, grpc, is_logged_in, show_menu);
                                                 async move {
-                                                    if let Err(e) = grpc.authorization.login(login_form.with(|login_form| {
+                                                    if let Err(e) = grpc.authentication.login(login_form.with(|login_form| {
                                                         LoginRequest {
                                                             email: login_form.username.clone(),
                                                             password: login_form.password.clone(),

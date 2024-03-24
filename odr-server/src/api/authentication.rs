@@ -132,8 +132,8 @@ impl<KStore: KeyStore, UStore: UserStore> Service<KStore, UStore> {
 }
 
 #[tonic::async_trait]
-impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::AuthorizationService
-    for Service<KStore, UStore>
+impl<KStore: KeyStore, UStore: UserStore>
+    proto::authentication_service_server::AuthenticationService for Service<KStore, UStore>
 {
     async fn login(
         &self,

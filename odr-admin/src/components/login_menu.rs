@@ -1,13 +1,11 @@
 use dioxus::prelude::*;
-use gloo_net::http::Method;
-use web_sys::RequestCredentials;
 
 use crate::{
     components::form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
-    hooks::{login::use_login, toasts::use_toasts},
+    hooks::{toasts::use_toasts, use_grpc_client},
 };
 
-use common::rest::{LoginRequest, LoginResponse};
+use common::proto::LoginRequest;
 
 #[derive(Default)]
 struct LoginForm {
@@ -21,9 +19,9 @@ pub fn LoginMenu(cx: Scope) -> Element {
     let menu_is_active = if *show_menu.get() { "is-active" } else { "" };
 
     let login_form = use_ref(cx, LoginForm::default);
-    let login_info = use_login(cx).unwrap();
 
     let toaster = use_toasts(cx).unwrap();
+    let grpc = use_grpc_client(cx).unwrap();
     cx.render(rsx! {
         div {
             class: "dropdown {menu_is_active} is-right",
@@ -75,40 +73,17 @@ pub fn LoginMenu(cx: Scope) -> Element {
                             Button {
                                 onclick: move |_| {
                                     cx.spawn({
-                                        to_owned!(login_info, toaster, login_form);
+                                        to_owned!(toaster, login_form, grpc);
                                         async move {
-                                            let body = login_form.with(|login_form| LoginRequest::Credentials {
-                                                email: login_form.username.clone(),
-                                                password: login_form.password.clone(),
-                                            });
-
-                                            let request = match gloo_net::http::RequestBuilder::new("http://localhost:3000/login").credentials(RequestCredentials::Include).method(Method::POST).json(&body) {
-                                                Ok(request) => request,
-                                                Err(e) => {
-                                                    toaster.write().new_error(e.to_string());
-                                                    return;
-                                                },
-                                            };
-
-                                            let response = match request.send().await {
-                                                Ok(response) => response,
-                                                Err(e) => {
-                                                    toaster.write().new_error(e.to_string());
-                                                    return;
-                                                },
-                                            };
-
-                                            let login_response = match response.json::<LoginResponse>().await {
-                                                Ok(response) => response,
-                                                Err(e) => {
-                                                    toaster.write().new_error(e.to_string());
-                                                    return;
-                                                },
-                                            };
-
-                                            log::info!("{}", login_response.token);
-
-                                            login_info.write().0 = Some(login_response.token);
+                                            if let Err(e) = grpc.authorization.login(login_form.with(|login_form| {
+                                                LoginRequest {
+                                                    email: login_form.username.clone(),
+                                                    password: login_form.password.clone(),
+                                                }
+                                            })).await {
+                                                toaster.write().new_error(e.to_string());
+                                                return
+                                            }
                                         }
                                     })
                                 },

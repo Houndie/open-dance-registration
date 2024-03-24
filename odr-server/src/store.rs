@@ -1,8 +1,3 @@
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-
 mod common;
 pub mod event;
 pub mod keys;
@@ -39,24 +34,6 @@ pub enum Error {
 
     #[error("unable to parse column {0}")]
     ColumnParseError(&'static str),
-}
-
-impl IntoResponse for Error {
-    fn into_response(self) -> Response {
-        let status = match self {
-            Self::IdDoesNotExist(_) => StatusCode::NOT_FOUND,
-            Self::InsertionError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::FetchError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::DeleteError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::CheckExistsError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::UpdateError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::TransactionFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::TransactionStartError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::ColumnParseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-
-        (status, self.to_string()).into_response()
-    }
 }
 
 pub trait Queryable {

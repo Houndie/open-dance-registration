@@ -174,7 +174,7 @@ impl<KStore: KeyStore, UStore: UserStore>
 
         let access_claims = Claims {
             iss: ISSUER.to_string(),
-            sub: user.email,
+            sub: user.id,
             aud: Audience::Access,
             iat: chrono::Utc::now(),
             exp: chrono::Utc::now() + chrono::Duration::seconds(ACCESS_TOKEN_EXPIRATION_SECONDS),

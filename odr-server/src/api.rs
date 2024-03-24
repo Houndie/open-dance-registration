@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use tonic::{Code, Status};
 
-use crate::store::Error;
+use crate::store;
 use thiserror::Error as ThisError;
 
 pub mod authentication;
@@ -13,20 +13,22 @@ pub mod registration;
 pub mod registration_schema;
 pub mod user;
 
-fn store_error_to_status(err: Error) -> Status {
-    let code = match err {
-        Error::IdDoesNotExist(_) => Code::NotFound,
-        Error::InsertionError(_)
-        | Error::FetchError(_)
-        | Error::UpdateError(_)
-        | Error::DeleteError(_)
-        | Error::CheckExistsError(_)
-        | Error::TransactionStartError(_)
-        | Error::TransactionFailed(_)
-        | Error::ColumnParseError(_) => Code::Internal,
-    };
+impl From<store::Error> for Status {
+    fn from(err: store::Error) -> Self {
+        let code = match err {
+            store::Error::IdDoesNotExist(_) => Code::NotFound,
+            store::Error::InsertionError(_)
+            | store::Error::FetchError(_)
+            | store::Error::UpdateError(_)
+            | store::Error::DeleteError(_)
+            | store::Error::CheckExistsError(_)
+            | store::Error::TransactionStartError(_)
+            | store::Error::TransactionFailed(_)
+            | store::Error::ColumnParseError(_) => Code::Internal,
+        };
 
-    Status::new(code, format!("{}", err))
+        Status::new(code, format!("{}", err))
+    }
 }
 
 #[derive(Debug)]

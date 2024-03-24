@@ -11,7 +11,7 @@ use common::proto::{
     QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
 };
 
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
+use super::{common::try_logical_string_query, ValidationError};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {
@@ -89,7 +89,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
             .store
             .upsert(events)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
         Ok(Response::new(UpsertEventsResponse { events }))
     }
 
@@ -104,7 +104,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
             .store
             .query(query.as_ref())
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
         Ok(Response::new(QueryEventsResponse { events }))
     }
 
@@ -115,7 +115,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         self.store
             .delete(&request.into_inner().ids)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(DeleteEventsResponse {}))
     }

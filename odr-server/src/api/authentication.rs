@@ -20,8 +20,6 @@ use crate::{
     },
 };
 
-use super::store_error_to_status;
-
 struct Claims {
     iss: String,
     sub: String,
@@ -132,7 +130,7 @@ impl<KStore: KeyStore, UStore: UserStore>
             .await
             .map_err(|e| match e {
                 store::Error::IdDoesNotExist(_) => invalid_email_or_password(),
-                _ => store_error_to_status(e),
+                _ => e.into(),
             })?;
 
         if users.is_empty() {
@@ -158,7 +156,7 @@ impl<KStore: KeyStore, UStore: UserStore>
             .km
             .get_signing_key()
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         let encoding_key = EncodingKey::from_ed_der(
             key.to_pkcs8_der()
@@ -282,7 +280,7 @@ impl From<ValidationError> for Status {
             ValidationError::Unauthenticated => {
                 Status::new(Code::Unauthenticated, "unauthenticated")
             }
-            ValidationError::StoreError(e) => store_error_to_status(e),
+            ValidationError::StoreError(e) => e.into(),
         }
     }
 }

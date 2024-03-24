@@ -12,7 +12,7 @@ use crate::store::{
     CompoundOperator, CompoundQuery,
 };
 
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
+use super::{common::try_logical_string_query, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -76,7 +76,7 @@ impl<StoreType: Store> proto::organization_service_server::OrganizationService
             .store
             .upsert(request_organizations)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(UpsertOrganizationsResponse { organizations }))
     }
@@ -92,7 +92,7 @@ impl<StoreType: Store> proto::organization_service_server::OrganizationService
             .store
             .query(query.as_ref())
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(QueryOrganizationsResponse { organizations }))
     }
@@ -104,7 +104,7 @@ impl<StoreType: Store> proto::organization_service_server::OrganizationService
         self.store
             .delete(&request.into_inner().ids)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(DeleteOrganizationsResponse {}))
     }

@@ -14,7 +14,7 @@ use crate::{
     user::hash_password,
 };
 
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
+use super::{common::try_logical_string_query, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -149,7 +149,7 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
             .store
             .upsert(store_users)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(UpsertUsersResponse {
             users: users.into_iter().map(user_to_proto).collect(),
@@ -167,7 +167,7 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
             .store
             .query(query.as_ref())
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(QueryUsersResponse {
             users: users.into_iter().map(user_to_proto).collect(),
@@ -181,7 +181,7 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
         self.store
             .delete(&request.into_inner().ids)
             .await
-            .map_err(|e| store_error_to_status(e))?;
+            .map_err(|e| -> Status { e.into() })?;
 
         Ok(Response::new(DeleteUsersResponse {}))
     }

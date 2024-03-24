@@ -3,7 +3,7 @@ use std::sync::Arc;
 use argon2::{Argon2, PasswordVerifier};
 use common::proto::{self, LoginRequest, LoginResponse};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
-use ed25519_dalek::pkcs8::{self, EncodePrivateKey};
+use ed25519_dalek::pkcs8::EncodePrivateKey;
 use http::header::{HeaderMap, COOKIE, SET_COOKIE};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -89,33 +89,6 @@ enum Audience {
     Access,
 }
 
-#[derive(thiserror::Error, Debug)]
-enum Error {
-    #[error("invalid email or password")]
-    InvalidEmailOrPassword,
-
-    #[error("error generating signing key: {0}")]
-    InvalidSigningKey(#[source] pkcs8::Error),
-
-    #[error("error signing token: {0}")]
-    SigningError(#[source] jsonwebtoken::errors::Error),
-
-    #[error("{0}")]
-    StoreError(#[source] store::Error),
-}
-
-impl From<Error> for Status {
-    fn from(err: Error) -> Self {
-        let code = match err {
-            Error::StoreError(e) => return store_error_to_status(e),
-            Error::InvalidEmailOrPassword => Code::Unauthenticated,
-            Error::InvalidSigningKey(_) | Error::SigningError(_) => Code::Internal,
-        };
-
-        Status::new(code, err.to_string())
-    }
-}
-
 const ISSUER: &str = "https://auth.example.com";
 const ACCESS_TOKEN_EXPIRATION_SECONDS: i64 = 60 * 60 * 24 * 30 * 6;
 const ACCESS_TOKEN_COOKIE: &str = "authorization";
@@ -141,6 +114,9 @@ impl<KStore: KeyStore, UStore: UserStore>
     ) -> Result<Response<LoginResponse>, Status> {
         let credentials = request.into_inner();
 
+        let invalid_email_or_password =
+            || Status::new(Code::Unauthenticated, "Invalid email or password");
+
         let mut users = self
             .user_store
             .query(
@@ -155,19 +131,19 @@ impl<KStore: KeyStore, UStore: UserStore>
             )
             .await
             .map_err(|e| match e {
-                store::Error::IdDoesNotExist(_) => Error::InvalidEmailOrPassword,
-                _ => Error::StoreError(e),
+                store::Error::IdDoesNotExist(_) => invalid_email_or_password(),
+                _ => store_error_to_status(e),
             })?;
 
         if users.is_empty() {
-            return Err(Error::InvalidEmailOrPassword.into());
+            return Err(invalid_email_or_password());
         }
 
         let user = users.remove(0);
         let user_password = match &user.password {
             PasswordType::Set(password) => password,
             _ => {
-                return Err(Error::InvalidEmailOrPassword.into());
+                return Err(invalid_email_or_password());
             }
         };
 
@@ -176,17 +152,22 @@ impl<KStore: KeyStore, UStore: UserStore>
                 credentials.password.as_bytes(),
                 &user_password.password_hash(),
             )
-            .map_err(|_| -> Status { Error::InvalidEmailOrPassword.into() })?;
+            .map_err(|_| invalid_email_or_password())?;
 
         let (kid, key) = self
             .km
             .get_signing_key()
             .await
-            .map_err(|e| Error::StoreError(e))?;
+            .map_err(|e| store_error_to_status(e))?;
 
         let encoding_key = EncodingKey::from_ed_der(
             key.to_pkcs8_der()
-                .map_err(|e| Error::InvalidSigningKey(e))?
+                .map_err(|e| {
+                    Status::new(
+                        Code::Internal,
+                        format!("error generating signing key {}", e),
+                    )
+                })?
                 .as_bytes(),
         );
 
@@ -202,7 +183,7 @@ impl<KStore: KeyStore, UStore: UserStore>
         };
 
         let access_jwt = jsonwebtoken::encode(&header, &access_claims, &encoding_key)
-            .map_err(|e| Error::SigningError(e))?;
+            .map_err(|e| Status::new(Code::Internal, format!("error signing token: {}", e)))?;
 
         let claims_cookie = Cookie::build((ACCESS_TOKEN_COOKIE, access_jwt.clone()))
             .expires(Expiration::DateTime(
@@ -286,8 +267,12 @@ fn delete_cookie() -> CookieBuilder<'static> {
         .same_site(SameSite::Strict)
 }
 
+#[derive(thiserror::Error, Debug)]
 enum ValidationError {
+    #[error("unauthenticated")]
     Unauthenticated,
+
+    #[error(transparent)]
     StoreError(store::Error),
 }
 

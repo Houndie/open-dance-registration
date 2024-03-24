@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use argon2::{Argon2, PasswordVerifier};
 use common::proto::{self, LoginRequest, LoginResponse};
-use cookie::{Cookie, Expiration, SameSite};
+use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
 use ed25519_dalek::pkcs8::{self, EncodePrivateKey};
 use http::header::{HeaderMap, COOKIE, SET_COOKIE};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
 
 use crate::{
@@ -249,9 +250,17 @@ impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::A
             Ok(_) => Ok(Response::new(proto::IsLoggedInResponse {
                 is_logged_in: true,
             })),
-            Err(ValidationError::Unauthenticated) => Ok(Response::new(proto::IsLoggedInResponse {
-                is_logged_in: false,
-            })),
+            Err(ValidationError::Unauthenticated) => {
+                let mut response = Response::new(proto::IsLoggedInResponse {
+                    is_logged_in: false,
+                });
+
+                let mut metadata = HeaderMap::new();
+                metadata.insert(SET_COOKIE, delete_cookie().to_string().parse().unwrap());
+                *response.metadata_mut() = MetadataMap::from_headers(metadata);
+
+                Ok(response)
+            }
             Err(e) => Err(e.into()),
         }
     }
@@ -260,10 +269,21 @@ impl<KStore: KeyStore, UStore: UserStore> proto::authorization_service_server::A
         &self,
         _request: Request<proto::LogoutRequest>,
     ) -> Result<Response<proto::LogoutResponse>, Status> {
-        let response = Response::new(proto::LogoutResponse {});
+        let mut response = Response::new(proto::LogoutResponse {});
+        let mut metadata = HeaderMap::new();
+        metadata.insert(SET_COOKIE, delete_cookie().to_string().parse().unwrap());
+        *response.metadata_mut() = MetadataMap::from_headers(metadata);
 
         Ok(response)
     }
+}
+
+fn delete_cookie() -> CookieBuilder<'static> {
+    Cookie::build((ACCESS_TOKEN_COOKIE, ""))
+        .expires(Expiration::DateTime(OffsetDateTime::UNIX_EPOCH))
+        .secure(true)
+        .http_only(true)
+        .same_site(SameSite::Strict)
 }
 
 enum ValidationError {

@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-use common::proto::LoginRequest;
+use common::proto::{LoginRequest, LogoutRequest};
 
 #[derive(Default)]
 struct LoginForm {
@@ -55,7 +55,23 @@ pub fn LoginMenu(cx: Scope) -> Element {
                         style: "min-width: 300px",
                         if is_logged_in.read().0 {
                             rsx! {
-                                "You are logged in"
+                                Button{
+                                    onclick: move |_| {
+                                        cx.spawn({
+                                            to_owned!(show_menu, is_logged_in, toaster, grpc);
+                                            async move {
+                                                if let Err(e) = grpc.authorization.logout(LogoutRequest{}).await {
+                                                    toaster.write().new_error(e.to_string());
+                                                    return
+                                                }
+                                                *is_logged_in.write() = Login(false);
+                                                show_menu.set(false);
+                                            }
+                                        })
+                                    },
+                                    flavor: ButtonFlavor::Danger,
+                                    "Logout"
+                                }
                             }
                         } else {
                             rsx! {
@@ -84,7 +100,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                     Button {
                                         onclick: move |_| {
                                             cx.spawn({
-                                                to_owned!(toaster, login_form, grpc, is_logged_in);
+                                                to_owned!(toaster, login_form, grpc, is_logged_in, show_menu);
                                                 async move {
                                                     if let Err(e) = grpc.authorization.login(login_form.with(|login_form| {
                                                         LoginRequest {
@@ -97,6 +113,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                                     };
 
                                                     *is_logged_in.write() = Login(true);
+                                                    show_menu.set(false);
                                                 }
                                             })
                                         },

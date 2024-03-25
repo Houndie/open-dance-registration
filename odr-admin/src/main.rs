@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use common::proto::IsLoggedInRequest;
+use common::proto::ClaimsRequest;
 use dioxus::prelude::*;
 use dioxus_router::prelude::*;
 use hooks::{
@@ -9,6 +9,7 @@ use hooks::{
 };
 use log::LevelFilter;
 use pages::Routes;
+use tonic::Code;
 
 use crate::{components::with_toasts::WithToasts, hooks::login::Login};
 
@@ -41,16 +42,18 @@ fn use_check_login_state(cx: Scope) {
     use_future(cx, (), |_| {
         to_owned!(is_logged_in, grpc, toaster);
         async move {
-            let response = match grpc.authentication.is_logged_in(IsLoggedInRequest {}).await {
-                Ok(response) => response,
-                Err(e) => {
-                    toaster.write().new_error(e.to_string());
-                    return;
-                }
+            let claims = match grpc.authentication.claims(ClaimsRequest {}).await {
+                Ok(response) => response.into_inner().claims,
+                Err(e) => match e.code() {
+                    Code::Unauthenticated => None,
+                    _ => {
+                        toaster.write().new_error(e.to_string());
+                        return;
+                    }
+                },
             };
-            log::info!("is_logged_in: {:?}", response.get_ref().is_logged_in);
 
-            *is_logged_in.write() = Login(response.into_inner().is_logged_in);
+            *is_logged_in.write() = Login(claims);
         }
     });
 }

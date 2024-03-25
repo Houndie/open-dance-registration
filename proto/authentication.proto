@@ -1,9 +1,11 @@
 syntax = "proto3";
 package proto;
 
+import "google/protobuf/timestamp.proto";
+
 service AuthenticationService {
 	rpc Login(LoginRequest) returns (LoginResponse) {}
-	rpc IsLoggedIn(IsLoggedInRequest) returns (IsLoggedInResponse) {}
+	rpc Claims(ClaimsRequest) returns (ClaimsResponse) {}
 	rpc Logout(LogoutRequest) returns (LogoutResponse) {}
 }
 
@@ -12,14 +14,28 @@ message LoginRequest {
 	string password = 2;
 }
 
-message LoginResponse {}
+message LoginResponse {
+	Claims claims = 1;
+}
 
 message LogoutRequest {}
 
 message LogoutResponse {}
 
-message IsLoggedInRequest {}
+message ClaimsRequest {}
 
-message IsLoggedInResponse {
-	bool is_logged_in = 1;
+message ClaimsResponse {
+	Claims claims = 1;
+}
+
+enum Audience {
+	ACCESS = 0;
+}
+
+message Claims {
+	string iss = 1;
+	string sub = 2;
+	Audience aud = 3;
+	google.protobuf.Timestamp iat = 4;
+	google.protobuf.Timestamp exp = 5;
 }

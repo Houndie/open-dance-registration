@@ -38,3 +38,4 @@ strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
 http = "0.2.11"
 cookie = "0.18.0"
 time = "0.3.34"
+prost-types = "0.12.3"

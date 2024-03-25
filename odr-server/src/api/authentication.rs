@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use argon2::{Argon2, PasswordVerifier};
-use common::proto::{self, LoginRequest, LoginResponse};
+use common::proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use http::header::{HeaderMap, COOKIE, SET_COOKIE};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
+use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
@@ -26,6 +27,24 @@ struct Claims {
     aud: Audience,
     iat: chrono::DateTime<chrono::Utc>,
     exp: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Claims> for proto::Claims {
+    fn from(claims: Claims) -> Self {
+        proto::Claims {
+            iss: claims.iss,
+            sub: claims.sub,
+            aud: Into::<proto::Audience>::into(claims.aud) as i32,
+            iat: Some(Timestamp {
+                seconds: claims.iat.timestamp(),
+                nanos: 0,
+            }),
+            exp: Some(Timestamp {
+                seconds: claims.exp.timestamp(),
+                nanos: 0,
+            }),
+        }
+    }
 }
 
 impl Serialize for Claims {
@@ -85,6 +104,14 @@ impl<'de> Deserialize<'de> for Claims {
 #[derive(Serialize, Deserialize, strum::Display)]
 enum Audience {
     Access,
+}
+
+impl From<Audience> for proto::Audience {
+    fn from(aud: Audience) -> Self {
+        match aud {
+            Audience::Access => proto::Audience::Access,
+        }
+    }
 }
 
 const ISSUER: &str = "https://auth.example.com";
@@ -191,7 +218,9 @@ impl<KStore: KeyStore, UStore: UserStore>
             .http_only(true)
             .same_site(SameSite::Strict);
 
-        let mut response = Response::new(LoginResponse {});
+        let mut response = Response::new(LoginResponse {
+            claims: Some(access_claims.into()),
+        });
         let mut metadata = HeaderMap::new();
         metadata.insert(SET_COOKIE, claims_cookie.to_string().parse().unwrap());
         *response.metadata_mut() = MetadataMap::from_headers(metadata);
@@ -199,10 +228,10 @@ impl<KStore: KeyStore, UStore: UserStore>
         Ok(response)
     }
 
-    async fn is_logged_in(
+    async fn claims(
         &self,
-        mut request: Request<proto::IsLoggedInRequest>,
-    ) -> Result<Response<proto::IsLoggedInResponse>, Status> {
+        mut request: Request<ClaimsRequest>,
+    ) -> Result<Response<ClaimsResponse>, Status> {
         let metadata = std::mem::take(request.metadata_mut());
         let headers = metadata.into_headers();
         let cookies = headers.get_all(COOKIE);
@@ -219,29 +248,17 @@ impl<KStore: KeyStore, UStore: UserStore>
         let auth_cookie = match auth_cookie {
             Some(cookie) => cookie,
             None => {
-                return Ok(Response::new(proto::IsLoggedInResponse {
-                    is_logged_in: false,
-                }))
+                return Err(ValidationError::Unauthenticated.into());
             }
         };
 
-        match validate_token(&self.km, auth_cookie.value()).await {
-            Ok(_) => Ok(Response::new(proto::IsLoggedInResponse {
-                is_logged_in: true,
-            })),
-            Err(ValidationError::Unauthenticated) => {
-                let mut response = Response::new(proto::IsLoggedInResponse {
-                    is_logged_in: false,
-                });
+        let token = validate_token(&self.km, auth_cookie.value())
+            .await
+            .map_err(|e| -> Status { e.into() })?;
 
-                let mut metadata = HeaderMap::new();
-                metadata.insert(SET_COOKIE, delete_cookie().to_string().parse().unwrap());
-                *response.metadata_mut() = MetadataMap::from_headers(metadata);
-
-                Ok(response)
-            }
-            Err(e) => Err(e.into()),
-        }
+        Ok(Response::new(ClaimsResponse {
+            claims: Some(token.into()),
+        }))
     }
 
     async fn logout(
@@ -288,7 +305,7 @@ impl From<ValidationError> for Status {
 async fn validate_token<KStore: KeyStore>(
     km: &KeyManager<KStore>,
     token: &str,
-) -> Result<(), ValidationError> {
+) -> Result<Claims, ValidationError> {
     let header = decode_header(token).map_err(|_| ValidationError::Unauthenticated)?;
 
     let kid = header.kid.ok_or(ValidationError::Unauthenticated)?;
@@ -310,8 +327,8 @@ async fn validate_token<KStore: KeyStore>(
     validation.set_issuer(&[ISSUER]);
     validation.validate_exp = true;
 
-    decode::<Claims>(token, &decoding_key, &validation)
+    let claims = decode::<Claims>(token, &decoding_key, &validation)
         .map_err(|_| ValidationError::Unauthenticated)?;
 
-    Ok(())
+    Ok(claims.claims)
 }

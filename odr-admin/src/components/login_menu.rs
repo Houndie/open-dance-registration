@@ -53,8 +53,8 @@ pub fn LoginMenu(cx: Scope) -> Element {
                     div {
                         class: "dropdown-item",
                         style: "min-width: 300px",
-                        if is_logged_in.read().0 {
-                            rsx! {
+                        match is_logged_in.read().0 {
+                            Some(_) => rsx! {
                                 Button{
                                     onclick: move |_| {
                                         cx.spawn({
@@ -64,7 +64,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                                     toaster.write().new_error(e.to_string());
                                                     return
                                                 }
-                                                *is_logged_in.write() = Login(false);
+                                                *is_logged_in.write() = Login(None);
                                                 show_menu.set(false);
                                             }
                                         })
@@ -72,9 +72,8 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                     flavor: ButtonFlavor::Danger,
                                     "Logout"
                                 }
-                            }
-                        } else {
-                            rsx! {
+                            },
+                            None => rsx! {
                                 strong {
                                     "Login"
                                 }
@@ -102,17 +101,28 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                             cx.spawn({
                                                 to_owned!(toaster, login_form, grpc, is_logged_in, show_menu);
                                                 async move {
-                                                    if let Err(e) = grpc.authentication.login(login_form.with(|login_form| {
+                                                    let claims = match grpc.authentication.login(login_form.with(|login_form| {
                                                         LoginRequest {
                                                             email: login_form.username.clone(),
                                                             password: login_form.password.clone(),
                                                         }
                                                     })).await {
-                                                        toaster.write().new_error(e.to_string());
-                                                        return
+                                                        Ok(response) => response.into_inner().claims,
+                                                        Err(e) => {
+                                                            toaster.write().new_error(e.to_string());
+                                                            return
+                                                        },
                                                     };
 
-                                                    *is_logged_in.write() = Login(true);
+                                                    let claims = match claims {
+                                                        Some(claims) => claims,
+                                                        None => {
+                                                            toaster.write().new_error("No Claims Found".to_string());
+                                                            return
+                                                        }
+                                                    };
+
+                                                    *is_logged_in.write() = Login(Some(claims));
                                                     show_menu.set(false);
                                                 }
                                             })
@@ -121,7 +131,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         "Login"
                                     },
                                 }
-                            }
+                            },
                         }
                     }
                 }

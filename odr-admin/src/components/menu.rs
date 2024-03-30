@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 pub mod event;
 pub mod organization;
+pub mod profile;
 pub mod site;
 
 #[component]

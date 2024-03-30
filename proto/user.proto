@@ -48,14 +48,8 @@ message User {
 message UserQuery {
 	oneof query {
 		StringQuery email = 1;
-		CompoundUserQuery compound = 2;
-	}
-}
-
-message EmailQuery {
-	oneof operator {
-		string equals = 1;
-		string not_equals = 2;
+		StringQuery id = 2;
+		CompoundUserQuery compound = 3;
 	}
 }
 

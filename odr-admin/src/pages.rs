@@ -2,6 +2,7 @@ pub mod event;
 pub mod events;
 pub mod not_found;
 pub mod organizations;
+pub mod profile;
 pub mod registration;
 pub mod registration_schema;
 
@@ -11,6 +12,7 @@ use event::Page as EventPage;
 use events::Page as EventsPage;
 use not_found::Page as NotFound;
 use organizations::Page as OrganizationsPage;
+use profile::Page as ProfilePage;
 use registration::Page as RegistrationPage;
 use registration_schema::Page as RegistrationSchemaPage;
 
@@ -30,6 +32,9 @@ pub enum Routes {
 
     #[route("/events/:event_id/registrations")]
     RegistrationPage { event_id: String },
+
+    #[route("/profile")]
+    ProfilePage,
 
     #[route("/404")]
     NotFound,

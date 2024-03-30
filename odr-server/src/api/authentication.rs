@@ -21,6 +21,7 @@ use crate::{
     },
 };
 
+#[derive(Debug)]
 struct Claims {
     iss: String,
     sub: String,
@@ -101,7 +102,7 @@ impl<'de> Deserialize<'de> for Claims {
     }
 }
 
-#[derive(Serialize, Deserialize, strum::Display)]
+#[derive(Debug, Serialize, Deserialize, strum::Display)]
 enum Audience {
     Access,
 }

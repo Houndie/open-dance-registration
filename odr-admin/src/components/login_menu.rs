@@ -1,12 +1,13 @@
 use dioxus::prelude::*;
+use dioxus_router::prelude::*;
 
 use crate::{
     components::form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
     hooks::{
-        login::{use_login, Login},
+        login::{use_login, Login, LoginState},
         toasts::use_toasts,
         use_grpc_client,
-    },
+    }, pages::Routes,
 };
 
 use common::proto::{LoginRequest, LogoutRequest};
@@ -27,6 +28,8 @@ pub fn LoginMenu(cx: Scope) -> Element {
     let toaster = use_toasts(cx).unwrap();
     let grpc = use_grpc_client(cx).unwrap();
     let is_logged_in = use_login(cx).unwrap();
+    let nav = use_navigator(cx);
+
     cx.render(rsx! {
         div {
             class: "dropdown {menu_is_active} is-right",
@@ -54,26 +57,41 @@ pub fn LoginMenu(cx: Scope) -> Element {
                         class: "dropdown-item",
                         style: "min-width: 300px",
                         match is_logged_in.read().0 {
-                            Some(_) => rsx! {
-                                Button{
-                                    onclick: move |_| {
-                                        cx.spawn({
-                                            to_owned!(show_menu, is_logged_in, toaster, grpc);
-                                            async move {
-                                                if let Err(e) = grpc.authentication.logout(LogoutRequest{}).await {
-                                                    toaster.write().new_error(e.to_string());
-                                                    return
-                                                }
-                                                *is_logged_in.write() = Login(None);
-                                                show_menu.set(false);
+                            LoginState::LoggedIn(_) => rsx! {
+                                div {
+                                    class: "menu",
+                                    ul {
+                                        class: "menu-list",
+                                        li {
+                                            a {
+                                                prevent_default: "onclick",
+                                                onclick: |_| { nav.push(Routes::ProfilePage); },
+                                                "My Profile"
                                             }
-                                        })
-                                    },
-                                    flavor: ButtonFlavor::Danger,
-                                    "Logout"
+                                        }
+                                        li {
+                                            a {
+                                                prevent_default: "onclick",
+                                                onclick: move |_| { 
+                                                    cx.spawn({
+                                                        to_owned!(show_menu, is_logged_in, toaster, grpc);
+                                                        async move {
+                                                            if let Err(e) = grpc.authentication.logout(LogoutRequest{}).await {
+                                                                toaster.write().new_error(e.to_string());
+                                                                return
+                                                            }
+                                                            *is_logged_in.write() = Login(LoginState::LoggedOut);
+                                                            show_menu.set(false);
+                                                        }
+                                                    })
+                                                },
+                                                "Logout"
+                                            }
+                                        }
+                                    }
                                 }
                             },
-                            None => rsx! {
+                            LoginState::LoggedOut => rsx! {
                                 strong {
                                     "Login"
                                 }
@@ -122,7 +140,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                                         }
                                                     };
 
-                                                    *is_logged_in.write() = Login(Some(claims));
+                                                    *is_logged_in.write() = Login(LoginState::LoggedIn(claims));
                                                     show_menu.set(false);
                                                 }
                                             })
@@ -131,6 +149,9 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         "Login"
                                     },
                                 }
+                            },
+                            LoginState::Unknown => rsx! {
+                                "Loading..."
                             },
                         }
                     }

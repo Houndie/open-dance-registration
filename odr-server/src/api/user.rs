@@ -97,6 +97,10 @@ impl TryFrom<UserQuery> for Query {
                 try_logical_string_query(email_query).map_err(|e| e.with_context("query.email"))?,
             )),
 
+            Some(user_query::Query::Id(id_query)) => Ok(Query::Id(
+                try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
+            )),
+
             Some(user_query::Query::Compound(compound_query)) => {
                 let operator =
                     match compound_user_query::Operator::try_from(compound_query.operator) {

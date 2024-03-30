@@ -11,7 +11,10 @@ use log::LevelFilter;
 use pages::Routes;
 use tonic::Code;
 
-use crate::{components::with_toasts::WithToasts, hooks::login::Login};
+use crate::{
+    components::with_toasts::WithToasts,
+    hooks::login::{Login, LoginState},
+};
 
 pub mod components;
 pub mod hooks;
@@ -42,18 +45,20 @@ fn use_check_login_state(cx: Scope) {
     use_future(cx, (), |_| {
         to_owned!(is_logged_in, grpc, toaster);
         async move {
-            let claims = match grpc.authentication.claims(ClaimsRequest {}).await {
-                Ok(response) => response.into_inner().claims,
+            let res = grpc.authentication.claims(ClaimsRequest {}).await;
+            match res {
+                Ok(response) => {
+                    *is_logged_in.write() =
+                        Login(LoginState::LoggedIn(response.into_inner().claims.unwrap()))
+                }
                 Err(e) => match e.code() {
-                    Code::Unauthenticated => None,
+                    Code::Unauthenticated => *is_logged_in.write() = Login(LoginState::LoggedOut),
                     _ => {
                         toaster.write().new_error(e.to_string());
                         return;
                     }
                 },
             };
-
-            *is_logged_in.write() = Login(claims);
         }
     });
 }

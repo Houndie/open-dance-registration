@@ -38,6 +38,9 @@ enum Commands {
         password: Option<String>,
 
         #[clap(long)]
+        display_name: Option<String>,
+
+        #[clap(long)]
         nointeractive: bool,
     },
 }
@@ -50,6 +53,9 @@ enum UserSubcommand {
 
         #[clap(long)]
         password: Option<String>,
+
+        #[clap(long)]
+        display_name: Option<String>,
 
         #[clap(long)]
         nointeractive: bool,
@@ -105,11 +111,12 @@ async fn main() -> Result<(), anyhow::Error> {
             UserSubcommand::Add {
                 email,
                 password,
+                display_name,
                 nointeractive,
             } => {
                 let db_url = db_url();
                 let db = Arc::new(SqlitePool::connect(&db_url).await?);
-                add_user(db, email, password, !nointeractive).await?;
+                add_user(db, email, password, display_name, !nointeractive).await?;
             }
             UserSubcommand::SetPassword {
                 email,
@@ -122,9 +129,10 @@ async fn main() -> Result<(), anyhow::Error> {
         Commands::Init {
             email,
             password,
+            display_name,
             nointeractive,
         } => {
-            init(email, password, !nointeractive).await?;
+            init(email, password, display_name, !nointeractive).await?;
         }
     };
 
@@ -172,6 +180,7 @@ async fn add_user(
     db: Arc<SqlitePool>,
     email: Option<String>,
     password: Option<String>,
+    display_name: Option<String>,
     interactive: bool,
 ) -> Result<(), anyhow::Error> {
     let user_store = UserStore::new(db.clone());
@@ -199,13 +208,26 @@ async fn add_user(
         }
     };
 
+    let display_name = match display_name {
+        Some(display_name) => display_name,
+        None => {
+            if interactive {
+                inquire::Text::new("Display Name").prompt()?
+            } else {
+                return Err(anyhow::anyhow!(
+                    "--nointeractive set, --display_name must be set"
+                ));
+            }
+        }
+    };
+
     let hashed_password =
         hash_password(&password).map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
 
     user_store
         .upsert(vec![User {
             id: "".to_owned(),
-            display_name: "".to_owned(),
+            display_name,
             email,
             password: PasswordType::Set(hashed_password),
         }])
@@ -270,6 +292,7 @@ async fn set_password(
 async fn init(
     email: Option<String>,
     password: Option<String>,
+    display_name: Option<String>,
     interactive: bool,
 ) -> Result<(), anyhow::Error> {
     println!("Initializing database");
@@ -290,7 +313,7 @@ async fn init(
     let user_store = UserStore::new(db.clone());
     if user_store.query(None).await?.is_empty() {
         println!("No users found, adding new user");
-        add_user(db, email, password, interactive).await?;
+        add_user(db, email, password, display_name, interactive).await?;
     }
 
     Ok(())

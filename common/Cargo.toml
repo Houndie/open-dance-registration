@@ -16,3 +16,6 @@ tonic-build = { version = "0.10.2", default-features = false, features = ["prost
 
 [features]
 transport = ["tonic/transport", "tonic-build/transport"]
+
+[dev-dependencies]
+test-case = "3.3.1"

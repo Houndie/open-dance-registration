@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use common::proto::{
-    self, compound_user_query, user::Password, user_query, DeleteUsersRequest, DeleteUsersResponse,
-    QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest, UpsertUsersResponse, UserQuery,
+use common::{
+    password,
+    proto::{
+        self, compound_user_query, user::Password, user_query, DeleteUsersRequest,
+        DeleteUsersResponse, QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest,
+        UpsertUsersResponse, UserQuery,
+    },
 };
 use tonic::{Request, Response, Status};
 
@@ -55,14 +59,6 @@ fn user_to_proto(user: user::User) -> proto::User {
     }
 }
 
-fn validate_password(password: &str) -> Result<(), ValidationError> {
-    if password == "" {
-        return Err(ValidationError::new_empty("password"));
-    }
-
-    Ok(())
-}
-
 fn validate_user(user: &proto::User) -> Result<(), ValidationError> {
     if user.email == "" {
         return Err(ValidationError::new_empty("email"));
@@ -77,13 +73,19 @@ fn validate_user(user: &proto::User) -> Result<(), ValidationError> {
         None => return Err(ValidationError::new_empty("password")),
     };
 
-    if user.id == "" && matches!(password, Password::Unchanged(())) {
-        return Err(ValidationError::new_empty("password"));
-    }
-
-    if let Password::Set(password) = password {
-        validate_password(password)?;
-    }
+    match password {
+        Password::Set(password) => {
+            if !password::Validation::new(password).is_valid() {
+                return Err(ValidationError::new_invalid_value("password"));
+            }
+        }
+        Password::Unset(_) => (),
+        Password::Unchanged(_) => {
+            if user.id == "" {
+                return Err(ValidationError::new_empty("password"));
+            }
+        }
+    };
 
     Ok(())
 }

@@ -508,6 +508,7 @@ dependencies = [
  "prost",
  "prost-types",
  "serde",
+ "test-case",
  "tonic",
  "tonic-build",
 ]

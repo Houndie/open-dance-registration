@@ -36,6 +36,7 @@ enum ValidationErrorReason {
     EmptyField,
     TooManyItems,
     InvalidEnum,
+    InvalidValue,
 }
 
 impl Display for ValidationErrorReason {
@@ -44,6 +45,7 @@ impl Display for ValidationErrorReason {
             ValidationErrorReason::EmptyField => write!(f, "cannot be empty"),
             ValidationErrorReason::TooManyItems => write!(f, "contains too many items"),
             ValidationErrorReason::InvalidEnum => write!(f, "contains invalid enum value"),
+            ValidationErrorReason::InvalidValue => write!(f, "contains an invalid value"),
         }
     }
 }
@@ -73,6 +75,10 @@ impl ValidationError {
 
     fn new_invalid_enum(field: &str) -> Self {
         ValidationError::new(field, ValidationErrorReason::InvalidEnum)
+    }
+
+    fn new_invalid_value(field: &str) -> Self {
+        ValidationError::new(field, ValidationErrorReason::InvalidValue)
     }
 
     fn with_context(self, context: &str) -> Self {

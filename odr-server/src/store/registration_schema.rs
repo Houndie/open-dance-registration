@@ -840,21 +840,19 @@ impl Store for SqliteStore {
 mod tests {
     use std::{collections::HashMap, str::FromStr, sync::Arc};
 
+    use common::proto::{
+        multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
+        CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
+        RegistrationSchemaItemType, SelectOption, SelectType, TextType,
+    };
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
 
-    use crate::{
-        proto::{
-            multi_select_type, registration_schema_item_type::Type as ItemType, select_type,
-            text_type, CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
-            RegistrationSchemaItemType, SelectOption, SelectType, TextType,
-        },
-        store::{
-            common::new_id,
-            registration_schema::{OptionRow, Store},
-            CompoundOperator, CompoundQuery, Error, LogicalQuery,
-        },
+    use crate::store::{
+        common::new_id,
+        registration_schema::{OptionRow, Store},
+        CompoundOperator, CompoundQuery, Error, LogicalQuery,
     };
 
     use super::{items_to_schema, ItemRow, Query, SqliteStore};
@@ -869,7 +867,7 @@ mod tests {
 
     async fn init_db() -> Init {
         let db_url = "sqlite://:memory:";
-        Sqlite::create_database(db_url);
+        Sqlite::create_database(db_url).await.unwrap();
 
         let db = SqlitePool::connect_with(
             SqliteConnectOptions::from_str(db_url)
@@ -878,7 +876,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::migrate!().run(&db).await.unwrap();
+        sqlx::migrate!("../migrations").run(&db).await.unwrap();
 
         let org_id = new_id();
         let org_name = "Org 1";

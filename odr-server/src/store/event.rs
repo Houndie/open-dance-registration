@@ -261,10 +261,9 @@ mod tests {
 
     use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 
-    use crate::{
-        proto::Event,
-        store::{common::new_id, CompoundOperator, CompoundQuery, LogicalQuery},
-    };
+    use common::proto::Event;
+
+    use crate::store::{common::new_id, CompoundOperator, CompoundQuery, LogicalQuery};
 
     use super::{Error, EventRow, Query, SqliteStore, Store};
 
@@ -277,10 +276,10 @@ mod tests {
 
     async fn init_db() -> Init {
         let db_url = "sqlite://:memory:";
-        Sqlite::create_database(db_url);
+        Sqlite::create_database(db_url).await.unwrap();
 
         let db = SqlitePool::connect(db_url).await.unwrap();
-        sqlx::migrate!().run(&db).await.unwrap();
+        sqlx::migrate!("../migrations").run(&db).await.unwrap();
 
         let org = new_id();
         let org_name = "Organization 1";

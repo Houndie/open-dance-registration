@@ -146,7 +146,7 @@ async fn migrate() -> Result<(), anyhow::Error> {
     }
 
     let db = Arc::new(SqlitePool::connect(&db_url).await?);
-    sqlx::migrate!().run(&(*db)).await?;
+    sqlx::migrate!("../migrations").run(&(*db)).await?;
     Ok(())
 }
 

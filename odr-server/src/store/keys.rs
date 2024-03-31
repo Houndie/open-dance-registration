@@ -177,7 +177,7 @@ mod tests {
 
     async fn init_db() -> Init {
         let db_url = "sqlite://:memory:";
-        Sqlite::create_database(db_url);
+        Sqlite::create_database(db_url).await.unwrap();
 
         let db = SqlitePool::connect_with(
             SqliteConnectOptions::from_str(db_url)
@@ -186,7 +186,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::migrate!().run(&db).await.unwrap();
+        sqlx::migrate!("../migrations").run(&db).await.unwrap();
 
         Init { db }
     }

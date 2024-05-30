@@ -53,6 +53,10 @@ impl<Store: KeyStore> KeyManager<Store> {
 
     pub async fn get_verifying_key(&self, kid: &str) -> Result<VerifyingKey, store::Error> {
         let key = self.store.list(vec![kid]).await?;
+        if key.is_empty() {
+            return Err(store::Error::IdDoesNotExist(kid.to_string()));
+        }
+
         Ok(key[0].key.verifying_key().clone())
     }
 }

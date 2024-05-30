@@ -1,17 +1,16 @@
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 
 use crate::pages::Routes;
 
 #[component]
-pub fn Breadcrumb(cx: Scope, items: Vec<(String, Option<Routes>)>) -> Element {
-    let nav = use_navigator(cx);
+pub fn Breadcrumb(items: ReadOnlySignal<Vec<(String, Option<Routes>)>>) -> Element {
+    let nav = use_navigator();
 
-    cx.render(rsx! {
+    rsx! {
         nav {
             class: "breadcrumb",
             ul {
-                items.iter().cloned().map(|(label, route)| {
+                { items.read().iter().cloned().map(|(label, route)| {
                     rsx!{
                         li {
                             a {
@@ -25,8 +24,8 @@ pub fn Breadcrumb(cx: Scope, items: Vec<(String, Option<Routes>)>) -> Element {
                             }
                         }
                     }
-                })
+                }) }
             }
         }
-    })
+    }
 }

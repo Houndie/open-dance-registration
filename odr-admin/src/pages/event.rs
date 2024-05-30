@@ -1,9 +1,8 @@
 use common::proto::{
-    event_query, organization_query, string_query, EventQuery, OrganizationQuery,
-    QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
+    self, event_query, organization_query, string_query, EventQuery, Organization,
+    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
 };
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 use tonic::Request;
 
 use crate::{
@@ -16,21 +15,21 @@ use crate::{
 };
 
 #[component]
-pub fn Page(cx: Scope, id: String) -> Element {
-    let grpc_client = use_grpc_client(cx).unwrap();
+pub fn Page(id: ReadOnlySignal<String>) -> Element {
+    let grpc_client = use_grpc_client();
 
-    let toaster = use_toasts(cx).unwrap();
-    let nav = use_navigator(cx);
+    let mut toaster = use_toasts();
+    let nav = use_navigator();
 
-    let event_success = use_future(cx, (id,), |(id,)| {
-        to_owned!(grpc_client, toaster, nav);
+    let resource = use_resource(move || {
+        let mut grpc_client = grpc_client.clone();
         async move {
             let result = grpc_client
                 .events
                 .query_events(Request::new(QueryEventsRequest {
                     query: Some(EventQuery {
                         query: Some(event_query::Query::Id(StringQuery {
-                            operator: Some(string_query::Operator::Equals(id.clone())),
+                            operator: Some(string_query::Operator::Equals(id.read().clone())),
                         })),
                     }),
                 }))
@@ -44,33 +43,24 @@ pub fn Page(cx: Scope, id: String) -> Element {
                 }
             };
 
-            let evt = response.into_inner().events.pop();
+            let event = response.into_inner().events.pop();
 
-            if evt.is_none() {
-                nav.push(Routes::NotFound);
-                return None;
-            }
+            let event = match event {
+                Some(event) => event,
+                None => {
+                    nav.push(Routes::NotFound);
+                    return None;
+                }
+            };
 
-            evt
-        }
-    });
-
-    let event = match event_success.value().map(|o| o.as_ref()).flatten() {
-        Some(evt) => evt,
-        None => return None,
-    };
-
-    let org_id = &event.organization_id;
-
-    let org = use_future(cx, (), |_| {
-        to_owned!(grpc_client, org_id, toaster);
-        async move {
             let result = grpc_client
                 .organizations
                 .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
                     query: Some(OrganizationQuery {
                         query: Some(organization_query::Query::Id(StringQuery {
-                            operator: Some(string_query::Operator::Equals(org_id)),
+                            operator: Some(string_query::Operator::Equals(
+                                event.organization_id.clone(),
+                            )),
                         })),
                     }),
                 }))
@@ -86,39 +76,50 @@ pub fn Page(cx: Scope, id: String) -> Element {
 
             let org = response.into_inner().organizations.pop();
 
-            if org.is_none() {
-                toaster
-                    .write()
-                    .new_error("Organization not found".to_string());
-                return None;
-            }
+            let org = match org {
+                Some(org) => org,
+                None => {
+                    toaster
+                        .write()
+                        .new_error("Organization not found".to_string());
+                    return None;
+                }
+            };
 
-            org
+            rsx! {
+                LoadedPage {
+                    org: org,
+                    event: event,
+                }
+            }
         }
     });
 
-    let org = match org.value().map(|o| o.as_ref()).flatten() {
-        Some(org) => org,
-        None => return None,
-    };
+    match resource() {
+        Some(page) => page,
+        None => None,
+    }
+}
 
-    cx.render(rsx! {
+#[component]
+fn LoadedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>) -> Element {
+    rsx! {
         GenericPage {
             title: "Event Home".to_string(),
             breadcrumb: vec![
                 ("Home".to_owned(), Some(Routes::OrganizationsPage)),
-                (org.name.clone(), Some(Routes::EventsPage { org_id: org.id.clone() })),
-                (event.name.clone(), None),
+                (org().name.clone(), Some(Routes::EventsPage { org_id: org().id.clone() })),
+                (event().name.clone(), None),
             ],
-            menu: cx.render(rsx!{
+            menu: rsx!{
                 Menu {
-                    event_name: event.name.clone(),
-                    event_id: event.id.clone(),
+                    event_name: event().name,
+                    event_id: event().id,
                     highlight: MenuItem::EventHome,
                 }
-            }),
+            },
             div {
             }
         }
-    })
+    }
 }

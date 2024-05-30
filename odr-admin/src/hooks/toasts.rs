@@ -28,10 +28,10 @@ impl ToastManager {
     }
 }
 
-pub fn use_toasts_provider(cx: &ScopeState) {
-    use_shared_state_provider(cx, || ToastManager::default())
+pub fn use_toasts_provider() {
+    use_context_provider(|| Signal::new(ToastManager::default()));
 }
 
-pub fn use_toasts(cx: &ScopeState) -> Option<&UseSharedState<ToastManager>> {
-    use_shared_state::<ToastManager>(cx)
+pub fn use_toasts() -> Signal<ToastManager> {
+    use_context::<Signal<ToastManager>>()
 }

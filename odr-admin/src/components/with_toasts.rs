@@ -1,17 +1,15 @@
 use dioxus::prelude::*;
 
-use crate::hooks::toasts::{use_toasts, use_toasts_provider};
+use crate::hooks::toasts::use_toasts;
 
 #[component]
-pub fn WithToasts<'a>(cx: Scope, children: Element<'a>) -> Element {
-    use_toasts_provider(cx);
-    let toaster = use_toasts(cx).unwrap();
-    cx.render(rsx!{
-        &children,
-        toaster.read().toasts().enumerate().map(|(idx, toast)| {
-            let toaster = toaster.clone();
+pub fn WithToasts(children: Element) -> Element {
+    let mut toaster = use_toasts();
+    rsx! {
+        { children },
+        { toaster.read().toasts().enumerate().map(|(idx, toast)| {
             let offset = idx * 9 + 2;
-            cx.render(rsx!(
+            rsx!{
                 div {
                     key: "{idx}",
                     class: "notification is-warning",
@@ -32,8 +30,8 @@ pub fn WithToasts<'a>(cx: Scope, children: Element<'a>) -> Element {
                         "{toast.body}",
                     }
                 }
-            ))
-        })
+            }
+        })}
 
-    })
+    }
 }

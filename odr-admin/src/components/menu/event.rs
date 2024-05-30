@@ -1,10 +1,9 @@
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 
 use super::Menu as GenericMenu;
 use crate::pages::Routes;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum MenuItem {
     None,
     EventHome,
@@ -24,15 +23,14 @@ impl MenuItem {
 
 #[component]
 pub fn Menu(
-    cx: Scope,
-    event_name: String,
-    event_id: String,
+    event_name: ReadOnlySignal<String>,
+    event_id: ReadOnlySignal<String>,
     highlight: Option<MenuItem>,
 ) -> Element {
-    let nav = use_navigator(cx);
+    let nav = use_navigator();
     let highlight = highlight.as_ref().cloned().unwrap_or(MenuItem::None);
 
-    cx.render(rsx! {
+    rsx! {
         GenericMenu {
             title: "{event_name}",
             p {
@@ -45,7 +43,7 @@ pub fn Menu(
                     a {
                         prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::EventHome),
-                        onclick: |_| { nav.push(Routes::EventPage { id: event_id.clone() }); },
+                        onclick: move |_| { nav.push(Routes::EventPage { id: event_id.read().clone() }); },
                         "Event Home"
                     }
                 }
@@ -53,7 +51,7 @@ pub fn Menu(
                     a {
                         prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::Registrations),
-                        onclick: |_| { nav.push(Routes::RegistrationPage { event_id: event_id.clone() }); },
+                        onclick: move |_| { nav.push(Routes::RegistrationPage { event_id: event_id.read().clone() }); },
                         "Registrations"
                     }
                 }
@@ -61,11 +59,11 @@ pub fn Menu(
                     a {
                         prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::RegistrationSchema),
-                        onclick: |_| { nav.push(Routes::RegistrationSchemaPage { id: event_id.clone() }); },
+                        onclick: move |_| { nav.push(Routes::RegistrationSchemaPage { id: event_id.read().clone() }); },
                         "Registration Schema"
                     }
                 }
             }
         }
-    })
+    }
 }

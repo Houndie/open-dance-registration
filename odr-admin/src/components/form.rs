@@ -10,34 +10,40 @@ pub enum TextInputType {
 }
 
 #[component]
-pub fn TextInput<'a>(
-    cx: Scope,
-    oninput: EventHandler<'a, FormEvent>,
-    onblur: Option<EventHandler<'a, FocusEvent>>,
+pub fn TextInput(
+    oninput: EventHandler<FormEvent>,
+    onblur: Option<EventHandler<FocusEvent>>,
     invalid: Option<Option<String>>,
-    value: TextInputType,
+    value: ReadOnlySignal<TextInputType>,
     is_expanded: Option<bool>,
-) -> Element<'a> {
-    let value_str = match value {
+) -> Element {
+    let value_str = match &*value.read() {
         TextInputType::Text(text) => text.clone(),
         TextInputType::Password(text) => text.clone(),
         TextInputType::Number(number) => format!("{}", number),
     };
 
-    let typ = match value {
+    let typ = match &*value.read() {
         TextInputType::Text(_) => "text",
         TextInputType::Number(_) => "number",
         TextInputType::Password(_) => "password",
     };
 
     let class = "field".to_owned();
-    let class = if matches!(*is_expanded, Some(true)) {
+    let class = if matches!(is_expanded, Some(true)) {
         format!("{} is-expanded", class)
     } else {
         class
     };
 
-    let invalid = invalid.as_ref().map(|o| o.as_ref()).flatten();
+    let invalid = invalid.flatten().map(|invalid| {
+        rsx! {
+            p {
+                class: "help is-danger",
+                "{invalid}"
+            }
+        }
+    });
 
     let input_class = "input".to_owned();
     let input_class = if invalid.is_some() {
@@ -46,7 +52,7 @@ pub fn TextInput<'a>(
         input_class
     };
 
-    cx.render(rsx!(
+    rsx! {
         div {
             class: "{class}",
             div {
@@ -62,33 +68,25 @@ pub fn TextInput<'a>(
                     },
                 }
             }
-            if let Some(invalid) = invalid {
-                rsx!{
-                    p {
-                        class: "help is-danger",
-                        "{invalid}"
-                    }
-                }
-            }
+            { invalid }
         }
-    ))
+    }
 }
 
 #[component]
-pub fn SelectInput<'a>(
-    cx: Scope,
-    onchange: EventHandler<'a, FormEvent>,
-    options: Vec<String>,
+pub fn SelectInput(
+    onchange: EventHandler<FormEvent>,
+    options: ReadOnlySignal<Vec<String>>,
     value: usize,
-) -> Element<'a> {
-    cx.render(rsx!(
+) -> Element {
+    rsx! {
         div {
             class: "select",
             select {
                 onchange: move |evt| onchange.call(evt),
                 value: "{value}",
-                options.iter().enumerate().map(|(idx, v)| {
-                    let selected = *value == idx;
+                { options.iter().enumerate().map(|(idx, v)| {
+                    let selected = value == idx;
                     rsx!(
                         option {
                             selected: selected,
@@ -97,54 +95,53 @@ pub fn SelectInput<'a>(
                             "{v}"
                         }
                     )
-                })
+                })}
             }
         }
-    ))
+    }
 }
 
 #[component]
-pub fn MultiSelectInput<DoSelect: Fn(usize, MouseEvent) -> ()>(
-    cx: Scope,
-    do_select: DoSelect,
-    options: Vec<String>,
-    value: HashSet<usize>,
-) -> Element<'a> {
-    cx.render(rsx!(
+pub fn MultiSelectInput(
+    onselect: EventHandler<(usize, MouseEvent)>,
+    options: ReadOnlySignal<Vec<String>>,
+    value: ReadOnlySignal<HashSet<usize>>,
+) -> Element {
+    rsx! {
         div {
             class: "select is-multiple",
             select {
                 multiple: true,
-                options.iter().enumerate().map(|(idx, v)| {
-                    let selected = value.contains(&idx);
+                { options.iter().enumerate().map(|(idx, v)| {
+                    let selected = value.read().contains(&idx);
                     rsx!(
                         option {
                             key: "{idx}",
                             value: "{idx}",
                             selected: selected,
-                            onclick: move |evt| do_select(idx, evt),
+                            onclick: move |evt| onselect.call((idx, evt)),
                             "{v}"
                         }
                     )
-                })
+                }) }
             }
         }
-    ))
+    }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum CheckStyle {
     Checkbox,
     Radio,
 }
 
 #[component]
-pub fn CheckInput<'a>(
-    cx: Scope,
+pub fn CheckInput(
     style: CheckStyle,
-    label: Option<&'a str>,
-    onclick: EventHandler<'a, MouseEvent>,
+    label: Option<String>,
+    onclick: EventHandler<MouseEvent>,
     value: bool,
-) -> Element<'a> {
+) -> Element {
     let style_str = match style {
         CheckStyle::Checkbox => "checkbox",
         CheckStyle::Radio => "radio",
@@ -153,30 +150,31 @@ pub fn CheckInput<'a>(
     let input = rsx!(input {
         class: "{style_str}",
         r#type: "{style_str}",
-        checked: *value,
+        checked: value,
         onclick: move |evt| onclick.call(evt),
     });
 
-    cx.render(rsx!(
+    rsx! {
         div {
             class: "field",
             div {
                 class: "control",
-                match label {
+                { match label {
                     None => input,
                     Some(label) => rsx!(
                         label {
                             class: "checkbox",
-                            input
+                            { input }
                             "{label}",
                         }
                     ),
-                }
+                } }
             }
         }
-    ))
+    }
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum ButtonFlavor {
     Info,
     Success,
@@ -184,12 +182,11 @@ pub enum ButtonFlavor {
 }
 
 #[component]
-pub fn Button<'a>(
-    cx: Scope,
-    onclick: EventHandler<'a, MouseEvent>,
+pub fn Button(
+    onclick: EventHandler<MouseEvent>,
     flavor: Option<ButtonFlavor>,
     disabled: Option<bool>,
-    children: Element<'a>,
+    children: Element,
 ) -> Element {
     let mut class = "button".to_owned();
 
@@ -200,26 +197,25 @@ pub fn Button<'a>(
         Some(ButtonFlavor::Danger) => class.push_str(" is-danger"),
     };
 
-    cx.render(rsx!(
-        button {
-            class: "{class}",
-            disabled: *disabled,
-            "type": "button",
-            onclick: move |evt| onclick.call(evt),
-            &children
-        }
-    ))
+    rsx! {
+         button {
+             class: "{class}",
+             disabled: disabled,
+             "type": "button",
+             onclick: move |evt| onclick.call(evt),
+             { children }
+         }
+    }
 }
 
 #[component]
-pub fn Field<'a>(
-    cx: Scope,
-    onmounted: Option<EventHandler<'a, MountedEvent>>,
-    ondragover: Option<EventHandler<'a, DragEvent>>,
-    label: &'a str,
-    children: Element<'a>,
+pub fn Field(
+    onmounted: Option<EventHandler<MountedEvent>>,
+    ondragover: Option<EventHandler<DragEvent>>,
+    label: ReadOnlySignal<String>,
+    children: Element,
 ) -> Element {
-    cx.render(rsx!(
+    rsx! {
         div {
             onmounted: move |evt| match onmounted {
                 Some(onmounted) => onmounted.call(evt),
@@ -239,8 +235,8 @@ pub fn Field<'a>(
             }
             div {
                 class: "field-body",
-                &children
+                { children }
             }
         }
-    ))
+    }
 }

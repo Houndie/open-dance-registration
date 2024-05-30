@@ -1,13 +1,13 @@
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 
 use crate::{
     components::form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
     hooks::{
-        login::{use_login, Login, LoginState},
+        login::{use_login, LoginState},
         toasts::use_toasts,
         use_grpc_client,
-    }, pages::Routes,
+    },
+    pages::Routes,
 };
 
 use common::proto::{LoginRequest, LogoutRequest};
@@ -19,18 +19,18 @@ struct LoginForm {
 }
 
 #[component]
-pub fn LoginMenu(cx: Scope) -> Element {
-    let show_menu = use_state(cx, || false);
-    let menu_is_active = if *show_menu.get() { "is-active" } else { "" };
+pub fn LoginMenu() -> Element {
+    let mut show_menu = use_signal(|| false);
+    let menu_is_active = if *show_menu.read() { "is-active" } else { "" };
 
-    let login_form = use_ref(cx, LoginForm::default);
+    let mut login_form = use_signal(LoginForm::default);
 
-    let toaster = use_toasts(cx).unwrap();
-    let grpc = use_grpc_client(cx).unwrap();
-    let is_logged_in = use_login(cx).unwrap();
-    let nav = use_navigator(cx);
+    let mut toaster = use_toasts();
+    let grpc = use_grpc_client();
+    let mut is_logged_in = use_login();
+    let nav = use_navigator();
 
-    cx.render(rsx! {
+    rsx! {
         div {
             class: "dropdown {menu_is_active} is-right",
             div {
@@ -38,7 +38,8 @@ pub fn LoginMenu(cx: Scope) -> Element {
                 button {
                     class: "button",
                     onclick: move |_| {
-                        show_menu.set(!show_menu.get());
+                        let new_show_menu = !(&*show_menu.read());
+                        show_menu.set(new_show_menu);
                     },
                     span{
                         "Login/Signup"
@@ -56,7 +57,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                     div {
                         class: "dropdown-item",
                         style: "min-width: 300px",
-                        match is_logged_in.read().0 {
+                        { match &*is_logged_in.read() {
                             LoginState::LoggedIn(_) => rsx! {
                                 div {
                                     class: "menu",
@@ -65,25 +66,25 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         li {
                                             a {
                                                 prevent_default: "onclick",
-                                                onclick: |_| { nav.push(Routes::ProfilePage); },
+                                                onclick: move |_| { nav.push(Routes::ProfilePage); },
                                                 "My Profile"
                                             }
                                         }
                                         li {
                                             a {
                                                 prevent_default: "onclick",
-                                                onclick: move |_| { 
-                                                    cx.spawn({
-                                                        to_owned!(show_menu, is_logged_in, toaster, grpc);
+                                                onclick: move |_| {
+                                                    spawn({
+                                                        let mut grpc = grpc.clone();
                                                         async move {
                                                             if let Err(e) = grpc.authentication.logout(LogoutRequest{}).await {
                                                                 toaster.write().new_error(e.to_string());
                                                                 return
                                                             }
-                                                            *is_logged_in.write() = Login(LoginState::LoggedOut);
+                                                            *is_logged_in.write() = LoginState::LoggedOut;
                                                             show_menu.set(false);
                                                         }
-                                                    })
+                                                    });
                                                 },
                                                 "Logout"
                                             }
@@ -100,7 +101,7 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         label: "Username",
                                         TextInput{
                                             oninput: move |e: FormEvent| {
-                                                login_form.write().username = e.value.clone();
+                                                login_form.write().username = e.value();
                                             },
                                             value: TextInputType::Text(login_form.read().username.clone()),
                                         }
@@ -109,15 +110,15 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                         label: "Password",
                                         TextInput{
                                             oninput: move |e: FormEvent| {
-                                                login_form.write().password = e.value.clone();
+                                                login_form.write().password = e.value();
                                             },
                                             value: TextInputType::Password(login_form.read().password.clone()),
                                         }
                                     }
                                     Button {
                                         onclick: move |_| {
-                                            cx.spawn({
-                                                to_owned!(toaster, login_form, grpc, is_logged_in, show_menu);
+                                            spawn({
+                                                let mut grpc = grpc.clone();
                                                 async move {
                                                     let claims = match grpc.authentication.login(login_form.with(|login_form| {
                                                         LoginRequest {
@@ -140,10 +141,10 @@ pub fn LoginMenu(cx: Scope) -> Element {
                                                         }
                                                     };
 
-                                                    *is_logged_in.write() = Login(LoginState::LoggedIn(claims));
+                                                    *is_logged_in.write() = LoginState::LoggedIn(claims);
                                                     show_menu.set(false);
                                                 }
-                                            })
+                                            });
                                         },
                                         flavor: ButtonFlavor::Success,
                                         "Login"
@@ -153,10 +154,10 @@ pub fn LoginMenu(cx: Scope) -> Element {
                             LoginState::Unknown => rsx! {
                                 "Loading..."
                             },
-                        }
+                        } }
                     }
                 }
             }
         }
-    })
+    }
 }

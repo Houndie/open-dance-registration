@@ -7,7 +7,6 @@ pub mod registration;
 pub mod registration_schema;
 
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 use event::Page as EventPage;
 use events::Page as EventsPage;
 use not_found::Page as NotFound;

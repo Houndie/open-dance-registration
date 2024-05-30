@@ -1,18 +1,17 @@
 use common::proto::Claims;
 use dioxus::prelude::*;
 
-pub struct Login(pub LoginState);
-
+#[derive(Debug, Clone)]
 pub enum LoginState {
     LoggedIn(Claims),
     LoggedOut,
     Unknown,
 }
 
-pub fn use_login_provider(cx: Scope) {
-    use_shared_state_provider(cx, || Login(LoginState::Unknown));
+pub fn use_login_provider() {
+    use_context_provider(|| Signal::new(LoginState::Unknown));
 }
 
-pub fn use_login(cx: Scope) -> Option<&UseSharedState<Login>> {
-    use_shared_state::<Login>(cx)
+pub fn use_login() -> Signal<LoginState> {
+    use_context::<Signal<LoginState>>()
 }

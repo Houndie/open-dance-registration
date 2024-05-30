@@ -36,25 +36,25 @@ impl From<User> for ProfileForm {
     }
 }
 
-pub fn Page(cx: Scope) -> Element {
-    let login = use_login(cx).unwrap();
-    let claims = match &login.read().0 {
-        LoginState::LoggedIn(claims) => claims.clone(),
-        LoginState::LoggedOut => {
-            return cx.render(rsx! {
-                p { "You are not logged in" }
-            })
-        }
-        LoginState::Unknown => return None,
-    };
+pub fn Page() -> Element {
+    let login = use_login();
 
-    let grpc = use_grpc_client(cx).unwrap();
-    let toaster = use_toasts(cx).unwrap();
+    let grpc = use_grpc_client();
+    let mut toaster = use_toasts();
 
-    let user_info: &UseRef<Option<common::proto::User>> = use_ref(cx, || None);
-    let success = use_future(cx, (&claims,), |(claims,)| {
-        to_owned!(grpc, toaster, user_info);
+    let page = use_resource(move || {
+        let mut grpc = grpc.clone();
         async move {
+            let claims = match &*login.read() {
+                LoginState::LoggedIn(claims) => claims.clone(),
+                LoginState::LoggedOut => {
+                    return rsx! {
+                        p { "You are not logged in" }
+                    }
+                }
+                LoginState::Unknown => return None,
+            };
+
             let res = grpc
                 .user
                 .query_users(Request::new(QueryUsersRequest {
@@ -72,7 +72,7 @@ pub fn Page(cx: Scope) -> Element {
                     toaster
                         .write()
                         .new_error(format!("Failed to query user: {}", e));
-                    return false;
+                    return None;
                 }
             };
 
@@ -80,53 +80,59 @@ pub fn Page(cx: Scope) -> Element {
                 Some(user) => user,
                 None => {
                     toaster.write().new_error("User not found".to_owned());
-                    return false;
+                    return None;
                 }
             };
 
-            *user_info.write() = Some(user);
-            true
+            rsx! {
+                LoadedPage {
+                    user: user,
+                }
+            }
         }
     });
 
-    if !*success.value().unwrap_or(&false) {
-        return None;
-    }
+    page().flatten()
+}
 
-    let form: &UseRef<ProfileForm> =
-        use_ref(cx, || user_info.read().as_ref().cloned().unwrap().into());
+#[component]
+fn LoadedPage(user: ReadOnlySignal<User>) -> Element {
+    let grpc = use_grpc_client();
+    let mut toaster = use_toasts();
+    let mut user_info = use_signal(move || user().clone());
 
-    cx.render(rsx! {
+    let mut profile_form: Signal<ProfileForm> = use_signal(|| user().clone().into());
+    rsx! {
         GenericPage {
             title: "Profile".to_string(),
-            menu: cx.render(rsx! {
+            menu: rsx! {
                 Menu {
-                    user_name: user_info.read().as_ref().unwrap().display_name.clone(),
+                    user_name: user_info().display_name.clone(),
                     highlight: MenuItem::AccountSettings,
                 }
-            }),
+            },
             form {
                 Field {
                     label: "Display Name",
                     TextInput {
-                        value: TextInputType::Text(form.read().display_name.clone()),
-                        oninput: |v: FormEvent| {
-                            form.write().display_name = v.value.clone();
+                        value: TextInputType::Text(profile_form.read().display_name.clone()),
+                        oninput: move |v: FormEvent| {
+                            profile_form.write().display_name = v.value();
                         },
                     }
                 }
                 Field {
                     label: "Password",
                     TextInput {
-                        value: TextInputType::Password(form.read().password.clone()),
-                        oninput: |v: FormEvent| {
-                            form.with_mut(|form| {
+                        value: TextInputType::Password(profile_form.read().password.clone()),
+                        oninput: move |v: FormEvent| {
+                            profile_form.with_mut(|form| {
                                 form.passwords_match = true;
-                                form.password = v.value.clone();
+                                form.password = v.value();
                             })
                         },
-                        onblur: |_| {
-                            form.with_mut(|form| {
+                        onblur: move |_| {
+                            profile_form.with_mut(|form| {
                                 form.passwords_match = form.password_confirm == "" || form.password == form.password_confirm;
                             })
                         },
@@ -135,19 +141,19 @@ pub fn Page(cx: Scope) -> Element {
                 Field {
                     label: "Confirm Password",
                     TextInput {
-                        value: TextInputType::Password(form.read().password_confirm.clone()),
-                        oninput: |v: FormEvent| {
-                            form.with_mut(|form| {
+                        value: TextInputType::Password(profile_form.read().password_confirm.clone()),
+                        oninput: move |v: FormEvent| {
+                            profile_form.with_mut(|form| {
                                 form.passwords_match = true;
-                                form.password_confirm = v.value.clone();
+                                form.password_confirm = v.value();
                             })
                         },
-                        onblur: |_| {
-                            form.with_mut(|form| {
+                        onblur: move |_| {
+                            profile_form.with_mut(|form| {
                                 form.passwords_match = form.password == form.password_confirm;
                             })
                         },
-                        invalid: if !form.read().passwords_match {
+                        invalid: if !profile_form.read().passwords_match {
                             Some("Passwords do not match".to_owned())
                         } else {
                             None
@@ -156,49 +162,44 @@ pub fn Page(cx: Scope) -> Element {
                 }
                 Button {
                     flavor: ButtonFlavor::Info,
-                    onclick: |_| {
-                        cx.spawn({
-                            to_owned!(grpc, toaster, form, user_info);
-                            async move {
-                                let send_user = form.with(|form| {
-                                    let password: Option<user::Password> = if form.password == "" {
-                                        Some(user::Password::Unchanged(()))
-                                    } else {
-                                        Some(user::Password::Set(form.password.clone()))
-                                    };
-
-                                    user_info.with(|user| {
-                                        let user = user.as_ref().unwrap();
-                                        User{
-                                            id: user.id.clone(),
-                                            email: user.email.clone(),
-                                            password: password,
-                                            display_name: form.display_name.clone(),
-                                        }
-                                    })
-                                });
-
-                                log::info!("Sending user: {:?}", send_user);
-
-                                let res = grpc.user.upsert_users(Request::new(UpsertUsersRequest{
-                                    users: vec![send_user],
-                                })).await;
-
-                                let mut response = match res {
-                                    Ok(res) => res.into_inner(),
-                                    Err(e) => {
-                                        toaster.write().new_error(format!("Failed to update user info: {}", e));
-                                        return;
-                                    }
+                    onclick: move |_| {
+                        let mut grpc = grpc.clone();
+                        spawn( async move {
+                            let send_user = profile_form.with(|form| {
+                                let password: Option<user::Password> = if form.password == "" {
+                                    Some(user::Password::Unchanged(()))
+                                } else {
+                                    Some(user::Password::Set(form.password.clone()))
                                 };
 
-                                *user_info.write().as_mut().unwrap() = response.users.pop().unwrap();
-                            }
-                        })
+                                user_info.with(|user| {
+                                    User{
+                                        id: user.id.clone(),
+                                        email: user.email.clone(),
+                                        password: password,
+                                        display_name: form.display_name.clone(),
+                                    }
+                                })
+                            });
+
+                            let res = grpc.user.upsert_users(Request::new(UpsertUsersRequest{
+                                users: vec![send_user],
+                            })).await;
+
+                            let mut response = match res {
+                                Ok(res) => res.into_inner(),
+                                Err(e) => {
+                                    toaster.write().new_error(format!("Failed to update user info: {}", e));
+                                    return;
+                                }
+                            };
+
+                            user_info.set(response.users.pop().unwrap());
+                        });
                     },
                     "Save",
                 }
             }
         }
-    })
+    }
 }

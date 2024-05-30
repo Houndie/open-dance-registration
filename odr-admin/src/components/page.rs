@@ -6,31 +6,36 @@ use crate::{
 };
 
 #[component]
-pub fn Page<'a>(
-    cx: Scope,
+pub fn Page(
     title: String,
-    children: Element<'a>,
-    style: Option<String>,
+    children: Element,
+    style: Option<ReadOnlySignal<String>>,
     breadcrumb: Option<Vec<(String, Option<Routes>)>>,
-    menu: Option<Element<'a>>,
+    menu: Option<Element>,
 ) -> Element {
-    let style = match style {
-        Some(style) => style.as_str(),
-        None => "",
-    };
+    let style = use_memo(move || style.map(|style| style.read().clone()).unwrap_or_default());
 
-    cx.render(rsx!(
+    let menu = menu.map(|menu| {
+        rsx!{
+            div {
+                class: "has-background-grey-light",
+                style: "position: sticky; display: inline-block; vertical-align: top; overflow-y: auto; width: 400px; height: 100vh; padding: 10px",
+                { menu }
+            }
+        }});
+
+    let breadcrumb = breadcrumb.map(|breadcrumb| {
+        rsx! {
+            Breadcrumb {
+                items: breadcrumb.clone(),
+            }
+        }
+    });
+
+    rsx! {
         div {
             style: "{style}",
-            if let Some(menu) = menu {
-                rsx!{
-                    div {
-                        class: "has-background-grey-light",
-                        style: "position: sticky; display: inline-block; vertical-align: top; overflow-y: auto; width: 400px; height: 100vh; padding: 10px",
-                        menu
-                    }
-                }
-            }
+            { menu }
             div {
                 style: "display: inline-block; padding: 20px; width: calc(100% - 400px);",
                 div {
@@ -47,15 +52,9 @@ pub fn Page<'a>(
                         LoginMenu {}
                     }
                 }
-                if let Some(breadcrumb) = breadcrumb {
-                    rsx! {
-                        Breadcrumb {
-                            items: breadcrumb.clone(),
-                        }
-                    }
-                }
-                &children
+                { breadcrumb }
+                { children }
             }
         }
-    ))
+    }
 }

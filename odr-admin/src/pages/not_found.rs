@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-pub fn Page(cx: Scope) -> Element {
-    cx.render(rsx! {
+pub fn Page() -> Element {
+    rsx! {
         h1 { "Not Found" }
-    })
+    }
 }

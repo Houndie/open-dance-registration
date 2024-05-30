@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use dioxus_router::prelude::*;
 
 use super::Menu as GenericMenu;
 use crate::pages::Routes;
@@ -21,11 +20,11 @@ impl MenuItem {
 }
 
 #[component]
-pub fn Menu(cx: Scope, highlight: Option<MenuItem>) -> Element {
-    let nav = use_navigator(cx);
+pub fn Menu(highlight: Option<MenuItem>) -> Element {
+    let nav = use_navigator();
     let highlight = highlight.as_ref().cloned().unwrap_or(MenuItem::None);
 
-    cx.render(rsx! {
+    rsx! {
         GenericMenu {
             title: "ODR Admin",
             p {
@@ -38,11 +37,11 @@ pub fn Menu(cx: Scope, highlight: Option<MenuItem>) -> Element {
                     a {
                         prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::Home),
-                        onclick: |_| { nav.push(Routes::OrganizationsPage); },
+                        onclick: move |_| { nav.push(Routes::OrganizationsPage); },
                         "Home"
                     }
                 }
             }
         }
-    })
+    }
 }

@@ -3,21 +3,20 @@ use dioxus::prelude::*;
 use crate::components::form::{Button, ButtonFlavor};
 
 #[component]
-pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
-    cx: Scope,
-    do_submit: DoSubmit,
-    do_close: DoClose,
-    title: &'a str,
+pub fn Modal(
+    onsubmit: EventHandler<()>,
+    onclose: EventHandler<()>,
+    title: ReadOnlySignal<String>,
     disable_submit: bool,
-    children: Element<'a>,
-    success_text: &'a str,
+    children: Element,
+    success_text: ReadOnlySignal<String>,
 ) -> Element {
-    cx.render(rsx! {
+    rsx! {
         div {
             class: "modal is-active",
             div {
                 class: "modal-background",
-                onclick: |_| do_close(),
+                onclick: move |_| onclose.call(()),
             }
             div {
                 class: "modal-card",
@@ -30,29 +29,29 @@ pub fn Modal<'a, DoSubmit: Fn() -> (), DoClose: Fn() -> ()>(
                     button {
                         class: "delete",
                         "aria-label": "close",
-                        onclick: |_| do_close(),
+                        onclick: move |_| onclose.call(()),
                     }
                 }
                 section {
                     class: "modal-card-body",
-                    &children,
+                    { children }
                 }
                 footer {
                     class: "modal-card-foot",
                     Button {
                         flavor: ButtonFlavor::Success,
-                        disabled: *disable_submit,
-                        onclick: |_| {
-                            do_submit()
+                        disabled: disable_submit,
+                        onclick: move |_| {
+                            onsubmit(())
                         },
                         "{success_text}"
                     }
                     Button {
-                        onclick: |_| do_close(),
+                        onclick: move |_| onclose(()),
                         "Cancel"
                     }
                 }
             }
         }
-    })
+    }
 }

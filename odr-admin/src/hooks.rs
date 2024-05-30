@@ -38,10 +38,10 @@ impl GrpcContext {
     }
 }
 
-pub fn use_grpc_client_provider(cx: &ScopeState) {
-    use_context_provider(cx, || GrpcContext::new("http://localhost:50051".to_owned()));
+pub fn use_grpc_client_provider() {
+    use_context_provider(|| GrpcContext::new("http://localhost:50051".to_owned()));
 }
 
-pub fn use_grpc_client(cx: &ScopeState) -> Option<&GrpcContext> {
-    use_context::<GrpcContext>(cx)
+pub fn use_grpc_client() -> GrpcContext {
+    use_context::<GrpcContext>()
 }

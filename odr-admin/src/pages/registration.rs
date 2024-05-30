@@ -1,14 +1,14 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use common::proto::{
-    event_query, organization_query, registration_query, registration_schema_item_type,
-    registration_schema_query, string_query, EventQuery, OrganizationQuery, QueryEventsRequest,
-    QueryOrganizationsRequest, QueryRegistrationSchemasRequest, QueryRegistrationsRequest,
-    Registration, RegistrationItem, RegistrationQuery, RegistrationSchema, RegistrationSchemaQuery,
-    StringQuery, UpsertRegistrationsRequest,
+    self, event_query, organization_query, registration_query, registration_schema_item_type,
+    registration_schema_query, string_query, EventQuery, Organization, OrganizationQuery,
+    QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest,
+    QueryRegistrationsRequest, Registration, RegistrationItem, RegistrationQuery,
+    RegistrationSchema, RegistrationSchemaQuery, StringQuery, UpsertRegistrationsRequest,
 };
 use dioxus::prelude::*;
-use dioxus_router::hooks::use_navigator;
+use futures::join;
 
 use crate::{
     components::{
@@ -60,20 +60,20 @@ fn to_proto_registration(registration: TableRegistration, event_id: String) -> R
 }
 
 #[component]
-pub fn Page(cx: Scope, event_id: String) -> Element {
-    let grpc_client = use_grpc_client(cx).unwrap();
-    let toaster = use_toasts(cx).unwrap();
-    let nav = use_navigator(cx);
+pub fn Page(event_id: ReadOnlySignal<String>) -> Element {
+    let grpc_client = use_grpc_client();
+    let mut toaster = use_toasts();
+    let nav = use_navigator();
 
-    let event = use_future(cx, (), |_| {
-        to_owned!(grpc_client, event_id, nav, toaster);
+    let page = use_resource(move || {
+        let mut grpc_client = grpc_client.clone();
         async move {
             let result = grpc_client
                 .events
                 .query_events(tonic::Request::new(QueryEventsRequest {
                     query: Some(EventQuery {
                         query: Some(event_query::Query::Id(StringQuery {
-                            operator: Some(string_query::Operator::Equals(event_id)),
+                            operator: Some(string_query::Operator::Equals(event_id().clone())),
                         })),
                     }),
                 }))
@@ -89,67 +89,22 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
 
             let event = response.into_inner().events.pop();
 
-            if event.is_none() {
-                nav.push(Routes::NotFound);
-                return None;
-            }
-
-            event
-        }
-    });
-
-    let event = match event.value().map(|e| e.as_ref()).flatten() {
-        Some(event) => event,
-        None => return None,
-    };
-
-    let schema = use_future(cx, (), |_| {
-        to_owned!(grpc_client, event_id, toaster);
-        async move {
-            let result = grpc_client
-                .registration_schema
-                .query_registration_schemas(tonic::Request::new(QueryRegistrationSchemasRequest {
-                    query: Some(RegistrationSchemaQuery {
-                        query: Some(registration_schema_query::Query::EventId(StringQuery {
-                            operator: Some(string_query::Operator::Equals(event_id.clone())),
-                        })),
-                    }),
-                }))
-                .await;
-
-            let response = match result {
-                Ok(rsp) => rsp,
-                Err(e) => {
-                    toaster.write().new_error(e.to_string());
+            let event = match event {
+                Some(event) => event,
+                None => {
+                    nav.push(Routes::NotFound);
                     return None;
                 }
             };
 
-            Some(
-                response
-                    .into_inner()
-                    .registration_schemas
-                    .pop()
-                    .unwrap_or_else(|| {
-                        let mut schema = RegistrationSchema::default();
-                        schema.event_id = event_id;
-                        schema
-                    }),
-            )
-        }
-    });
-
-    let org_id = &event.organization_id;
-
-    let org = use_future(cx, (), |_| {
-        to_owned!(grpc_client, org_id, toaster);
-        async move {
             let result = grpc_client
                 .organizations
                 .query_organizations(tonic::Request::new(QueryOrganizationsRequest {
                     query: Some(OrganizationQuery {
                         query: Some(organization_query::Query::Id(StringQuery {
-                            operator: Some(string_query::Operator::Equals(org_id)),
+                            operator: Some(string_query::Operator::Equals(
+                                event.organization_id.clone(),
+                            )),
                         })),
                     }),
                 }))
@@ -165,191 +120,247 @@ pub fn Page(cx: Scope, event_id: String) -> Element {
 
             let org = response.into_inner().organizations.pop();
 
-            if org.is_none() {
-                toaster
-                    .write()
-                    .new_error("Organization not found".to_string());
-                return None;
-            }
-
-            org
-        }
-    });
-
-    let org = match org.value().map(|o| o.as_ref()).flatten() {
-        Some(org) => org,
-        None => return None,
-    };
-
-    let registrations: &UseRef<Vec<TableRegistration>> = use_ref(cx, Vec::new);
-
-    let registrations_loaded = use_future(cx, (), |_| {
-        to_owned!(grpc_client, event_id, toaster, registrations);
-        async move {
-            let result = grpc_client
-                .registration
-                .query_registrations(tonic::Request::new(QueryRegistrationsRequest {
-                    query: Some(RegistrationQuery {
-                        query: Some(registration_query::Query::EventId(StringQuery {
-                            operator: Some(string_query::Operator::Equals(event_id.clone())),
-                        })),
-                    }),
-                }))
-                .await;
-
-            let response = match result {
-                Ok(rsp) => rsp,
-                Err(e) => {
-                    toaster.write().new_error(e.to_string());
-                    return false;
+            let org = match org {
+                Some(org) => org,
+                None => {
+                    toaster
+                        .write()
+                        .new_error("Organization not found".to_string());
+                    return None;
                 }
             };
 
-            *registrations.write() = response
-                .into_inner()
-                .registrations
-                .into_iter()
-                .map(|r| r.into())
-                .collect();
-
-            true
+            rsx! {
+                LoadedPage {
+                    org: org,
+                    event: event,
+                }
+            }
         }
     });
 
-    if !registrations_loaded.value().unwrap_or(&false) {
-        return None;
-    }
+    page().flatten()
+}
 
-    let schema = match schema.value().and_then(|s| s.as_ref()) {
-        Some(s) => s,
-        None => return None,
-    };
+#[component]
+fn LoadedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>) -> Element {
+    let grpc_client = use_grpc_client();
+    let mut toaster = use_toasts();
 
-    let show_modal: &UseState<Option<TableRegistration>> = use_state(cx, || None);
+    let page_body =
+        use_resource(move || {
+            let mut grpc_client = grpc_client.clone();
+            async move {
+                let schema_fut = grpc_client.registration_schema.query_registration_schemas(
+                    tonic::Request::new(QueryRegistrationSchemasRequest {
+                        query: Some(RegistrationSchemaQuery {
+                            query: Some(registration_schema_query::Query::EventId(StringQuery {
+                                operator: Some(string_query::Operator::Equals(event().id.clone())),
+                            })),
+                        }),
+                    }),
+                );
 
-    cx.render(rsx! {
+                let registrations_fut =
+                    grpc_client
+                        .registration
+                        .query_registrations(tonic::Request::new(QueryRegistrationsRequest {
+                            query: Some(RegistrationQuery {
+                                query: Some(registration_query::Query::EventId(StringQuery {
+                                    operator: Some(string_query::Operator::Equals(
+                                        event().id.clone(),
+                                    )),
+                                })),
+                            }),
+                        }));
+
+                let (registrations_result, schema_result) = join!(registrations_fut, schema_fut);
+
+                let response = match schema_result {
+                    Ok(rsp) => rsp,
+                    Err(e) => {
+                        toaster.write().new_error(e.to_string());
+                        return None;
+                    }
+                };
+
+                let schema = response
+                    .into_inner()
+                    .registration_schemas
+                    .pop()
+                    .unwrap_or_else(|| {
+                        let mut schema = RegistrationSchema::default();
+                        schema.event_id = event().id;
+                        schema
+                    });
+
+                let response = match registrations_result {
+                    Ok(rsp) => rsp,
+                    Err(e) => {
+                        toaster.write().new_error(e.to_string());
+                        return None;
+                    }
+                };
+
+                let registrations = response.into_inner().registrations;
+
+                rsx! {
+                    PageBody{
+                        org: org,
+                        event: event,
+                        schema: schema,
+                        registrations: registrations,
+                    }
+                }
+            }
+        });
+
+    rsx! {
         GenericPage {
             title: "View Registrations".to_owned(),
             breadcrumb: vec![
                 ("Home".to_owned(), Some(Routes::OrganizationsPage)),
-                (org.name.clone(), Some(Routes::EventsPage { org_id: org.id.clone() })),
-                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                (org().name.clone(), Some(Routes::EventsPage { org_id: org().id.clone() })),
+                (event().name.clone(), Some(Routes::EventPage{ id: event().id.clone() })),
                 ("Registrations".to_owned(), None),
             ],
-            menu: cx.render(rsx!{
+            menu: rsx!{
                 Menu {
-                    event_name: event.name.clone(),
-                    event_id: event.id.clone(),
+                    event_name: event().name.clone(),
+                    event_id: event().id.clone(),
                     highlight: MenuItem::Registrations,
                 }
-            }),
-            Button {
-                flavor: ButtonFlavor::Info,
-                onclick: |_| {
-                    show_modal.set(Some(TableRegistration::default()));
-                },
-                "Add Registration",
-            }
-            Table {
-                is_striped: true,
-                is_fullwidth: true,
-                thead {
-                    tr {
-                        th{}
-                        schema.items.iter().map(|item| {
-                            rsx! {
-                                th {
-                                    key: "{item.id}",
-                                    "{item.name}"
+            },
+            { page_body().flatten() }
+        }
+    }
+}
+
+#[component]
+fn PageBody(
+    org: ReadOnlySignal<Organization>,
+    event: ReadOnlySignal<proto::Event>,
+    schema: ReadOnlySignal<RegistrationSchema>,
+    registrations: ReadOnlySignal<Vec<Registration>>,
+) -> Element {
+    let grpc_client = use_grpc_client();
+    let mut toaster = use_toasts();
+
+    let mut registrations = use_signal(move || {
+        registrations
+            .read()
+            .iter()
+            .map(|r| -> TableRegistration { r.clone().into() })
+            .collect::<Vec<_>>()
+    });
+
+    let mut show_modal = use_signal(|| None);
+    let registration_modal = show_modal.read().as_ref().map(move |modal_registration: &TableRegistration| {
+            rsx!{
+                RegistrationModal {
+                    schema: schema,
+                    onsubmit: move |registration| {
+                        let mut grpc_client = grpc_client.clone();
+                        spawn(async move {
+                            let result = grpc_client
+                                .registration
+                                .upsert_registrations(UpsertRegistrationsRequest{
+                                    registrations: vec![to_proto_registration(registration, event().id.clone())]
+                                })
+                                .await;
+
+                            let response = match result {
+                                Ok(rsp) => rsp,
+                                Err(e) => {
+                                    toaster.write().new_error(e.to_string());
+                                    return;
+                                }
+                            };
+
+                            let response_registration = match response.into_inner().registrations.pop() {
+                                Some(r) => r,
+                                None => {
+                                    toaster.write().new_error("No registration returned".to_owned());
+                                    return;
+                                }
+                            };
+
+                            let position = registrations.read().iter().position(|r| r.id == response_registration.id);
+
+                            match position {
+                                Some(idx) => {
+                                    registrations.write()[idx] = response_registration.into();
+                                }
+                                None => {
+                                    registrations.write().push(response_registration.into());
                                 }
                             }
-                        })
-                    }
+
+                            show_modal.set(None);
+                        });
+                    },
+                    onclose: move |_| {
+                        show_modal.set(None);
+                    },
+                    registration: modal_registration.clone(),
                 }
-                tbody {
-                    registrations.read().iter().map(|registration| {
-                        let button_registration = registration.clone();
+            }
+        });
+
+    rsx! {
+        Button {
+            flavor: ButtonFlavor::Info,
+            onclick: move |_| {
+                show_modal.set(Some(TableRegistration::default()));
+            },
+            "Add Registration",
+        }
+        Table {
+            is_striped: true,
+            is_fullwidth: true,
+            thead {
+                tr {
+                    th{}
+                    { schema.read().items.iter().map(|item| {
                         rsx! {
-                            tr {
-                                key: "{registration.id}",
-                                td {
-                                    Button {
-                                        flavor: ButtonFlavor::Info,
-                                        onclick: move |_| {
-                                            show_modal.set(Some(button_registration.clone()));
-                                        },
-                                        "Edit"
-                                    }
-                                }
-                                schema.items.iter().map(|item| {
-                                    rsx! {
-                                        td {
-                                            key: "{item.id}",
-                                            registration.items.get(&item.id).map(|v| v.as_str()).unwrap_or_default()
-                                        }
-                                    }
-                                })
+                            th {
+                                key: "{item.id}",
+                                "{item.name}"
                             }
                         }
-                    })
+                    })}
                 }
             }
-
-            if let Some(modal_registration) = show_modal.get() {
-                rsx!{
-                    RegistrationModal {
-                        schema: schema,
-                        do_submit: |registration| {
-                            cx.spawn({
-                                to_owned!(grpc_client, event_id, toaster, registrations, registration, show_modal);
-                                async move {
-                                    let result = grpc_client
-                                        .registration
-                                        .upsert_registrations(UpsertRegistrationsRequest{
-                                            registrations: vec![to_proto_registration(registration, event_id)]
-                                        })
-                                        .await;
-
-                                    let response = match result {
-                                        Ok(rsp) => rsp,
-                                        Err(e) => {
-                                            toaster.write().new_error(e.to_string());
-                                            return;
-                                        }
-                                    };
-
-                                    let response_registration = match response.into_inner().registrations.pop() {
-                                        Some(r) => r,
-                                        None => {
-                                            toaster.write().new_error("No registration returned".to_owned());
-                                            return;
-                                        }
-                                    };
-
-                                    let position = registrations.read().iter().position(|r| r.id == response_registration.id);
-
-                                    match position {
-                                        Some(idx) => {
-                                            registrations.write()[idx] = response_registration.into();
-                                        }
-                                        None => {
-                                            registrations.write().push(response_registration.into());
-                                        }
-                                    }
-
-                                    show_modal.set(None);
+            tbody {
+                {registrations.read().iter().map(|registration| {
+                    let button_registration = registration.clone();
+                    rsx! {
+                        tr {
+                            key: "{registration.id}",
+                            td {
+                                Button {
+                                    flavor: ButtonFlavor::Info,
+                                    onclick: move |_| {
+                                        show_modal.set(Some(button_registration.clone()));
+                                    },
+                                    "Edit"
                                 }
-                            })
-                        },
-                        do_close: || {
-                            show_modal.set(None);
-                        },
-                        registration: modal_registration.clone(),
+                            }
+                            { schema.read().items.iter().map(|item| {
+                                rsx! {
+                                    td {
+                                        key: "{item.id}",
+                                        {registration.items.get(&item.id).map(|v| v.as_str()).unwrap_or_default()}
+                                    }
+                                }
+                            })}
+                        }
                     }
-                }
+                })}
             }
         }
-    })
+        {registration_modal}
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -514,15 +525,15 @@ struct FormRegistrationItem {
 }
 
 #[component]
-fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() -> ()>(
-    cx: Scope,
-    schema: &'a RegistrationSchema,
-    registration: TableRegistration,
-    do_submit: DoSubmit,
-    do_close: DoClose,
+fn RegistrationModal(
+    schema: ReadOnlySignal<RegistrationSchema>,
+    registration: ReadOnlySignal<TableRegistration>,
+    onsubmit: EventHandler<TableRegistration>,
+    onclose: EventHandler<()>,
 ) -> Element {
-    let form = use_ref(cx, || {
+    let mut form = use_signal(move || {
         schema
+            .read()
             .items
             .iter()
             .map(|item| {
@@ -535,6 +546,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                     registration_schema_item_type::Type::Text(_) => {
                         FormRegistrationItemValue::Text(
                             registration
+                                .read()
                                 .items
                                 .get(&item.id)
                                 .cloned()
@@ -544,7 +556,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
 
                     registration_schema_item_type::Type::Checkbox(checkbox) => {
                         let options = vec!["No".to_owned(), "Yes".to_owned()];
-                        let select_option = match registration.items.get(&item.id) {
+                        let select_option = match registration.read().items.get(&item.id) {
                             Some(registration_item) => {
                                 SelectOption::from_existing(options, registration_item.clone())
                             }
@@ -559,7 +571,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
 
                     registration_schema_item_type::Type::Select(select) => {
                         let options = select.options.iter().map(|o| o.name.clone()).collect();
-                        let select_option = match registration.items.get(&item.id) {
+                        let select_option = match registration.read().items.get(&item.id) {
                             Some(registration_item) => {
                                 SelectOption::from_existing(options, registration_item.clone())
                             }
@@ -574,7 +586,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
 
                     registration_schema_item_type::Type::MultiSelect(select) => {
                         let options = select.options.iter().map(|o| o.name.clone()).collect();
-                        let select_option = match registration.items.get(&item.id) {
+                        let select_option = match registration.read().items.get(&item.id) {
                             Some(registration_item) => {
                                 MultiSelectOption::from_existing(options, registration_item.clone())
                             }
@@ -601,34 +613,34 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
             })
             .collect::<Vec<_>>()
     });
-    let submitted = use_state(cx, || false);
+    let mut submitted = use_signal(|| false);
 
-    let (title, success_text) = if registration.id.is_empty() {
+    let (title, success_text) = if registration.read().id.is_empty() {
         ("Add Registration", "Create")
     } else {
         ("Edit Registration", "Update")
     };
 
-    cx.render(rsx! {
+    rsx! {
         Modal {
             title: "{title}",
-            do_close: do_close,
-            do_submit: || {
+            onclose: onclose,
+            onsubmit: move |_| {
                 submitted.set(true);
                 let items = form.read().iter().map(|item| {
                     (item.schema_item_id.clone(), item.value.clone().into())
                 }).collect();
                 let r = TableRegistration {
-                    id: registration.id.clone(),
+                    id: registration.read().id.clone(),
                     items,
                 };
-                do_submit(r)
+                onsubmit.call(r)
             },
-            disable_submit: **submitted,
+            disable_submit: *submitted.read(),
             success_text: "{success_text}",
 
             form {
-                form.read().iter().enumerate().map(|(idx, item)| {
+                { form.read().iter().enumerate().map(|(idx, item)| {
                     rsx! {
                         Field {
                             key: "{item.schema_item_id}",
@@ -638,7 +650,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                                     rsx! {
                                         TextRegistrationForm {
                                             value: value,
-                                            do_input: move |v| {
+                                            oninput: move |v| {
                                                 form.write()[idx].value = FormRegistrationItemValue::Text(v);
                                             },
                                         }
@@ -648,10 +660,10 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                                     rsx! {
                                         SelectRegistrationForm {
                                             select_option: select_option,
-                                            do_select_input: move |v| {
+                                            onselectinput: move |v| {
                                                 form.write()[idx].value.try_as_checkbox_mut().unwrap().selected = v;
                                             },
-                                            do_other_input: move |v| {
+                                            onotherinput: move |v| {
                                                 form.write()[idx].value.try_as_checkbox_mut().unwrap().other = v;
                                             },
                                         }
@@ -662,10 +674,10 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                                     rsx! {
                                         SelectRegistrationForm {
                                             select_option: select_option.clone(),
-                                            do_select_input: move |v| {
+                                            onselectinput: move |v| {
                                                 form.write()[idx].value.try_as_select_mut().unwrap().selected = v;
                                             },
-                                            do_other_input: move |v| {
+                                            onotherinput: move |v| {
                                                 form.write()[idx].value.try_as_select_mut().unwrap().other = v;
                                             },
                                         }
@@ -676,7 +688,7 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                                     rsx! {
                                         MultiSelectRegistrationForm {
                                             select_option: multi_select_option.clone(),
-                                            do_select_input: move |option_idx, ctrl| {
+                                            onselectinput: move |(option_idx, ctrl)| {
                                                 if ctrl {
                                                     if multi_select_option.selected.contains(&option_idx) {
                                                         form.write()[idx].value.try_as_multi_select_mut().unwrap().selected.remove(&option_idx);
@@ -691,10 +703,10 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                                                     })
                                                 }
                                             },
-                                            do_other_input: move |v| {
+                                            onotherinput: move |v| {
                                                 form.write()[idx].value.try_as_multi_select_mut().unwrap().other = v;
                                             },
-                                            do_is_other_input: move || {
+                                            onisotherinput: move |_| {
                                                 form.write()[idx].value.try_as_multi_select_mut().unwrap().is_other = !multi_select_option.is_other;
                                             },
                                         }
@@ -703,36 +715,47 @@ fn RegistrationModal<'a, DoSubmit: Fn(TableRegistration) -> (), DoClose: Fn() ->
                             }
                         }
                     }
-                })
+                })}
             }
         }
-    })
+    }
 }
 
 #[component]
-fn TextRegistrationForm<DoInput: Fn(String) -> ()>(
-    cx: Scope,
-    value: String,
-    do_input: DoInput,
-) -> Element {
-    cx.render(rsx! {
+fn TextRegistrationForm(value: ReadOnlySignal<String>, oninput: EventHandler<String>) -> Element {
+    rsx! {
         TextInput {
             oninput: move |evt: FormEvent| {
-                do_input(evt.value.clone());
+                oninput.call(evt.value());
             },
-            value: TextInputType::Text(value.clone()),
+            value: TextInputType::Text(value.read().clone()),
         }
-    })
+    }
 }
 
 #[component]
-fn SelectRegistrationForm<DoSelectInput: Fn(usize) -> (), DoOtherInput: Fn(String) -> ()>(
-    cx: Scope,
+fn SelectRegistrationForm(
     select_option: SelectOption,
-    do_select_input: DoSelectInput,
-    do_other_input: DoOtherInput,
+    onselectinput: EventHandler<usize>,
+    onotherinput: EventHandler<String>,
 ) -> Element {
-    cx.render(rsx! {
+    let other = if select_option.selected == (select_option.options.len() - 1) {
+        rsx! {
+            Field {
+                label: "Other",
+                TextInput {
+                    oninput: move |evt: FormEvent| {
+                        onotherinput.call(evt.value());
+                    },
+                    value: TextInputType::Text(select_option.other.clone()),
+                }
+            }
+        }
+    } else {
+        None
+    };
+
+    rsx! {
         div {
             class: "box",
             Field {
@@ -740,58 +763,41 @@ fn SelectRegistrationForm<DoSelectInput: Fn(usize) -> (), DoOtherInput: Fn(Strin
                 SelectInput {
                     options: select_option.options.clone(),
                     onchange: move |evt: FormEvent| {
-                        do_select_input(evt.value.parse().unwrap());
+                        onselectinput.call(evt.value().parse().unwrap());
                     },
                     value: select_option.selected,
                 }
             }
-            if select_option.selected == (select_option.options.len() - 1) {
-                rsx!{
-                    Field {
-                        label: "Other",
-                        TextInput {
-                            oninput: move |evt: FormEvent| {
-                                do_other_input(evt.value.clone());
-                            },
-                            value: TextInputType::Text(select_option.other.clone()),
-                        }
-                    }
-                }
-            }
+            { other }
         }
-    })
+    }
 }
 
 #[component]
-fn MultiSelectRegistrationForm<
-    DoIsOtherInput: Fn() -> (),
-    DoSelectInput: Fn(usize, bool) -> (),
-    DoOtherInput: Fn(String) -> (),
->(
-    cx: Scope,
+fn MultiSelectRegistrationForm(
     select_option: MultiSelectOption,
-    do_is_other_input: DoIsOtherInput,
-    do_select_input: DoSelectInput,
-    do_other_input: DoOtherInput,
+    onisotherinput: EventHandler<()>,
+    onselectinput: EventHandler<(usize, bool)>,
+    onotherinput: EventHandler<String>,
 ) -> Element {
-    cx.render(rsx! {
+    rsx! {
         div {
             class: "box",
             CheckInput{
                 style: CheckStyle::Checkbox,
-                label: "Use \"Other\"",
+                label: "Use \"Other\"".to_owned(),
                 value: select_option.is_other,
                 onclick: move |_| {
-                    do_is_other_input();
+                    onisotherinput.call(());
                 }
             }
-            if select_option.is_other {
+            { if select_option.is_other {
                 rsx!{
                     Field {
                         label: "Other",
                         TextInput {
                             oninput: move |evt: FormEvent| {
-                                do_other_input(evt.value.clone());
+                                onotherinput.call(evt.value());
                             },
                             value: TextInputType::Text(select_option.other.clone()),
                         }
@@ -803,14 +809,14 @@ fn MultiSelectRegistrationForm<
                         label: "Value",
                         MultiSelectInput {
                             options: select_option.options.clone(),
-                            do_select: move |idx, evt| {
-                                do_select_input(idx, evt.modifiers().ctrl());
+                            onselect: move |(idx, evt): (usize, MouseEvent)| {
+                                onselectinput.call((idx, evt.modifiers().ctrl()));
                             },
-                            value: select_option.selected.clone().into_iter().collect(),
+                            value: select_option.selected.clone().into_iter().collect::<HashSet<usize>>(),
                         }
                     }
                 }
-            }
+            }}
         }
-    })
+    }
 }

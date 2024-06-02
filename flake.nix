@@ -19,19 +19,38 @@
     };
 
     grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" "${pkgs.grpcui}/bin/grpcui -plaintext localhost:50051");
+
+    dioxus-cli = pkgs.rustPlatform.buildRustPackage rec {
+      pname = "dioxus-cli";
+      version = "0.5.1";
+
+      src = pkgs.fetchCrate {
+        inherit pname version;
+        #sha256 = "sha256-iNlJLDxb8v7x19q0iaAnGmtmoPjMW8YXzbx5Fcf8Yws="; # 0.5.0
+        sha256 = "sha256-EQGidjyqB48H33vFvBLUpHYGUm1RHMQM+eiU2tmCSwc="; # 0.5.1
+      };
+
+      #cargoHash = "sha256-6XKNBLDNWYd5+O7buHupXzVss2jCdh3wu9mXVLivH44="; # 0.5.0
+      cargoHash = "sha256-IOwD9I70hqY3HwRMhqxtRmDP/yO4OdNkNRAIIIAqbmY="; # 0.5.1
+
+      OPENSSL_NO_VENDOR = 1;
+
+      nativeBuildInputs = [ pkgs.pkg-config pkgs.cacert myrust ];
+      buildInputs = [ pkgs.openssl ];
+    };
   in
   {
     devShell.${system} = pkgs.mkShell {
-      packages = with pkgs; [
+      packages = [
         myrust 
-        protobuf_23 
-        sqlx-cli 
-	sqlitebrowser
-	unstable.legacyPackages.${system}.dioxus-cli
-	grpcuiScript
-	entr
+        pkgs.protobuf_23 
+        pkgs.sqlx-cli 
+        pkgs.sqlitebrowser
+        dioxus-cli
+        grpcuiScript
+        pkgs.entr
 
-	(pkgs.writeShellScriptBin ",devserver" ''
+        (pkgs.writeShellScriptBin ",devserver" ''
 	  set -e
 
 	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)

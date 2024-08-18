@@ -22,16 +22,18 @@
 
     dioxus-cli = pkgs.rustPlatform.buildRustPackage rec {
       pname = "dioxus-cli";
-      version = "0.5.1";
+      version = "0.5.6";
 
       src = pkgs.fetchCrate {
         inherit pname version;
         #sha256 = "sha256-iNlJLDxb8v7x19q0iaAnGmtmoPjMW8YXzbx5Fcf8Yws="; # 0.5.0
-        sha256 = "sha256-EQGidjyqB48H33vFvBLUpHYGUm1RHMQM+eiU2tmCSwc="; # 0.5.1
+        #sha256 = "sha256-EQGidjyqB48H33vFvBLUpHYGUm1RHMQM+eiU2tmCSwc="; # 0.5.1
+        sha256 = "sha256-cOd8OGkmebUYw6fNLO/kja81qKwqBuVpJqCix1Izf64="; # 0.5.6
       };
 
       #cargoHash = "sha256-6XKNBLDNWYd5+O7buHupXzVss2jCdh3wu9mXVLivH44="; # 0.5.0
-      cargoHash = "sha256-IOwD9I70hqY3HwRMhqxtRmDP/yO4OdNkNRAIIIAqbmY="; # 0.5.1
+      #cargoHash = "sha256-IOwD9I70hqY3HwRMhqxtRmDP/yO4OdNkNRAIIIAqbmY="; # 0.5.1
+      cargoHash = "sha256-shllaNdg9g6fD8qRyCKpN47keFUTu0g96MzVX4BrhXI="; # 0.5.6
 
       OPENSSL_NO_VENDOR = 1;
 

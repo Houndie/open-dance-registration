@@ -6,7 +6,6 @@ use hooks::{
     toasts::{use_toasts, use_toasts_provider},
     use_grpc_client, use_grpc_client_provider,
 };
-use log::LevelFilter;
 use pages::Routes;
 use tonic::Code;
 
@@ -17,7 +16,7 @@ pub mod hooks;
 pub mod pages;
 
 fn main() {
-    dioxus_logger::init(LevelFilter::Info).expect("failed to init logger");
+    dioxus_logger::init(dioxus_logger::tracing::Level::INFO).expect("failed to init logger");
     launch(App);
 }
 

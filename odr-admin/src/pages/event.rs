@@ -39,7 +39,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -49,7 +49,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Some(event) => event,
                 None => {
                     nav.push(Routes::NotFound);
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -70,7 +70,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -82,7 +82,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                     toaster
                         .write()
                         .new_error("Organization not found".to_string());
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -97,7 +97,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
 
     match resource() {
         Some(page) => page,
-        None => None,
+        None => rsx! {},
     }
 }
 

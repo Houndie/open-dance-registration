@@ -3,11 +3,10 @@
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-23.11";
-    unstable.url = "nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, unstable, rust-overlay }: 
+  outputs = { self, nixpkgs, rust-overlay }: 
   let
     system = "x86_64-linux";
     pkgs = import nixpkgs {
@@ -22,18 +21,20 @@
 
     dioxus-cli = pkgs.rustPlatform.buildRustPackage rec {
       pname = "dioxus-cli";
-      version = "0.5.6";
+      version = "0.6.0";
 
       src = pkgs.fetchCrate {
         inherit pname version;
         #sha256 = "sha256-iNlJLDxb8v7x19q0iaAnGmtmoPjMW8YXzbx5Fcf8Yws="; # 0.5.0
         #sha256 = "sha256-EQGidjyqB48H33vFvBLUpHYGUm1RHMQM+eiU2tmCSwc="; # 0.5.1
-        sha256 = "sha256-cOd8OGkmebUYw6fNLO/kja81qKwqBuVpJqCix1Izf64="; # 0.5.6
+        #sha256 = "sha256-cOd8OGkmebUYw6fNLO/kja81qKwqBuVpJqCix1Izf64="; # 0.5.6
+	sha256 = "sha256-0Kg2/+S8EuMYZQaK4Ao+mbS7K48VhVWjPL+LnoVJMSw="; # 0.6.0
       };
 
       #cargoHash = "sha256-6XKNBLDNWYd5+O7buHupXzVss2jCdh3wu9mXVLivH44="; # 0.5.0
       #cargoHash = "sha256-IOwD9I70hqY3HwRMhqxtRmDP/yO4OdNkNRAIIIAqbmY="; # 0.5.1
-      cargoHash = "sha256-shllaNdg9g6fD8qRyCKpN47keFUTu0g96MzVX4BrhXI="; # 0.5.6
+      #cargoHash = "sha256-shllaNdg9g6fD8qRyCKpN47keFUTu0g96MzVX4BrhXI="; # 0.5.6
+      cargoHash = "sha256-RMo6q/GSAV1bCMWtR+wu9xGKCgz/Ie6t/8oirBly/LQ="; # 0.6.0
 
       OPENSSL_NO_VENDOR = 1;
 
@@ -58,7 +59,7 @@
 	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
 
 	  ${pkgs.tmux}/bin/tmux \
-	    new-session "cd $ROOT/odr-admin; ${unstable.legacyPackages.${system}.dioxus-cli}/bin/dx serve; read" \; \
+	    new-session "cd $ROOT/odr-admin; ${dioxus-cli}/bin/dx serve; read" \; \
 	    split-window "cd $ROOT/odr-cmd; cargo run init; cd $ROOT/odr-server; RUST_LOG=tower_http=trace find src/ | ${pkgs.entr}/bin/entr -r ${myrust}/bin/cargo run; read" \; \
 	    select-layout even-vertical
 	'')

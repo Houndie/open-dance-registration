@@ -52,7 +52,7 @@ pub fn Page() -> Element {
                         p { "You are not logged in" }
                     }
                 }
-                LoginState::Unknown => return None,
+                LoginState::Unknown => return rsx! {},
             };
 
             let res = grpc
@@ -72,7 +72,7 @@ pub fn Page() -> Element {
                     toaster
                         .write()
                         .new_error(format!("Failed to query user: {}", e));
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -80,7 +80,7 @@ pub fn Page() -> Element {
                 Some(user) => user,
                 None => {
                     toaster.write().new_error("User not found".to_owned());
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -92,7 +92,7 @@ pub fn Page() -> Element {
         }
     });
 
-    page().flatten()
+    page().unwrap()
 }
 
 #[component]

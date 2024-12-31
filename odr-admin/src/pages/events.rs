@@ -42,7 +42,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -50,7 +50,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                 Some(org) => org,
                 None => {
                     nav.push(Routes::NotFound);
-                    return None;
+                    return rsx! {};
                 }
             };
 
@@ -78,7 +78,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
 
     match page() {
         Some(page) => page,
-        None => None,
+        None => rsx! {},
     }
 }
 
@@ -111,7 +111,7 @@ fn LoadedPage(
             }
         }
     } else {
-        None
+        rsx! {}
     };
 
     let page_body = loaded_events().map(|_| {

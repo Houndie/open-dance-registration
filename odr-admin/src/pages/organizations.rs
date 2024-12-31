@@ -65,7 +65,7 @@ pub fn Page() -> Element {
             }
         }
     } else {
-        None
+        rsx! {}
     };
 
     let page_body = match &*orgs_success.value().read() {
@@ -120,7 +120,7 @@ pub fn Page() -> Element {
                 { org_modal }
             }
         }
-        _ => None,
+        _ => rsx! {},
     };
 
     rsx! {

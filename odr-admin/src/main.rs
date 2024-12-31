@@ -16,7 +16,6 @@ pub mod hooks;
 pub mod pages;
 
 fn main() {
-    dioxus_logger::init(dioxus_logger::tracing::Level::INFO).expect("failed to init logger");
     launch(App);
 }
 

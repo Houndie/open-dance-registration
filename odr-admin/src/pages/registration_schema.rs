@@ -95,7 +95,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return None;
+                    return rsx!{};
                 }
             };
 
@@ -104,7 +104,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Some(event) => event,
                 None => {
                     nav.push(Routes::NotFound);
-                    return None;
+                    return rsx!{};
                 }
             };
 
@@ -123,7 +123,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 Ok(rsp) => rsp,
                 Err(e) => {
                     toaster.write().new_error(e.to_string());
-                    return None;
+                    return rsx!{};
                 }
             };
 
@@ -133,7 +133,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                     toaster
                         .write()
                         .new_error("Organization not found".to_string());
-                    return None;
+                    return rsx!{};
                 }
             };
 
@@ -146,7 +146,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         }
     });
 
-    page().flatten()
+    page().unwrap()
 }
 #[component]
 fn LoadedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>) -> Element {
@@ -180,7 +180,7 @@ fn LoadedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Ev
                     Ok(rsp) => rsp,
                     Err(e) => {
                         toaster.write().new_error(e.to_string());
-                        return None;
+                        return rsx!{};
                     }
                 };
 
@@ -222,7 +222,7 @@ fn LoadedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Ev
                     highlight: MenuItem::RegistrationSchema,
                 }
             },
-            { page_body().flatten() }
+            { page_body().unwrap() }
         }
     }
 }

@@ -1,3 +1,5 @@
+#![cfg(feature = "server")]
+
 use std::sync::Arc;
 
 use chrono::Utc;

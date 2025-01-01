@@ -58,10 +58,7 @@
 
 	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
 
-	  ${pkgs.tmux}/bin/tmux \
-	    new-session "cd $ROOT/odr-admin; ${dioxus-cli}/bin/dx serve; read" \; \
-	    split-window "cd $ROOT/odr-cmd; cargo run init; cd $ROOT/odr-server; RUST_LOG=tower_http=trace find src/ | ${pkgs.entr}/bin/entr -r ${myrust}/bin/cargo run; read" \; \
-	    select-layout even-vertical
+	  cd $ROOT/odr-server; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
 	'')
       ];
       PROTOC = "${pkgs.protobuf_23}/bin/protoc";

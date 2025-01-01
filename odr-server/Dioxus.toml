@@ -1,0 +1,16 @@
+[application]
+name = "odr-server"
+default_platform = "fullstack"
+
+[web.app]
+title = "Open Dance Registration Admin"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src", "public"]
+index_on_404 = true
+
+[web.resource]
+style = ["https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"]
+
+[web.resource.dev]

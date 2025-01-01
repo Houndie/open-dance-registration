@@ -3,40 +3,46 @@ name = "odr-server"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "odr-server"
-path = "src/main.rs"
-
-[lib]
-name = "odr_server"
-path = "src/lib.rs"
-test = false
-
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.12.0"
-log = "0.4.20"
-prost = "0.12.3"
-sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"] }
+# Server/Client
 test-case = "3.3.1"
-thiserror = "1.0.56"
-tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"] }
-tonic = "0.10.2"
-tonic-reflection = "0.10.2"
-uuid = { version = "1.6.1", features = ["v7"] }
-common = { path = "../common", features = ["transport"] }
-tonic-web = "0.10.2"
-bcrypt = "0.15.0"
-chrono = { version = "0.4.31", features = ["serde"] }
-rand = "0.8.5"
-argon2 = "0.5.3"
 serde = { version = "1.0.195", features = ["derive"] }
-ed25519-dalek = { version = "2.1.0", features = ["rand_core", "pkcs8", "alloc"] }
-jsonwebtoken = "9.2.0"
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
-http = "0.2.11"
-cookie = "0.18.0"
-time = "0.3.34"
-prost-types = "0.12.3"
+dioxus = { version = "=0.6.0", features = ["router", "fullstack"] }
+
+# Server
+itertools = { version = "0.12.0", optional = true }
+log = { version = "0.4.20", optional = true }
+prost = { version = "0.12.3", optional = true }
+sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }
+thiserror = { version = "1.0.56", optional = true }
+tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"], optional = true }
+tonic = { version = "0.10.2", optional = true }
+tonic-reflection = { version = "0.10.2", optional = true }
+tonic-web = { version = "0.10.2", optional = true }
+bcrypt = { version = "0.15.0", optional = true }
+chrono = { version = "0.4.31", features = ["serde"], optional = true }
+rand = { version = "0.8.5", optional = true }
+argon2 = { version = "0.5.3", optional = true }
+ed25519-dalek = { version = "2.1.0", features = ["rand_core", "pkcs8", "alloc"], optional = true }
+jsonwebtoken = { version = "9.2.0", optional = true }
+http = { version = "0.2.11", optional = true }
+cookie = { version = "0.18.0", optional = true }
+time = { version = "0.3.34", optional = true }
+prost-types = { version = "0.12.3", optional = true }
+futures = { version = "0.3.31", optional = true }
+axum = { version = "0.7.9", optional = true }
+common = { path = "../common", optional = true }
+dioxus-liveview = { version = "=0.6.0", optional = true }
+dioxus-cli-config = { version = "=0.6.0", optional = true }
+uuid = { version = "1.6.1", features = ["v7"], optional = true }
+
+# Client
+wasm-bindgen = { version = "=0.2.97", optional = true }
+web-sys = { version = "=0.3.74", optional = true }
+
+[features]
+web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys"]
+server = ["dioxus/server", "dep:itertools", "dep:log", "dep:prost", "dep:sqlx", "dep:thiserror", "dep:tokio", "dep:tonic", "dep:tonic-reflection", "dep:tonic-web", "dep:bcrypt", "dep:chrono", "dep:rand", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:time", "dep:prost-types", "dep:futures", "dep:axum", "dep:common", "dep:dioxus-liveview", "dep:uuid", "dep:dioxus-cli-config", "common/transport"]

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{SecretKey, SigningKey};
@@ -13,13 +13,12 @@ pub struct Key {
     pub created_at: DateTime<Utc>,
 }
 
-#[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn insert(&self, mut key: Key) -> Result<Key, Error>;
-    async fn list(&self, ids: Vec<&str>) -> Result<Vec<Key>, Error>;
-    async fn get_newest(&self) -> Result<Key, Error>;
-    async fn has(&self) -> Result<bool, Error>;
-    async fn delete(&self, ids: Vec<String>) -> Result<(), Error>;
+    fn insert(&self, key: Key) -> impl Future<Output = Result<Key, Error>> + Send;
+    fn list(&self, ids: Vec<&str>) -> impl Future<Output = Result<Vec<Key>, Error>> + Send;
+    fn get_newest(&self) -> impl Future<Output = Result<Key, Error>> + Send;
+    fn has(&self) -> impl Future<Output = Result<bool, Error>> + Send;
+    fn delete(&self, ids: Vec<String>) -> impl Future<Output = Result<(), Error>> + Send;
 }
 
 pub struct SqliteStore {
@@ -57,7 +56,6 @@ impl TryFrom<KeyRow> for Key {
     }
 }
 
-#[tonic::async_trait]
 impl Store for SqliteStore {
     async fn insert(&self, mut key: Key) -> Result<Key, Error> {
         key.id = new_id();
@@ -73,7 +71,7 @@ impl Store for SqliteStore {
         .bind(key.created_at.timestamp())
         .execute(&*self.pool)
         .await
-        .map_err(|e| Error::InsertionError(e))?;
+        .map_err(Error::InsertionError)?;
 
         Ok(key)
     }
@@ -87,7 +85,7 @@ impl Store for SqliteStore {
         )
         .fetch_one(&*self.pool)
         .await
-        .map_err(|e| Error::FetchError(e))?;
+        .map_err(Error::FetchError)?;
 
         row.try_into()
     }
@@ -100,7 +98,7 @@ impl Store for SqliteStore {
         )
         .fetch_one(&*self.pool)
         .await
-        .map_err(|e| Error::FetchError(e))?;
+        .map_err(Error::FetchError)?;
 
         Ok(row.0)
     }
@@ -111,7 +109,7 @@ impl Store for SqliteStore {
             let rows: Vec<KeyRow> = sqlx::query_as(base_query)
                 .fetch_all(&*self.pool)
                 .await
-                .map_err(|e| Error::FetchError(e))?;
+                .map_err(Error::FetchError)?;
 
             let keys = rows
                 .into_iter()
@@ -132,12 +130,11 @@ impl Store for SqliteStore {
         let rows: Vec<KeyRow> = query_builder
             .fetch_all(&*self.pool)
             .await
-            .map_err(|e| Error::FetchError(e))?;
+            .map_err(Error::FetchError)?;
 
-        Ok(rows
-            .into_iter()
+        rows.into_iter()
             .map(|r| r.try_into())
-            .collect::<Result<Vec<_>, _>>()?)
+            .collect::<Result<Vec<_>, _>>()
     }
 
     async fn delete(&self, ids: Vec<String>) -> Result<(), Error> {
@@ -151,7 +148,7 @@ impl Store for SqliteStore {
         query_builder
             .execute(&*self.pool)
             .await
-            .map_err(|e| Error::DeleteError(e))?;
+            .map_err(Error::DeleteError)?;
 
         Ok(())
     }

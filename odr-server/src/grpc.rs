@@ -1,19 +1,16 @@
 #![cfg(feature = "server")]
 
-use crate::{
-    api::{
-        authentication::Service as AuthenticationService, event::Service as EventService,
-        organization::Service as OrganizationService, registration::Service as RegistrationService,
-        registration_schema::Service as SchemaService, user::Service as UserService,
-    },
-    store::{
-        event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
-        organization::SqliteStore as OrganizationStore,
-        registration::SqliteStore as RegistrationStore,
-        registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
-    },
+use crate::api::{
+    authentication::Service as AuthenticationService, event::Service as EventService,
+    organization::Service as OrganizationService, registration::Service as RegistrationService,
+    registration_schema::Service as SchemaService, user::Service as UserService,
 };
 use common::proto;
+use odr_core::store::{
+    event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
+    organization::SqliteStore as OrganizationStore, registration::SqliteStore as RegistrationStore,
+    registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
+};
 use sqlx::SqlitePool;
 use std::{env, sync::Arc};
 use thiserror::Error;
@@ -35,7 +32,7 @@ pub async fn run_grpc() -> Result<(), Box<dyn std::error::Error>> {
     let user_store = Arc::new(UserStore::new(db.clone()));
     let key_store = Arc::new(KeyStore::new(db.clone()));
 
-    let key_manager = Arc::new(crate::keys::KeyManager::new(key_store));
+    let key_manager = Arc::new(odr_core::keys::KeyManager::new(key_store));
 
     let event_service =
         proto::event_service_server::EventServiceServer::new(EventService::new(event_store));

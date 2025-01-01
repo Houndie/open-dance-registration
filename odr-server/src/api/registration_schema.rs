@@ -2,10 +2,6 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use crate::store::{
-    registration_schema::{Query, Store},
-    CompoundOperator, CompoundQuery,
-};
 use common::proto::{
     self, compound_registration_schema_query, multi_select_type, registration_schema_item_type,
     registration_schema_query, select_type, text_type, DeleteRegistrationSchemasResponse,
@@ -13,8 +9,12 @@ use common::proto::{
     RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
     UpsertRegistrationSchemasResponse,
 };
+use odr_core::store::{
+    registration_schema::{Query, Store},
+    CompoundOperator, CompoundQuery,
+};
 
-use super::{common::try_logical_string_query, ValidationError};
+use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {
@@ -98,42 +98,38 @@ fn validate_registration_schema(
     Ok(())
 }
 
-impl TryFrom<RegistrationSchemaQuery> for Query {
-    type Error = ValidationError;
+fn try_parse_registration_schema_query(
+    query: RegistrationSchemaQuery,
+) -> Result<Query, ValidationError> {
+    match query.query {
+        Some(registration_schema_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
+            try_logical_string_query(event_id_query)
+                .map_err(|e| e.with_context("query.event_id"))?,
+        )),
 
-    fn try_from(query: RegistrationSchemaQuery) -> Result<Self, Self::Error> {
-        match query.query {
-            Some(registration_schema_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
-                try_logical_string_query(event_id_query)
-                    .map_err(|e| e.with_context("query.event_id"))?,
-            )),
+        Some(registration_schema_query::Query::Compound(compound_query)) => {
+            let operator = match compound_registration_schema_query::Operator::try_from(
+                compound_query.operator,
+            ) {
+                Ok(compound_registration_schema_query::Operator::And) => CompoundOperator::And,
+                Ok(compound_registration_schema_query::Operator::Or) => CompoundOperator::Or,
+                Err(_) => return Err(ValidationError::new_invalid_enum("query.compound.operator")),
+            };
 
-            Some(registration_schema_query::Query::Compound(compound_query)) => {
-                let operator = match compound_registration_schema_query::Operator::try_from(
-                    compound_query.operator,
-                ) {
-                    Ok(compound_registration_schema_query::Operator::And) => CompoundOperator::And,
-                    Ok(compound_registration_schema_query::Operator::Or) => CompoundOperator::Or,
-                    Err(_) => {
-                        return Err(ValidationError::new_invalid_enum("query.compound.operator"))
-                    }
-                };
-
-                let queries = compound_query
-                    .queries
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, query)| {
-                        query.try_into().map_err(|e: Self::Error| {
-                            e.with_context(&format!("query.compound.queries[{}]", idx))
-                        })
+            let queries = compound_query
+                .queries
+                .into_iter()
+                .enumerate()
+                .map(|(idx, query)| {
+                    try_parse_registration_schema_query(query).map_err(|e: ValidationError| {
+                        e.with_context(&format!("query.compound.queries[{}]", idx))
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-                Ok(Query::Compound(CompoundQuery { operator, queries }))
-            }
-            None => Err(ValidationError::new_empty("query")),
+            Ok(Query::Compound(CompoundQuery { operator, queries }))
         }
+        None => Err(ValidationError::new_empty("query")),
     }
 }
 
@@ -158,7 +154,7 @@ impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSc
             .store
             .upsert(request_schemas)
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(UpsertRegistrationSchemasResponse {
             registration_schemas,
@@ -172,14 +168,14 @@ impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSc
         let query = request
             .into_inner()
             .query
-            .map(|q| -> Result<_, ValidationError> { q.try_into() })
+            .map(|q| -> Result<_, ValidationError> { try_parse_registration_schema_query(q) })
             .transpose()?;
 
         let registration_schemas = self
             .store
             .query(query.as_ref())
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
         Ok(Response::new(QueryRegistrationSchemasResponse {
             registration_schemas,
         }))
@@ -192,7 +188,7 @@ impl<StoreType: Store> proto::registration_schema_service_server::RegistrationSc
         self.store
             .delete(&request.into_inner().ids)
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(DeleteRegistrationSchemasResponse {}))
     }

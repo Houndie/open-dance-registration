@@ -58,7 +58,7 @@
 
 	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
 
-	  cd $ROOT/odr-server; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
+	  cd $ROOT/odr-cmd; cargo run init; cd $ROOT/odr-server; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
 	'')
       ];
       PROTOC = "${pkgs.protobuf_23}/bin/protoc";

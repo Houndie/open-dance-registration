@@ -1,7 +1,7 @@
 use std::{env, sync::Arc};
 
 use clap::{Parser, Subcommand};
-use odr_server::{
+use odr_core::{
     keys::KeyManager,
     store::{
         keys::{SqliteStore as KeyStore, Store as _},

@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    future::Future,
     sync::Arc,
 };
 
@@ -26,7 +27,7 @@ struct OptionRow {
 }
 
 impl OptionRow {
-    fn to_option(self) -> Result<(String, usize, SelectOption), Error> {
+    fn into_option(self) -> Result<(String, usize, SelectOption), Error> {
         Ok((
             self.schema_item,
             usize::try_from(self.idx).map_err(|_| Error::ColumnParseError("idx"))?,
@@ -56,7 +57,7 @@ struct ItemRow {
 }
 
 impl ItemRow {
-    fn to_item(self) -> Result<(String, usize, RegistrationSchemaItem), Error> {
+    fn into_item(self) -> Result<(String, usize, RegistrationSchemaItem), Error> {
         let typ = match self.item_type.as_str() {
             "TextType" => Some(ItemType::Text(TextType {
                 default: self
@@ -146,14 +147,16 @@ type QueryBuilder<'q> = sqlx::query::Query<
     <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
 >;
 
-#[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn upsert(
+    fn upsert(
         &self,
         schemas: Vec<RegistrationSchema>,
-    ) -> Result<Vec<RegistrationSchema>, Error>;
-    async fn query(&self, query: Option<&Query>) -> Result<Vec<RegistrationSchema>, Error>;
-    async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
+    ) -> impl Future<Output = Result<Vec<RegistrationSchema>, Error>> + Send;
+    fn query(
+        &self,
+        query: Option<&Query>,
+    ) -> impl Future<Output = Result<Vec<RegistrationSchema>, Error>> + Send;
+    fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }
 
 pub struct EventIdField;
@@ -339,14 +342,13 @@ fn items_to_schema(
         .collect()
 }
 
-#[tonic::async_trait]
 impl Store for SqliteStore {
     async fn upsert(
         &self,
         schemas: Vec<RegistrationSchema>,
     ) -> Result<Vec<RegistrationSchema>, Error> {
         ids_in_table(
-            &*self.pool,
+            &self.pool,
             "events",
             schemas.iter().map(|schema| schema.event_id.as_str()),
         )
@@ -354,19 +356,18 @@ impl Store for SqliteStore {
 
         let (inserts, updates): (Vec<_>, Vec<_>) = schemas
             .into_iter()
-            .map(|s| {
+            .flat_map(|s| {
                 s.items
                     .into_iter()
                     .enumerate()
                     .map(move |(item_idx, item)| (s.event_id.clone(), item_idx, item))
             })
-            .flatten()
-            .partition(|(_, _, item)| item.id == "");
+            .partition(|(_, _, item)| item.id.is_empty());
 
         if !updates.is_empty() {
             // Make sure events exist
             ids_in_table(
-                &*self.pool,
+                &self.pool,
                 "registration_schema_items",
                 updates.iter().map(|(_, _, item)| item.id.as_str()),
             )
@@ -399,11 +400,11 @@ impl Store for SqliteStore {
         let (insert_options, update_options): (Vec<_>, Vec<_>) = options_from_updates
             .into_iter()
             .flatten()
-            .partition(|(_, _, option)| option.id == "");
+            .partition(|(_, _, option)| option.id.is_empty());
 
         if !update_options.is_empty() {
             ids_in_table(
-                &*self.pool,
+                &self.pool,
                 "registration_schema_select_options",
                 update_options
                     .iter()
@@ -416,7 +417,7 @@ impl Store for SqliteStore {
             .pool
             .begin()
             .await
-            .map_err(|e| Error::TransactionStartError(e))?;
+            .map_err(Error::TransactionStartError)?;
 
         let inserted = if !inserts.is_empty() {
             let items_with_ids = inserts
@@ -461,7 +462,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::InsertionError(e))?;
+                .map_err(Error::InsertionError)?;
 
             items_with_ids
         } else {
@@ -514,7 +515,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
         }
 
         let (inserted, options_from_inserts): (Vec<_>, Vec<_>) = inserted
@@ -571,7 +572,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::InsertionError(e))?;
+                .map_err(Error::InsertionError)?;
 
             options_with_ids
         } else {
@@ -608,7 +609,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
         }
 
         let schema = items_to_schema(
@@ -652,13 +653,12 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::DeleteError(e))?;
+                .map_err(Error::DeleteError)?;
 
             let options_where_clause = itertools::Itertools::intersperse(
                 schema
                     .iter()
-                    .map(|schema| schema.items.iter())
-                    .flatten()
+                    .flat_map(|schema| schema.items.iter())
                     .map(|item| {
                         let options: Box<dyn Iterator<Item = &SelectOption>> =
                             match item.r#type.as_ref().unwrap().r#type.as_ref().unwrap() {
@@ -683,11 +683,9 @@ impl Store for SqliteStore {
             );
 
             let query_builder = sqlx::query(&options_query);
-            let query_builder = schema
-                .iter()
-                .map(|schema| schema.items.iter())
-                .flatten()
-                .fold(query_builder, |query_builder, item| {
+            let query_builder = schema.iter().flat_map(|schema| schema.items.iter()).fold(
+                query_builder,
+                |query_builder, item| {
                     let query_builder = query_builder.bind(&item.id);
 
                     let options: Box<dyn Iterator<Item = &SelectOption>> =
@@ -700,15 +698,16 @@ impl Store for SqliteStore {
                     options.fold(query_builder, |query_builder, option| {
                         query_builder.bind(&option.id)
                     })
-                });
+                },
+            );
 
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::DeleteError(e))?;
+                .map_err(Error::DeleteError)?;
         };
 
-        tx.commit().await.map_err(|e| Error::TransactionFailed(e))?;
+        tx.commit().await.map_err(Error::TransactionFailed)?;
 
         Ok(schema)
     }
@@ -745,10 +744,10 @@ impl Store for SqliteStore {
             let rows: Vec<ItemRow> = query_builder
                 .fetch_all(&*self.pool)
                 .await
-                .map_err(|e| Error::FetchError(e))?;
+                .map_err(Error::FetchError)?;
 
             rows.into_iter()
-                .map(|row| row.to_item())
+                .map(|row| row.into_item())
                 .collect::<Result<Vec<_>, _>>()?
         };
 
@@ -760,10 +759,10 @@ impl Store for SqliteStore {
             let select_items = items
                 .iter()
                 .filter(|(_, _, item)| {
-                    match item.r#type.as_ref().unwrap().r#type.as_ref().unwrap() {
-                        ItemType::Select(_) | ItemType::MultiSelect(_) => true,
-                        _ => false,
-                    }
+                    matches!(
+                        item.r#type.as_ref().unwrap().r#type.as_ref().unwrap(),
+                        ItemType::Select(_) | ItemType::MultiSelect(_)
+                    )
                 })
                 .collect::<Vec<_>>();
 
@@ -773,7 +772,7 @@ impl Store for SqliteStore {
             )
             .collect();
 
-            if where_clause == "" {
+            if where_clause.is_empty() {
                 Vec::new()
             } else {
                 let query = format!("{} WHERE {}", base_options_query, where_clause);
@@ -788,10 +787,10 @@ impl Store for SqliteStore {
                 let rows: Vec<OptionRow> = query_builder
                     .fetch_all(&*self.pool)
                     .await
-                    .map_err(|e| Error::FetchError(e))?;
+                    .map_err(Error::FetchError)?;
 
                 rows.into_iter()
-                    .map(|row| row.to_option())
+                    .map(|row| row.into_option())
                     .collect::<Result<Vec<_>, _>>()?
             }
         };
@@ -801,17 +800,12 @@ impl Store for SqliteStore {
         Ok(schemas)
     }
 
-    async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error> {
+    async fn delete(&self, event_ids: &[String]) -> Result<(), Error> {
         if event_ids.is_empty() {
             return Ok(());
         }
 
-        ids_in_table(
-            &*self.pool,
-            "events",
-            event_ids.iter().map(|id| id.as_str()),
-        )
-        .await?;
+        ids_in_table(&self.pool, "events", event_ids.iter().map(|id| id.as_str())).await?;
 
         let where_clause: String =
             itertools::Itertools::intersperse(event_ids.iter().map(|_| "event = ?"), " OR ")
@@ -830,7 +824,7 @@ impl Store for SqliteStore {
         query_builder
             .execute(&*self.pool)
             .await
-            .map_err(|e| Error::DeleteError(e))?;
+            .map_err(Error::DeleteError)?;
 
         Ok(())
     }
@@ -894,10 +888,10 @@ mod tests {
         sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
             .bind(&org_id)
-            .bind(&name_1)
+            .bind(name_1)
             .bind(&id_2)
             .bind(&org_id)
-            .bind(&name_2)
+            .bind(name_2)
             .execute(&db)
             .await
             .unwrap();
@@ -1292,10 +1286,10 @@ mod tests {
                 .unwrap();
 
         let store_schemas = items_to_schema(
-            store_row.into_iter().map(|row| row.to_item().unwrap()),
+            store_row.into_iter().map(|row| row.into_item().unwrap()),
             store_options_row
                 .into_iter()
-                .map(|row| row.to_option().unwrap()),
+                .map(|row| row.into_option().unwrap()),
         );
 
         assert_eq!(schemas.len(), store_schemas.len());
@@ -1389,10 +1383,10 @@ mod tests {
                 .unwrap();
 
         let store_schemas = items_to_schema(
-            store_row.into_iter().map(|row| row.to_item().unwrap()),
+            store_row.into_iter().map(|row| row.into_item().unwrap()),
             store_options_row
                 .into_iter()
-                .map(|row| row.to_option().unwrap()),
+                .map(|row| row.into_option().unwrap()),
         );
 
         assert_eq!(schemas.len(), store_schemas.len());
@@ -1536,7 +1530,7 @@ mod tests {
         let db_ptr = Arc::new(init.db);
         let store = SqliteStore::new(db_ptr.clone());
 
-        store.delete(&vec![init.event_1]).await.unwrap();
+        store.delete(&[init.event_1]).await.unwrap();
 
         let event_ids: Vec<(String,)> =
             sqlx::query_as("SELECT DISTINCT event FROM registration_schema_items")

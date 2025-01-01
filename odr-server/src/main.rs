@@ -6,15 +6,6 @@ pub mod grpc;
 #[cfg(feature = "server")]
 pub mod api;
 
-#[cfg(feature = "server")]
-pub mod keys;
-
-#[cfg(feature = "server")]
-pub mod store;
-
-#[cfg(feature = "server")]
-pub mod user;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "web")]
     // Hydrate the application on the client

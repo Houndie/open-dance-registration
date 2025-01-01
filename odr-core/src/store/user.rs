@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use argon2::password_hash::PasswordHashString;
 use sqlx::SqlitePool;
@@ -143,11 +143,11 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
     query_builder.bind(&user.display_name)
 }
 
-#[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn upsert(&self, users: Vec<User>) -> Result<Vec<User>, Error>;
-    async fn query(&self, query: Option<&Query>) -> Result<Vec<User>, Error>;
-    async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
+    fn upsert(&self, users: Vec<User>) -> impl Future<Output = Result<Vec<User>, Error>> + Send;
+    fn query(&self, query: Option<&Query>)
+        -> impl Future<Output = Result<Vec<User>, Error>> + Send;
+    fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }
 
 #[derive(Debug)]
@@ -161,18 +161,17 @@ impl SqliteStore {
     }
 }
 
-#[tonic::async_trait]
 impl Store for SqliteStore {
     async fn upsert(&self, users: Vec<User>) -> Result<Vec<User>, Error> {
         let (inserts, updates): (Vec<_>, Vec<_>) = users
             .into_iter()
             .enumerate()
-            .partition(|(_, user)| user.id == "");
+            .partition(|(_, user)| user.id.is_empty());
 
         if !updates.is_empty() {
             // Make sure events exist
             ids_in_table(
-                &*self.pool,
+                &self.pool,
                 "users",
                 updates.iter().map(|(_, user)| user.id.as_str()),
             )
@@ -195,7 +194,7 @@ impl Store for SqliteStore {
             .pool
             .begin()
             .await
-            .map_err(|e| Error::TransactionStartError(e))?;
+            .map_err(Error::TransactionStartError)?;
 
         if !inserts.is_empty() {
             let values_clause = itertools::Itertools::intersperse(
@@ -219,7 +218,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::InsertionError(e))?;
+                .map_err(Error::InsertionError)?;
         }
 
         if !updates_with_password.is_empty() {
@@ -231,12 +230,12 @@ impl Store for SqliteStore {
 
             let query = format!(
                 "WITH mydata(id, email, password, display_name) AS (VALUES {}) 
-                UPDATE users 
-                SET email = mydata.email, 
-                    password = mydata.password, 
-                    display_name = mydata.display_name
-                FROM mydata
-                WHERE users.id = mydata.id",
+                    UPDATE users 
+                    SET email = mydata.email, 
+                        password = mydata.password, 
+                        display_name = mydata.display_name
+                    FROM mydata
+                    WHERE users.id = mydata.id",
                 values_clause
             );
 
@@ -250,7 +249,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
         }
 
         if !updates_without_password.is_empty() {
@@ -262,11 +261,11 @@ impl Store for SqliteStore {
 
             let query = format!(
                 "WITH mydata(id, email, display_name) AS (VALUES {}) 
-                UPDATE users 
-                SET email = mydata.email, 
-                    display_name = mydata.display_name
-                FROM mydata
-                WHERE users.id = mydata.id",
+                    UPDATE users 
+                    SET email = mydata.email, 
+                        display_name = mydata.display_name
+                    FROM mydata
+                    WHERE users.id = mydata.id",
                 values_clause
             );
 
@@ -280,10 +279,10 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
         }
 
-        tx.commit().await.map_err(|e| Error::TransactionFailed(e))?;
+        tx.commit().await.map_err(Error::TransactionFailed)?;
 
         let mut outputs = Vec::new();
         outputs.resize(
@@ -318,7 +317,7 @@ impl Store for SqliteStore {
         let rows: Vec<UserRow> = query_builder
             .fetch_all(&*self.pool)
             .await
-            .map_err(|e| Error::FetchError(e))?;
+            .map_err(Error::FetchError)?;
 
         let users = rows
             .into_iter()
@@ -328,12 +327,12 @@ impl Store for SqliteStore {
         Ok(users)
     }
 
-    async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
+    async fn delete(&self, ids: &[String]) -> Result<(), Error> {
         if ids.is_empty() {
             return Ok(());
         }
 
-        ids_in_table(&*self.pool, "users", ids.iter().map(|id| id.as_str())).await?;
+        ids_in_table(&self.pool, "users", ids.iter().map(|id| id.as_str())).await?;
 
         let where_clause =
             itertools::Itertools::intersperse(std::iter::repeat("id = ?").take(ids.len()), " OR ")
@@ -348,7 +347,7 @@ impl Store for SqliteStore {
         query_builder
             .execute(&*self.pool)
             .await
-            .map_err(|e| Error::DeleteError(e))?;
+            .map_err(Error::DeleteError)?;
 
         Ok(())
     }
@@ -630,7 +629,7 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        store.delete(&vec![users[0].id.clone()]).await.unwrap();
+        store.delete(&[users[0].id.clone()]).await.unwrap();
 
         let store_user_rows: Vec<UserRow> =
             sqlx::query_as("SELECT id, email, password, display_name FROM users")

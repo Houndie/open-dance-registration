@@ -1,17 +1,11 @@
-use std::sync::Arc;
-
+use super::store_error_to_status;
 use argon2::{Argon2, PasswordVerifier};
 use common::proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use http::header::{HeaderMap, COOKIE, SET_COOKIE};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
-use prost_types::Timestamp;
-use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
-use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
-
-use crate::{
+use odr_core::{
     keys::KeyManager,
     store::{
         self,
@@ -20,6 +14,11 @@ use crate::{
         CompoundOperator, CompoundQuery,
     },
 };
+use prost_types::Timestamp;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use time::OffsetDateTime;
+use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
 
 #[derive(Debug)]
 struct Claims {
@@ -158,7 +157,7 @@ impl<KStore: KeyStore, UStore: UserStore>
             .await
             .map_err(|e| match e {
                 store::Error::IdDoesNotExist(_) => invalid_email_or_password(),
-                _ => e.into(),
+                _ => store_error_to_status(e),
             })?;
 
         if users.is_empty() {
@@ -184,7 +183,7 @@ impl<KStore: KeyStore, UStore: UserStore>
             .km
             .get_signing_key()
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         let encoding_key = EncodingKey::from_ed_der(
             key.to_pkcs8_der()
@@ -298,7 +297,7 @@ impl From<ValidationError> for Status {
             ValidationError::Unauthenticated => {
                 Status::new(Code::Unauthenticated, "unauthenticated")
             }
-            ValidationError::StoreError(e) => e.into(),
+            ValidationError::StoreError(e) => store_error_to_status(e),
         }
     }
 }

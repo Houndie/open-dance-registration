@@ -1,6 +1,6 @@
 use common::proto::{string_query, StringQuery};
 
-use crate::store;
+use odr_core::store;
 
 use super::ValidationError;
 

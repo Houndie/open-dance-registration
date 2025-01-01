@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use super::{
     common::{ids_in_table, new_id},
@@ -68,11 +68,16 @@ where
     }
 }
 
-#[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn upsert(&self, organizations: Vec<Organization>) -> Result<Vec<Organization>, Error>;
-    async fn query(&self, query: Option<&Query>) -> Result<Vec<Organization>, Error>;
-    async fn delete(&self, ids: &Vec<String>) -> Result<(), Error>;
+    fn upsert(
+        &self,
+        organizations: Vec<Organization>,
+    ) -> impl Future<Output = Result<Vec<Organization>, Error>> + Send;
+    fn query(
+        &self,
+        query: Option<&Query>,
+    ) -> impl Future<Output = Result<Vec<Organization>, Error>> + Send;
+    fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }
 
 #[derive(Debug)]
@@ -86,18 +91,17 @@ impl SqliteStore {
     }
 }
 
-#[tonic::async_trait]
 impl Store for SqliteStore {
     async fn upsert(&self, organizations: Vec<Organization>) -> Result<Vec<Organization>, Error> {
         let (inserts, updates): (Vec<_>, Vec<_>) = organizations
             .into_iter()
             .enumerate()
-            .partition(|(_, org)| org.id == "");
+            .partition(|(_, org)| org.id.is_empty());
 
         if !updates.is_empty() {
             // Make sure events exist
             ids_in_table(
-                &*self.pool,
+                &self.pool,
                 "organizations",
                 updates.iter().map(|(_, org)| org.id.as_str()),
             )
@@ -116,7 +120,7 @@ impl Store for SqliteStore {
             .pool
             .begin()
             .await
-            .map_err(|e| Error::TransactionStartError(e))?;
+            .map_err(Error::TransactionStartError)?;
 
         if !inserts.is_empty() {
             let values_clause = itertools::Itertools::intersperse(
@@ -140,7 +144,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::InsertionError(e))?;
+                .map_err(Error::InsertionError)?;
         };
 
         if !updates.is_empty() {
@@ -152,10 +156,10 @@ impl Store for SqliteStore {
 
             let query = format!(
                 "WITH mydata(id, name) AS (VALUES {}) 
-                UPDATE organizations 
-                SET name = mydata.name 
-                FROM mydata 
-                WHERE organizations.id = mydata.id",
+                    UPDATE organizations 
+                    SET name = mydata.name 
+                    FROM mydata 
+                    WHERE organizations.id = mydata.id",
                 values_clause
             );
 
@@ -169,19 +173,16 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
         };
 
-        tx.commit().await.map_err(|e| Error::TransactionFailed(e))?;
+        tx.commit().await.map_err(Error::TransactionFailed)?;
 
         let mut outputs = Vec::new();
         outputs.resize(inserts.len() + updates.len(), Organization::default());
-        inserts
-            .into_iter()
-            .chain(updates.into_iter())
-            .for_each(|(idx, org)| {
-                outputs[idx] = org;
-            });
+        inserts.into_iter().chain(updates).for_each(|(idx, org)| {
+            outputs[idx] = org;
+        });
 
         Ok(outputs)
     }
@@ -201,18 +202,18 @@ impl Store for SqliteStore {
         let rows: Vec<OrganizationRow> = query_builder
             .fetch_all(&*self.pool)
             .await
-            .map_err(|e| Error::FetchError(e))?;
+            .map_err(Error::FetchError)?;
 
         Ok(rows.into_iter().map(|row| row.into()).collect())
     }
 
-    async fn delete(&self, ids: &Vec<String>) -> Result<(), Error> {
+    async fn delete(&self, ids: &[String]) -> Result<(), Error> {
         if ids.is_empty() {
             return Ok(());
         }
 
         ids_in_table(
-            &*self.pool,
+            &self.pool,
             "organizations",
             ids.iter().map(|id| id.as_str()),
         )
@@ -231,7 +232,7 @@ impl Store for SqliteStore {
         query_builder
             .execute(&*self.pool)
             .await
-            .map_err(|e| Error::DeleteError(e))?;
+            .map_err(Error::DeleteError)?;
 
         Ok(())
     }
@@ -468,7 +469,7 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        store.delete(&vec![orgs[0].id.clone()]).await.unwrap();
+        store.delete(&[orgs[0].id.clone()]).await.unwrap();
 
         let store_org_rows: Vec<OrganizationRow> =
             sqlx::query_as("SELECT id, name FROM organizations")

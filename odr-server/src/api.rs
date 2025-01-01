@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use tonic::{Code, Status};
 
-use crate::store;
+use odr_core::store;
 use thiserror::Error as ThisError;
 
 pub mod authentication;
@@ -13,22 +13,20 @@ pub mod registration;
 pub mod registration_schema;
 pub mod user;
 
-impl From<store::Error> for Status {
-    fn from(err: store::Error) -> Self {
-        let code = match err {
-            store::Error::IdDoesNotExist(_) => Code::NotFound,
-            store::Error::InsertionError(_)
-            | store::Error::FetchError(_)
-            | store::Error::UpdateError(_)
-            | store::Error::DeleteError(_)
-            | store::Error::CheckExistsError(_)
-            | store::Error::TransactionStartError(_)
-            | store::Error::TransactionFailed(_)
-            | store::Error::ColumnParseError(_) => Code::Internal,
-        };
+fn store_error_to_status(err: store::Error) -> Status {
+    let code = match err {
+        store::Error::IdDoesNotExist(_) => Code::NotFound,
+        store::Error::InsertionError(_)
+        | store::Error::FetchError(_)
+        | store::Error::UpdateError(_)
+        | store::Error::DeleteError(_)
+        | store::Error::CheckExistsError(_)
+        | store::Error::TransactionStartError(_)
+        | store::Error::TransactionFailed(_)
+        | store::Error::ColumnParseError(_) => Code::Internal,
+    };
 
-        Status::new(code, format!("{}", err))
-    }
+    Status::new(code, format!("{}", err))
 }
 
 #[derive(Debug)]

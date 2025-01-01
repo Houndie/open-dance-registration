@@ -1,5 +1,3 @@
-#![cfg(feature = "server")]
-
 mod common;
 pub mod event;
 pub mod keys;

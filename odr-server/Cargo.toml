@@ -7,14 +7,11 @@ edition = "2021"
 
 [dependencies]
 # Server/Client
-test-case = "3.3.1"
 serde = { version = "1.0.195", features = ["derive"] }
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
 dioxus = { version = "=0.6.0", features = ["router", "fullstack"] }
 
 # Server
-itertools = { version = "0.12.0", optional = true }
-log = { version = "0.4.20", optional = true }
 prost = { version = "0.12.3", optional = true }
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }
 thiserror = { version = "1.0.56", optional = true }
@@ -22,9 +19,7 @@ tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"], optional
 tonic = { version = "0.10.2", optional = true }
 tonic-reflection = { version = "0.10.2", optional = true }
 tonic-web = { version = "0.10.2", optional = true }
-bcrypt = { version = "0.15.0", optional = true }
 chrono = { version = "0.4.31", features = ["serde"], optional = true }
-rand = { version = "0.8.5", optional = true }
 argon2 = { version = "0.5.3", optional = true }
 ed25519-dalek = { version = "2.1.0", features = ["rand_core", "pkcs8", "alloc"], optional = true }
 jsonwebtoken = { version = "9.2.0", optional = true }
@@ -32,12 +27,11 @@ http = { version = "0.2.11", optional = true }
 cookie = { version = "0.18.0", optional = true }
 time = { version = "0.3.34", optional = true }
 prost-types = { version = "0.12.3", optional = true }
-futures = { version = "0.3.31", optional = true }
 axum = { version = "0.7.9", optional = true }
 common = { path = "../common", optional = true }
 dioxus-liveview = { version = "=0.6.0", optional = true }
 dioxus-cli-config = { version = "=0.6.0", optional = true }
-uuid = { version = "1.6.1", features = ["v7"], optional = true }
+odr-core = { path = "../odr-core", optional = true }
 
 # Client
 wasm-bindgen = { version = "=0.2.97", optional = true }
@@ -45,4 +39,4 @@ web-sys = { version = "=0.3.74", optional = true }
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys"]
-server = ["dioxus/server", "dep:itertools", "dep:log", "dep:prost", "dep:sqlx", "dep:thiserror", "dep:tokio", "dep:tonic", "dep:tonic-reflection", "dep:tonic-web", "dep:bcrypt", "dep:chrono", "dep:rand", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:time", "dep:prost-types", "dep:futures", "dep:axum", "dep:common", "dep:dioxus-liveview", "dep:uuid", "dep:dioxus-cli-config", "common/transport"]
+server = ["dioxus/server", "dep:prost", "dep:sqlx", "dep:thiserror", "dep:tokio", "dep:tonic", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:common", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "common/transport"]

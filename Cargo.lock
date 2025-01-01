@@ -2423,9 +2423,29 @@ dependencies = [
  "clap",
  "common",
  "inquire",
- "odr-server",
+ "odr-core",
  "sqlx",
  "tokio",
+]
+
+[[package]]
+name = "odr-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "bcrypt",
+ "chrono",
+ "common",
+ "ed25519-dalek",
+ "itertools",
+ "jsonwebtoken",
+ "log",
+ "rand",
+ "sqlx",
+ "test-case",
+ "thiserror",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2434,7 +2454,6 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "axum 0.7.9",
- "bcrypt",
  "chrono",
  "common",
  "cookie",
@@ -2442,25 +2461,20 @@ dependencies = [
  "dioxus-cli-config",
  "dioxus-liveview",
  "ed25519-dalek",
- "futures",
  "http 0.2.12",
- "itertools",
  "jsonwebtoken",
- "log",
+ "odr-core",
  "prost",
  "prost-types",
- "rand",
  "serde",
  "sqlx",
  "strum",
- "test-case",
  "thiserror",
  "time",
  "tokio",
  "tonic",
  "tonic-reflection",
  "tonic-web",
- "uuid",
  "wasm-bindgen",
  "web-sys",
 ]

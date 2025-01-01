@@ -32,7 +32,7 @@ where
     let missing_ids: Vec<(String,)> = select_query_builder
         .fetch_all(pool)
         .await
-        .map_err(|e| Error::CheckExistsError(e))?;
+        .map_err(Error::CheckExistsError)?;
 
     if !missing_ids.is_empty() {
         return Err(Error::IdDoesNotExist(missing_ids[0].0.clone()));

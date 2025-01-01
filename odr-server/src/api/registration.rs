@@ -7,12 +7,12 @@ use common::proto::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::store::{
+use odr_core::store::{
     registration::{Query, Store},
     CompoundOperator, CompoundQuery,
 };
 
-use super::{common::try_logical_string_query, ValidationError};
+use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,
@@ -32,24 +32,20 @@ fn validate_registration(registration: &Registration) -> Result<(), ValidationEr
     Ok(())
 }
 
-impl TryFrom<RegistrationQuery> for Query {
-    type Error = ValidationError;
+fn try_parse_registration_query(query: RegistrationQuery) -> Result<Query, ValidationError> {
+    match query.query {
+        Some(registration_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
+            try_logical_string_query(event_id_query)
+                .map_err(|e| e.with_context("query.event_id"))?,
+        )),
 
-    fn try_from(query: RegistrationQuery) -> Result<Self, Self::Error> {
-        match query.query {
-            Some(registration_query::Query::EventId(event_id_query)) => Ok(Query::EventId(
-                try_logical_string_query(event_id_query)
-                    .map_err(|e| e.with_context("query.event_id"))?,
-            )),
+        Some(registration_query::Query::Id(id_query)) => Ok(Query::Id(
+            try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
+        )),
 
-            Some(registration_query::Query::Id(id_query)) => Ok(Query::Id(
-                try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
-            )),
-
-            Some(registration_query::Query::Compound(compound_query)) => {
-                let operator = match compound_registration_query::Operator::try_from(
-                    compound_query.operator,
-                ) {
+        Some(registration_query::Query::Compound(compound_query)) => {
+            let operator =
+                match compound_registration_query::Operator::try_from(compound_query.operator) {
                     Ok(compound_registration_query::Operator::And) => CompoundOperator::And,
                     Ok(compound_registration_query::Operator::Or) => CompoundOperator::Or,
                     Err(_) => {
@@ -57,21 +53,20 @@ impl TryFrom<RegistrationQuery> for Query {
                     }
                 };
 
-                let queries = compound_query
-                    .queries
-                    .into_iter()
-                    .enumerate()
-                    .map(|(i, query)| {
-                        query.try_into().map_err(|e: Self::Error| {
-                            e.with_context(&format!("query.compound.queries[{}]", i))
-                        })
+            let queries = compound_query
+                .queries
+                .into_iter()
+                .enumerate()
+                .map(|(i, query)| {
+                    try_parse_registration_query(query).map_err(|e: ValidationError| {
+                        e.with_context(&format!("query.compound.queries[{}]", i))
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                })
+                .collect::<Result<Vec<_>, _>>()?;
 
-                Ok(Query::Compound(CompoundQuery { operator, queries }))
-            }
-            None => Err(ValidationError::new_empty("query")),
+            Ok(Query::Compound(CompoundQuery { operator, queries }))
         }
+        None => Err(ValidationError::new_empty("query")),
     }
 }
 
@@ -95,7 +90,7 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
             .store
             .upsert(request_registrations)
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(UpsertRegistrationsResponse { registrations }))
     }
@@ -106,13 +101,15 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
     ) -> Result<Response<QueryRegistrationsResponse>, Status> {
         let query = request.into_inner().query;
 
-        let query = query.map(|query| query.try_into()).transpose()?;
+        let query = query
+            .map(|query| try_parse_registration_query(query))
+            .transpose()?;
 
         let registrations = self
             .store
             .query(query.as_ref())
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(QueryRegistrationsResponse { registrations }))
     }
@@ -124,7 +121,7 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
         self.store
             .delete(&request.into_inner().ids)
             .await
-            .map_err(|e| -> Status { e.into() })?;
+            .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(DeleteRegistrationsResponse {}))
     }

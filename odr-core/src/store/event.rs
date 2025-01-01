@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use sqlx::SqlitePool;
 
@@ -88,11 +88,13 @@ where
     }
 }
 
-#[tonic::async_trait]
 pub trait Store: Send + Sync + 'static {
-    async fn upsert(&self, events: Vec<Event>) -> Result<Vec<Event>, Error>;
-    async fn query(&self, query: Option<&Query>) -> Result<Vec<Event>, Error>;
-    async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error>;
+    fn upsert(&self, events: Vec<Event>) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
+    fn query(
+        &self,
+        query: Option<&Query>,
+    ) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
+    fn delete(&self, event_ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }
 
 #[derive(Debug)]
@@ -106,16 +108,15 @@ impl SqliteStore {
     }
 }
 
-#[tonic::async_trait]
 impl Store for SqliteStore {
     async fn upsert(&self, events: Vec<Event>) -> Result<Vec<Event>, Error> {
         let (insert_events, mut update_events): (Vec<_>, Vec<_>) =
-            events.into_iter().partition(|e| e.id == "");
+            events.into_iter().partition(|e| e.id.is_empty());
 
         if !update_events.is_empty() {
             // Make sure events exist
             ids_in_table(
-                &*self.pool,
+                &self.pool,
                 "events",
                 update_events.iter().map(|e| e.id.as_str()),
             )
@@ -126,7 +127,7 @@ impl Store for SqliteStore {
             .pool
             .begin()
             .await
-            .map_err(|e| Error::TransactionStartError(e))?;
+            .map_err(Error::TransactionStartError)?;
 
         let mut output_events = Vec::new();
         if !insert_events.is_empty() {
@@ -162,7 +163,7 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::InsertionError(e))?;
+                .map_err(Error::InsertionError)?;
             output_events.append(&mut events_with_ids);
         }
 
@@ -192,12 +193,12 @@ impl Store for SqliteStore {
             query_builder
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| Error::UpdateError(e))?;
+                .map_err(Error::UpdateError)?;
 
             output_events.append(&mut update_events);
         }
 
-        tx.commit().await.map_err(|e| Error::TransactionFailed(e))?;
+        tx.commit().await.map_err(Error::TransactionFailed)?;
 
         Ok(output_events)
     }
@@ -218,24 +219,19 @@ impl Store for SqliteStore {
         let rows: Vec<EventRow> = query_builder
             .fetch_all(&*self.pool)
             .await
-            .map_err(|e| Error::FetchError(e))?;
+            .map_err(Error::FetchError)?;
 
         let output_events = rows.into_iter().map(|row| row.into()).collect();
 
         Ok(output_events)
     }
 
-    async fn delete(&self, event_ids: &Vec<String>) -> Result<(), Error> {
+    async fn delete(&self, event_ids: &[String]) -> Result<(), Error> {
         if event_ids.is_empty() {
             return Ok(());
         }
 
-        ids_in_table(
-            &*self.pool,
-            "events",
-            event_ids.iter().map(|id| id.as_str()),
-        )
-        .await?;
+        ids_in_table(&self.pool, "events", event_ids.iter().map(|id| id.as_str())).await?;
 
         let where_clause: String =
             itertools::Itertools::intersperse(event_ids.iter().map(|_| "id = ?"), " OR ").collect();
@@ -249,7 +245,7 @@ impl Store for SqliteStore {
         query_builder
             .execute(&*self.pool)
             .await
-            .map_err(|e| Error::DeleteError(e))?;
+            .map_err(Error::DeleteError)?;
 
         Ok(())
     }
@@ -285,7 +281,7 @@ mod tests {
         let org_name = "Organization 1";
         sqlx::query("INSERT INTO organizations(id, name) VALUES (?, ?);")
             .bind(&org)
-            .bind(&org_name)
+            .bind(org_name)
             .execute(&db)
             .await
             .unwrap();
@@ -338,10 +334,10 @@ mod tests {
         sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
             .bind(&init.org)
-            .bind(&name_1)
+            .bind(name_1)
             .bind(&id_2)
             .bind(&init.org)
-            .bind(&name_2)
+            .bind(name_2)
             .execute(&*db)
             .await
             .unwrap();
@@ -433,10 +429,10 @@ mod tests {
         sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
             .bind(&init.org)
-            .bind(&name_1)
+            .bind(name_1)
             .bind(&id_2)
             .bind(&init.org)
-            .bind(&name_2)
+            .bind(name_2)
             .execute(&*db)
             .await
             .unwrap();
@@ -512,10 +508,10 @@ mod tests {
         sqlx::query("INSERT INTO events(id, organization, name) VALUES (?, ?, ?), (?, ?, ?);")
             .bind(&id_1)
             .bind(&init.org)
-            .bind(&name_1)
+            .bind(name_1)
             .bind(&id_2)
             .bind(&init.org)
-            .bind(&name_2)
+            .bind(name_2)
             .execute(&*db)
             .await
             .unwrap();
@@ -525,7 +521,7 @@ mod tests {
             SqliteStore::new(db)
         };
 
-        store.delete(&vec![id_1]).await.unwrap();
+        store.delete(&[id_1]).await.unwrap();
 
         let mut store_row: Vec<EventRow> =
             sqlx::query_as("SELECT id, organization, name FROM events")
@@ -549,7 +545,7 @@ mod tests {
         };
 
         let id = new_id();
-        let result = store.delete(&vec![id.clone()]).await;
+        let result = store.delete(&[id.clone()]).await;
         match result {
             Ok(_) => panic!("no error returned"),
             Err(Error::IdDoesNotExist(err_id)) => assert_eq!(err_id, id),

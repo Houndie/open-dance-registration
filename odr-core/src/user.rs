@@ -1,5 +1,3 @@
-#![cfg(feature = "server")]
-
 use argon2::{
     password_hash::{PasswordHashString, SaltString},
     Argon2, PasswordHasher as _,

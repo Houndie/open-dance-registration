@@ -1,5 +1,3 @@
-#![cfg(feature = "server")]
-
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -59,6 +57,6 @@ impl<Store: KeyStore> KeyManager<Store> {
             return Err(store::Error::IdDoesNotExist(kid.to_string()));
         }
 
-        Ok(key[0].key.verifying_key().clone())
+        Ok(key[0].key.verifying_key())
     }
 }

@@ -2,8 +2,8 @@ use crate::hooks::toasts::{use_toasts_provider, ToastManager};
 use dioxus::prelude::*;
 
 #[component]
-pub fn WithToasts(initial_errors: Vec<String>, children: Element) -> Element {
-    let mut toaster = use_signal(|| ToastManager::with_toasts(initial_errors));
+pub fn WithToasts(initial_errors: Option<Vec<String>>, children: Element) -> Element {
+    let mut toaster = use_signal(|| ToastManager::with_toasts(initial_errors.unwrap_or_default()));
     use_toasts_provider(toaster);
     rsx! {
         { children },

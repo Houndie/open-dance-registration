@@ -2461,6 +2461,7 @@ dependencies = [
  "dioxus-cli-config",
  "dioxus-liveview",
  "ed25519-dalek",
+ "futures",
  "http 0.2.12",
  "jsonwebtoken",
  "odr-core",

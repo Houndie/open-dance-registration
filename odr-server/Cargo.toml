@@ -10,9 +10,10 @@ edition = "2021"
 serde = { version = "1.0.195", features = ["derive"] }
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
 dioxus = { version = "=0.6.0", features = ["router", "fullstack"] }
+prost = { version = "0.12.3" }
+common = { path = "../common" }
 
 # Server
-prost = { version = "0.12.3", optional = true }
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }
 thiserror = { version = "1.0.56", optional = true }
 tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"], optional = true }
@@ -28,10 +29,10 @@ cookie = { version = "0.18.0", optional = true }
 time = { version = "0.3.34", optional = true }
 prost-types = { version = "0.12.3", optional = true }
 axum = { version = "0.7.9", optional = true }
-common = { path = "../common", optional = true }
 dioxus-liveview = { version = "=0.6.0", optional = true }
 dioxus-cli-config = { version = "=0.6.0", optional = true }
 odr-core = { path = "../odr-core", optional = true }
+futures = { version = "0.3.31", optional = true }
 
 # Client
 wasm-bindgen = { version = "=0.2.97", optional = true }
@@ -39,4 +40,4 @@ web-sys = { version = "=0.3.74", optional = true }
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys"]
-server = ["dioxus/server", "dep:prost", "dep:sqlx", "dep:thiserror", "dep:tokio", "dep:tonic", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:common", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "common/transport"]
+server = ["dioxus/server", "dep:sqlx", "dep:thiserror", "dep:tokio", "dep:tonic", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "dep:futures", "common/transport"]

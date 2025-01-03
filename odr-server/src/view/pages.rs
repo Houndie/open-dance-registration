@@ -1,1 +1,1 @@
-pub mod organizations;
+pub mod landing;

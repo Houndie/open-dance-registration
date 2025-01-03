@@ -101,7 +101,7 @@ fn ServerRenderedPage(orgs: Vec<Organization>) -> Element {
                                 Button {
                                     flavor: ButtonFlavor::Info,
                                     onclick: move |_| {
-                                        nav.push(Routes::OrganizationsPage{});
+                                        nav.push(Routes::LandingPage{});
                                     },
                                     "Edit Organization"
                                 }
@@ -166,7 +166,7 @@ pub fn Menu(highlight: Option<MenuItem>) -> Element {
                         class: highlight.is_active(&MenuItem::Home),
                         onclick: move |e| {
                             e.prevent_default();
-                            nav.push(Routes::OrganizationsPage);
+                            nav.push(Routes::LandingPage);
                         },
                         "Home"
                     }

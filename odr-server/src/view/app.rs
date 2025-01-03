@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::view::pages::organizations::Page as OrganizationsPage;
+use crate::view::pages::landing::Page as LandingPage;
 
 #[component]
 pub fn App() -> Element {
@@ -12,7 +12,7 @@ pub fn App() -> Element {
 #[derive(Clone, PartialEq, Routable)]
 pub enum Routes {
     #[route("/")]
-    OrganizationsPage,
+    LandingPage,
     /*#[route("/organizations/:org_id")]
     EventsPage { org_id: String },
 

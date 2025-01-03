@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
 
-use crate::view::organization::Page as OrganizationsPage;
+use crate::view::pages::organizations::Page as OrganizationsPage;
 
 #[component]
 pub fn App() -> Element {
-    rsx! { Router::<Routes>{} }
+    rsx! {
+        Router::<Routes>{}
+    }
 }
 
 #[derive(Clone, PartialEq, Routable)]

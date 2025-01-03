@@ -12,6 +12,7 @@ strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
 dioxus = { version = "=0.6.0", features = ["router", "fullstack"] }
 prost = { version = "0.12.3" }
 common = { path = "../common" }
+log = "0.4.20"
 
 # Server
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }

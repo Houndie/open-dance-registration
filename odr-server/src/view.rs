@@ -1,2 +1,3 @@
 pub mod app;
-pub mod organization;
+pub mod components;
+pub mod pages;

@@ -67,7 +67,6 @@ pub async fn upsert(
 pub async fn query(
     request: ProtoWrapper<QueryOrganizationsRequest>,
 ) -> Result<ProtoWrapper<QueryOrganizationsResponse>, ServerFnError> {
-    println!("HERE");
     use crate::server_functions::status_to_server_fn_error;
 
     let service: AnyService = extract::<FromContext<AnyService>, _>().await?.0;

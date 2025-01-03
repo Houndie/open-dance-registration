@@ -2464,6 +2464,7 @@ dependencies = [
  "futures",
  "http 0.2.12",
  "jsonwebtoken",
+ "log",
  "odr-core",
  "prost",
  "prost-types",

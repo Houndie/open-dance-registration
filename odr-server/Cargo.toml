@@ -9,7 +9,7 @@ edition = "2021"
 # Server/Client
 serde = { version = "1.0.195", features = ["derive"] }
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
-dioxus = { version = "=0.6.0", features = ["router", "fullstack"] }
+dioxus = { version = "=0.6.0", features = ["router", "fullstack", "logger"] }
 prost = { version = "0.12.3" }
 common = { path = "../common" }
 log = "0.4.20"

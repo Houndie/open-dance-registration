@@ -6,6 +6,7 @@ use crate::{
         organization::Service as OrganizationService, registration::Service as RegistrationService,
         registration_schema::Service as SchemaService, user::Service as UserService,
     },
+    server_functions::event::AnyService as AnyEventService,
     server_functions::organization::AnyService as AnyOrganizationService,
 };
 use common::proto;
@@ -38,8 +39,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let key_manager = Arc::new(odr_core::keys::KeyManager::new(key_store));
 
-    let event_service =
-        proto::event_service_server::EventServiceServer::new(EventService::new(event_store));
+    let event_service = Arc::new(EventService::new(event_store));
 
     let schema_service =
         proto::registration_schema_service_server::RegistrationSchemaServiceServer::new(
@@ -68,7 +68,9 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let grpc_server = Server::builder()
         .accept_http1(true)
-        .add_service(event_service)
+        .add_service(proto::event_service_server::EventServiceServer::from_arc(
+            event_service.clone(),
+        ))
         .add_service(schema_service)
         .add_service(registration_service)
         .add_service(
@@ -88,9 +90,18 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     })
         as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
 
+    let event_provider_state = Box::new(move || {
+        Box::new(AnyEventService::new_sqlite(event_service.clone())) as Box<dyn std::any::Any>
+    })
+        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+
     let dioxus_config = ServeConfig::builder()
-        .context_providers(Arc::new(vec![organization_provider_state]))
+        .context_providers(Arc::new(vec![
+            event_provider_state,
+            organization_provider_state,
+        ]))
         .build()?;
+
     let webserver =
         axum::Router::new().serve_dioxus_application(dioxus_config, crate::view::app::App);
     let addr = dioxus_cli_config::fullstack_address_or_localhost();

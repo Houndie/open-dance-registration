@@ -20,10 +20,9 @@ impl ToastManager {
     }
 
     pub fn new_error(&mut self, error_message: String) {
-        log::error!("Error occurred: {}", error_message);
         self.toasts.push(Toast {
             title: "Oh no!".to_owned(),
-            body: "We're sorry, something unexpected went wrong.".to_owned(),
+            body: error_message,
         })
     }
 

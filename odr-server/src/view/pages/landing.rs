@@ -101,7 +101,9 @@ fn ServerRenderedPage(orgs: Vec<Organization>) -> Element {
                                 Button {
                                     flavor: ButtonFlavor::Info,
                                     onclick: move |_| {
-                                        nav.push(Routes::LandingPage{});
+                                        nav.push(Routes::OrganizationPage{
+                                            org_id: id.clone(),
+                                        });
                                     },
                                     "Edit Organization"
                                 }

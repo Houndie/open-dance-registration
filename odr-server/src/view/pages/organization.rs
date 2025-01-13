@@ -142,9 +142,9 @@ fn ServerRenderedPage(org: Organization, events: Vec<Event>) -> Element {
                                 Button {
                                     flavor: ButtonFlavor::Info,
                                     onclick: move |_| {
-                                        /*nav.push(Routes::EventPage{
+                                        nav.push(Routes::EventPage{
                                             id: id.clone(),
-                                        });*/
+                                        });
                                     },
                                     "Edit Event"
                                 }

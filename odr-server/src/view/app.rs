@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::view::pages::{landing::Page as LandingPage, organization::Page as OrganizationPage};
+use crate::view::pages::{
+    event::Page as EventPage, landing::Page as LandingPage, organization::Page as OrganizationPage,
+};
 
 #[component]
 pub fn App() -> Element {
@@ -16,10 +18,10 @@ pub enum Routes {
 
     #[route("/organizations/:org_id")]
     OrganizationPage { org_id: String },
-    /*#[route("/events/:id")]
-    EventPage { id: String },
 
-    #[route("/events/:id/registration_schema")]
+    #[route("/events/:id")]
+    EventPage { id: String },
+    /*#[route("/events/:id/registration_schema")]
     RegistrationSchemaPage { id: String },
 
     #[route("/events/:event_id/registrations")]

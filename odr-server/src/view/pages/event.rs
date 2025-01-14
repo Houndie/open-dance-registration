@@ -18,7 +18,7 @@ use crate::{
 
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
-    let _nav = use_navigator();
+    let nav = use_navigator();
     let events_response = use_server_future(move || {
         query_events(ProtoWrapper(QueryEventsRequest {
             query: Some(EventQuery {
@@ -42,7 +42,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     };
 
     if events_response.events.is_empty() {
-        //nav.push(Routes::NotFound);
+        nav.push(Routes::NotFound);
         return rsx! {};
     }
 

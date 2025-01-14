@@ -1,24 +1,29 @@
 pub mod event;
 pub mod organization;
 
+use dioxus::logger::tracing;
 use prost;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
-pub struct ProtoWrapper<T: prost::Message + Default>(pub T);
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProtoWrapper<T: prost::Message + Default>(#[serde(with = "proto_wrapper")] pub T);
 
-impl<T: prost::Message + Default> Serialize for ProtoWrapper<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let bytes = self.0.encode_to_vec();
-        bytes.serialize(serializer)
+mod proto_wrapper {
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<T: prost::Message, S: Serializer>(
+        message: &T,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let bytes = message.encode_to_vec();
+        serde_bytes::serialize(&bytes, serializer)
     }
-}
 
-impl<'de, T: prost::Message + Default> Deserialize<'de> for ProtoWrapper<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let bytes = Vec::deserialize(deserializer)?;
-        let message = T::decode(&*bytes).map_err(serde::de::Error::custom)?;
-        Ok(ProtoWrapper(message))
+    pub fn deserialize<'de, T: prost::Message + Default, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<T, D::Error> {
+        let bytes: Vec<u8> = serde_bytes::deserialize(deserializer)?;
+        T::decode(&*(bytes)).map_err(serde::de::Error::custom)
     }
 }
 

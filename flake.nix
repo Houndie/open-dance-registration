@@ -52,6 +52,7 @@
         dioxus-cli
         grpcuiScript
         pkgs.entr
+	pkgs.cargo-expand
 
         (pkgs.writeShellScriptBin ",devserver" ''
 	  set -e

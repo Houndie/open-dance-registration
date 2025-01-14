@@ -9,10 +9,11 @@ edition = "2021"
 # Server/Client
 serde = { version = "1.0.195", features = ["derive"] }
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
-dioxus = { version = "=0.6.0", features = ["router", "fullstack", "logger"] }
+dioxus = { path = "../../dioxus/packages/dioxus", features = ["router", "fullstack", "logger"] }
 prost = { version = "0.12.3" }
 common = { path = "../common" }
 log = "0.4.20"
+serde_bytes = "0.11.15"
 
 # Server
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }
@@ -30,8 +31,8 @@ cookie = { version = "0.18.0", optional = true }
 time = { version = "0.3.34", optional = true }
 prost-types = { version = "0.12.3", optional = true }
 axum = { version = "0.7.9", optional = true }
-dioxus-liveview = { version = "=0.6.0", optional = true }
-dioxus-cli-config = { version = "=0.6.0", optional = true }
+dioxus-liveview = { path = "../../dioxus/packages/liveview", optional = true }
+dioxus-cli-config = { path = "../../dioxus/packages/cli-config", optional = true }
 odr-core = { path = "../odr-core", optional = true }
 futures = { version = "0.3.31", optional = true }
 

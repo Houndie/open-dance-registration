@@ -25,6 +25,8 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
+    let nav = use_navigator();
+
     let organizations_response = use_server_future(move || {
         query_organizations(ProtoWrapper(QueryOrganizationsRequest {
             query: Some(OrganizationQuery {
@@ -38,7 +40,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     let events_response =
         use_server_future(move || query_events(ProtoWrapper(QueryEventsRequest { query: None })))?;
 
-    let (ProtoWrapper(organizations_response), ProtoWrapper(events_response)) =
+    let (ProtoWrapper(mut organizations_response), ProtoWrapper(events_response)) =
         match (organizations_response(), events_response()) {
             (None, _) | (_, None) => return rsx! {},
             (Some(or), Some(er)) => {
@@ -62,21 +64,17 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
             }
         };
 
-    let org = match organizations_response.organizations.first() {
-        Some(org) => org,
-        None => {
-            return rsx! {
-                WithToasts {
-                    initial_errors: vec!["Organization not found".to_string()],
-                }
-            }
-        }
-    };
+    if organizations_response.organizations.is_empty() {
+        nav.push(Routes::NotFound);
+        return rsx! {};
+    }
+
+    let org = organizations_response.organizations.remove(0);
 
     rsx! {
         WithToasts{
             ServerRenderedPage {
-                org: org.clone(),
+                org: org,
                 events: events_response.events,
             }
         }

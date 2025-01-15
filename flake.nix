@@ -19,22 +19,27 @@
 
     grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" "${pkgs.grpcui}/bin/grpcui -plaintext localhost:50051");
 
-    dioxus-cli = pkgs.rustPlatform.buildRustPackage rec {
+    dioxus-cli = pkgs.rustPlatform.buildRustPackage {
       pname = "dioxus-cli";
-      version = "0.6.0";
+      version = "0.6.1-git";
 
-      src = pkgs.fetchCrate {
+      /*src = pkgs.fetchCrate {
         inherit pname version;
-        #sha256 = "sha256-iNlJLDxb8v7x19q0iaAnGmtmoPjMW8YXzbx5Fcf8Yws="; # 0.5.0
-        #sha256 = "sha256-EQGidjyqB48H33vFvBLUpHYGUm1RHMQM+eiU2tmCSwc="; # 0.5.1
-        #sha256 = "sha256-cOd8OGkmebUYw6fNLO/kja81qKwqBuVpJqCix1Izf64="; # 0.5.6
 	sha256 = "sha256-0Kg2/+S8EuMYZQaK4Ao+mbS7K48VhVWjPL+LnoVJMSw="; # 0.6.0
+      };*/
+      src = pkgs.fetchFromGitHub {
+        owner = "dioxusLabs";
+        repo = "dioxus";
+        rev = "857c3e232ecd024c752176bd0af14a5654014527";
+        hash = "sha256-N4wWWfa7T0ldMVHSavCgvqoDCk2vGUk/Jf3O9Q1TyZU=";
       };
 
-      #cargoHash = "sha256-6XKNBLDNWYd5+O7buHupXzVss2jCdh3wu9mXVLivH44="; # 0.5.0
-      #cargoHash = "sha256-IOwD9I70hqY3HwRMhqxtRmDP/yO4OdNkNRAIIIAqbmY="; # 0.5.1
-      #cargoHash = "sha256-shllaNdg9g6fD8qRyCKpN47keFUTu0g96MzVX4BrhXI="; # 0.5.6
-      cargoHash = "sha256-RMo6q/GSAV1bCMWtR+wu9xGKCgz/Ie6t/8oirBly/LQ="; # 0.6.0
+      buildAndTestSubdir = "packages/cli";
+
+      #cargoHash = "sha256-RMo6q/GSAV1bCMWtR+wu9xGKCgz/Ie6t/8oirBly/LQ="; # 0.6.0
+      cargoHash = "sha256-kE595bHDPmy9HOPZXqcYR4lxe7r6d+UA3yikKB/37Y8="; # git
+
+      checkFlags = [ "--skip=wasm_bindgen::test::test_cargo_install" "--skip=wasm_bindgen::test::test_github_install" ];
 
       OPENSSL_NO_VENDOR = 1;
 
@@ -53,6 +58,7 @@
         grpcuiScript
         pkgs.entr
 	pkgs.cargo-expand
+	pkgs.rustup
 
         (pkgs.writeShellScriptBin ",devserver" ''
 	  set -e

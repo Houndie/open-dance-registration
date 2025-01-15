@@ -9,7 +9,7 @@ edition = "2021"
 # Server/Client
 serde = { version = "1.0.195", features = ["derive"] }
 strum = { version = "0.25.0", features = ["strum_macros", "derive"] }
-dioxus = { path = "../../dioxus/packages/dioxus", features = ["router", "fullstack", "logger"] }
+dioxus = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", features = ["router", "fullstack", "logger"] }
 prost = { version = "0.12.3" }
 common = { path = "../common" }
 log = "0.4.20"
@@ -31,14 +31,14 @@ cookie = { version = "0.18.0", optional = true }
 time = { version = "0.3.34", optional = true }
 prost-types = { version = "0.12.3", optional = true }
 axum = { version = "0.7.9", optional = true }
-dioxus-liveview = { path = "../../dioxus/packages/liveview", optional = true }
-dioxus-cli-config = { path = "../../dioxus/packages/cli-config", optional = true }
+dioxus-liveview = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
+dioxus-cli-config = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
 odr-core = { path = "../odr-core", optional = true }
 futures = { version = "0.3.31", optional = true }
 
 # Client
-wasm-bindgen = { version = "=0.2.97", optional = true }
-web-sys = { version = "=0.3.74", optional = true }
+wasm-bindgen = { version = "=0.2.99", optional = true }
+web-sys = { version = "=0.3.76", optional = true }
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys"]

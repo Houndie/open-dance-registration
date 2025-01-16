@@ -13,9 +13,7 @@
       inherit system;
       overlays = [ rust-overlay.overlays.default ];
     };
-    myrust = pkgs.rust-bin.stable.latest.default.override {
-      targets = [ "wasm32-unknown-unknown" ];
-    };
+    myrust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
     grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" "${pkgs.grpcui}/bin/grpcui -plaintext localhost:50051");
 
@@ -58,18 +56,23 @@
         grpcuiScript
         pkgs.entr
 	pkgs.cargo-expand
-	pkgs.rustup
 
         (pkgs.writeShellScriptBin ",devserver" ''
 	  set -e
 
 	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
 
+	  # Wart:  rustup will install it's own binaries but they match our versions and we can ignore them:-)
+	  PATH=${pkgs.rustup}/bin:$PATH
+
+	  rustup show
+
 	  cd $ROOT/odr-cmd; cargo run init; cd $ROOT/odr-server; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
 	'')
       ];
       PROTOC = "${pkgs.protobuf_23}/bin/protoc";
       PROTOC_INCLUDE = "${pkgs.protobuf_23}/include";
+      RUST_SRC_PATH = "${myrust}/lib/rustlib/src/rust/library";
     };
   };
 }

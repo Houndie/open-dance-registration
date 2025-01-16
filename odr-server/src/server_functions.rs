@@ -1,7 +1,7 @@
 pub mod event;
 pub mod organization;
+pub mod registration_schema;
 
-use dioxus::logger::tracing;
 use prost;
 use serde::{Deserialize, Serialize};
 

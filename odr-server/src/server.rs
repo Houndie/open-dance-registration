@@ -6,8 +6,10 @@ use crate::{
         organization::Service as OrganizationService, registration::Service as RegistrationService,
         registration_schema::Service as SchemaService, user::Service as UserService,
     },
-    server_functions::event::AnyService as AnyEventService,
-    server_functions::organization::AnyService as AnyOrganizationService,
+    server_functions::{
+        event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
+        registration_schema::AnyService as AnyRegistrationSchemaService,
+    },
 };
 use common::proto;
 use dioxus::prelude::{DioxusRouterExt, ServeConfig};
@@ -41,10 +43,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_service = Arc::new(EventService::new(event_store));
 
-    let schema_service =
-        proto::registration_schema_service_server::RegistrationSchemaServiceServer::new(
-            SchemaService::new(schema_store),
-        );
+    let schema_service = Arc::new(SchemaService::new(schema_store));
 
     let registration_service = proto::registration_service_server::RegistrationServiceServer::new(
         RegistrationService::new(registration_store),
@@ -71,7 +70,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(proto::event_service_server::EventServiceServer::from_arc(
             event_service.clone(),
         ))
-        .add_service(schema_service)
+        .add_service(
+            proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
+                schema_service.clone(),
+            ),
+        )
         .add_service(registration_service)
         .add_service(
             proto::organization_service_server::OrganizationServiceServer::from_arc(
@@ -95,10 +98,18 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     })
         as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
 
+    let registration_schema_provider_state = Box::new(move || {
+        Box::new(AnyRegistrationSchemaService::new_sqlite(
+            schema_service.clone(),
+        )) as Box<dyn std::any::Any>
+    })
+        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+
     let dioxus_config = ServeConfig::builder()
         .context_providers(Arc::new(vec![
             event_provider_state,
             organization_provider_state,
+            registration_schema_provider_state,
         ]))
         .build()?;
 

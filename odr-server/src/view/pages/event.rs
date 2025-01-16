@@ -121,9 +121,11 @@ pub fn Menu(
                 class: "menu-list",
                 li {
                     a {
-                        prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::EventHome),
-                        onclick: move |_| { nav.push(Routes::EventPage { id: event_id.read().clone() }); },
+                        onclick: move |e| {
+                            e.prevent_default();
+                            nav.push(Routes::EventPage { id: event_id.read().clone() });
+                        },
                         "Event Home"
                     }
                 }
@@ -137,9 +139,11 @@ pub fn Menu(
                 }
                 li {
                     a {
-                        prevent_default: "onclick",
                         class: highlight.is_active(&MenuItem::RegistrationSchema),
-                        onclick: move |_| { /*nav.push(Routes::RegistrationSchemaPage { id: event_id.read().clone() }); */},
+                        onclick: move |e| {
+                            e.prevent_default();
+                            nav.push(Routes::RegistrationSchemaPage { id: event_id.read().clone() });
+                        },
                         "Registration Schema"
                     }
                 }

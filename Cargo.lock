@@ -2482,6 +2482,7 @@ dependencies = [
  "tonic",
  "tonic-reflection",
  "tonic-web",
+ "uuid",
  "wasm-bindgen",
  "web-sys",
 ]

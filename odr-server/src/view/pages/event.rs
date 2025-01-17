@@ -19,14 +19,16 @@ use crate::{
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let events_response = use_server_future(move || {
-        query_events(ProtoWrapper(QueryEventsRequest {
+    let events_response = use_server_future(move || async move {
+        query_events(QueryEventsRequest {
             query: Some(EventQuery {
                 query: Some(event_query::Query::Id(StringQuery {
                     operator: Some(string_query::Operator::Equals(id.read().clone())),
                 })),
             }),
-        }))
+        })
+        .await
+        .map(|r| ProtoWrapper(r))
     })?;
 
     let ProtoWrapper(mut events_response) = match events_response() {
@@ -50,13 +52,18 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let organization_id = event.organization_id.clone();
 
     let organizations_response = use_server_future(move || {
-        query_organizations(ProtoWrapper(QueryOrganizationsRequest {
-            query: Some(OrganizationQuery {
-                query: Some(organization_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(organization_id.clone())),
-                })),
-            }),
-        }))
+        let organization_id = organization_id.clone();
+        async move {
+            query_organizations(QueryOrganizationsRequest {
+                query: Some(OrganizationQuery {
+                    query: Some(organization_query::Query::Id(StringQuery {
+                        operator: Some(string_query::Operator::Equals(organization_id)),
+                    })),
+                }),
+            })
+            .await
+            .map(|r| ProtoWrapper(r))
+        }
     })?;
 
     let ProtoWrapper(mut organizations_response) = match organizations_response() {

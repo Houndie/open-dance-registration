@@ -18,8 +18,9 @@ use crate::{
     },
 };
 use common::proto::{
-    organization_query, string_query, Event, Organization, OrganizationQuery, QueryEventsRequest,
-    QueryOrganizationsRequest, StringQuery, UpsertEventsRequest, UpsertOrganizationsResponse,
+    event_query, organization_query, string_query, Event, EventQuery, Organization,
+    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
+    UpsertEventsRequest,
 };
 use dioxus::prelude::*;
 
@@ -27,18 +28,29 @@ use dioxus::prelude::*;
 pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
 
-    let organizations_response = use_server_future(move || {
-        query_organizations(ProtoWrapper(QueryOrganizationsRequest {
+    let organizations_response = use_server_future(move || async move {
+        query_organizations(QueryOrganizationsRequest {
             query: Some(OrganizationQuery {
                 query: Some(organization_query::Query::Id(StringQuery {
                     operator: Some(string_query::Operator::Equals(org_id())),
                 })),
             }),
-        }))
+        })
+        .await
+        .map(|r| ProtoWrapper(r))
     })?;
 
-    let events_response =
-        use_server_future(move || query_events(ProtoWrapper(QueryEventsRequest { query: None })))?;
+    let events_response = use_server_future(move || async move {
+        query_events(QueryEventsRequest {
+            query: Some(EventQuery {
+                query: Some(event_query::Query::OrganizationId(StringQuery {
+                    operator: Some(string_query::Operator::Equals(org_id())),
+                })),
+            }),
+        })
+        .await
+        .map(|r| ProtoWrapper(r))
+    })?;
 
     let (ProtoWrapper(mut organizations_response), ProtoWrapper(events_response)) =
         match (organizations_response(), events_response()) {
@@ -235,16 +247,16 @@ fn EventModal(org_id: String, onsubmit: EventHandler<Event>, onclose: EventHandl
 
                 let org_id = org_id.clone();
                 spawn(async move {
-                    let rsp = upsert_events(ProtoWrapper(UpsertEventsRequest{
+                    let rsp = upsert_events(UpsertEventsRequest{
                         events: vec![Event{
                             id: "".to_owned(),
                             organization_id: org_id,
                             name: event_name.read().clone(),
                         }],
-                    })).await;
+                    }).await;
 
                     match rsp {
-                        Ok(ProtoWrapper(mut rsp)) => onsubmit.call(rsp.events.remove(0)),
+                        Ok(mut rsp) => onsubmit.call(rsp.events.remove(0)),
                         Err(e) => {
                             toaster.write().new_error(e.to_string());
                             submitted.set(false);

@@ -4,6 +4,7 @@ pub mod registration_schema;
 
 use prost;
 use serde::{Deserialize, Serialize};
+use thiserror;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProtoWrapper<T: prost::Message + Default>(#[serde(with = "proto_wrapper")] pub T);
@@ -27,7 +28,24 @@ mod proto_wrapper {
     }
 }
 
-#[cfg(feature = "server")]
 fn status_to_server_fn_error(status: tonic::Status) -> dioxus::prelude::ServerFnError {
     dioxus::prelude::ServerFnError::ServerError(status.message().to_string())
+}
+
+#[cfg(feature = "web")]
+fn wasm_client() -> tonic_web_wasm_client::Client {
+    tonic_web_wasm_client::Client::new_with_options(
+        "http://localhost:50051".to_string(),
+        tonic_web_wasm_client::options::FetchOptions::new()
+            .credentials(tonic_web_wasm_client::options::Credentials::Include),
+    )
+}
+
+#[derive(thiserror::Error, Clone, Debug, Deserialize, Serialize)]
+pub enum Error {
+    #[error("service not found in server context")]
+    ServiceNotInContext,
+
+    #[error("error calling grpc function: {0}")]
+    GrpcError(String),
 }

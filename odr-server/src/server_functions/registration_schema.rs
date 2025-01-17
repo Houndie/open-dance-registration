@@ -1,18 +1,12 @@
-use crate::server_functions::ProtoWrapper;
-use common::proto::{
-    QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
-    UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
-};
-use dioxus::prelude::*;
-
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::api::registration_schema::Service;
+    use crate::{api::registration_schema::Service, server_functions::Error};
     use common::proto::{
         registration_schema_service_server::RegistrationSchemaService,
         QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
         UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
     };
+    use dioxus::prelude::*;
     use odr_core::store::registration_schema::SqliteStore;
     use std::sync::Arc;
     use tonic::{Request, Response, Status};
@@ -45,35 +39,72 @@ mod server_only {
             }
         }
     }
+
+    pub async fn upsert(
+        request: UpsertRegistrationSchemasRequest,
+    ) -> Result<UpsertRegistrationSchemasResponse, Error> {
+        let service: AnyService = extract::<FromContext<AnyService>, _>()
+            .await
+            .map_err(|_| Error::ServiceNotInContext)?
+            .0;
+        service
+            .upsert(tonic::Request::new(request))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| Error::GrpcError(e.to_string()))
+    }
+
+    pub async fn query(
+        request: QueryRegistrationSchemasRequest,
+    ) -> Result<QueryRegistrationSchemasResponse, Error> {
+        let service: AnyService = extract::<FromContext<AnyService>, _>()
+            .await
+            .map_err(|_| Error::ServiceNotInContext)?
+            .0;
+        service
+            .query(tonic::Request::new(request))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| Error::GrpcError(e.to_string()))
+    }
 }
 
 #[cfg(feature = "server")]
-pub use server_only::AnyService;
+pub use server_only::{query, upsert, AnyService};
 
-#[server]
-pub async fn upsert(
-    request: ProtoWrapper<UpsertRegistrationSchemasRequest>,
-) -> Result<ProtoWrapper<UpsertRegistrationSchemasResponse>, ServerFnError> {
-    use crate::server_functions::status_to_server_fn_error;
+#[cfg(feature = "web")]
+mod web_only {
+    use crate::server_functions::{wasm_client, Error};
+    use common::proto::{
+        registration_schema_service_client::RegistrationSchemaServiceClient,
+        QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
+        UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
+    };
 
-    let service: AnyService = extract::<FromContext<AnyService>, _>().await?.0;
-    service
-        .upsert(tonic::Request::new(request.0))
-        .await
-        .map(|r| ProtoWrapper(r.into_inner()))
-        .map_err(status_to_server_fn_error)
+    pub async fn upsert(
+        request: UpsertRegistrationSchemasRequest,
+    ) -> Result<UpsertRegistrationSchemasResponse, Error> {
+        let mut client = RegistrationSchemaServiceClient::new(wasm_client());
+
+        client
+            .upsert_registration_schemas(tonic::Request::new(request))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| Error::GrpcError(e.to_string()))
+    }
+
+    pub async fn query(
+        request: QueryRegistrationSchemasRequest,
+    ) -> Result<QueryRegistrationSchemasResponse, Error> {
+        let mut client = RegistrationSchemaServiceClient::new(wasm_client());
+
+        client
+            .query_registration_schemas(tonic::Request::new(request))
+            .await
+            .map(|r| r.into_inner())
+            .map_err(|e| Error::GrpcError(e.to_string()))
+    }
 }
 
-#[server]
-pub async fn query(
-    request: ProtoWrapper<QueryRegistrationSchemasRequest>,
-) -> Result<ProtoWrapper<QueryRegistrationSchemasResponse>, ServerFnError> {
-    use crate::server_functions::status_to_server_fn_error;
-
-    let service: AnyService = extract::<FromContext<AnyService>, _>().await?.0;
-    service
-        .query(tonic::Request::new(request.0))
-        .await
-        .map(|r| ProtoWrapper(r.into_inner()))
-        .map_err(status_to_server_fn_error)
-}
+#[cfg(feature = "web")]
+pub use web_only::{query, upsert};

@@ -21,7 +21,11 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Page() -> Element {
-    let res = use_server_future(|| query(ProtoWrapper(QueryOrganizationsRequest { query: None })))?;
+    let res = use_server_future(|| async {
+        query(QueryOrganizationsRequest { query: None })
+            .await
+            .map(|r| ProtoWrapper(r))
+    })?;
 
     let ProtoWrapper(res) = match res() {
         Some(Ok(res)) => res,
@@ -190,15 +194,15 @@ fn OrganizationModal(onsubmit: EventHandler<Organization>, onclose: EventHandler
                 spawn({
                     submitted.set(true);
                     async move {
-                        let rsp = upsert(ProtoWrapper(UpsertOrganizationsRequest{
+                        let rsp = upsert(UpsertOrganizationsRequest{
                             organizations: vec![Organization{
                                 id: "".to_owned(),
                                 name: organization_name.read().clone(),
                             }],
-                        })).await;
+                        }).await;
 
                         let organization = match rsp {
-                            Ok(ProtoWrapper(mut rsp)) => rsp.organizations.remove(0),
+                            Ok(mut rsp) => rsp.organizations.remove(0),
                             Err(e) => {
                                 toaster.write().new_error(e.to_string());
                                 return;

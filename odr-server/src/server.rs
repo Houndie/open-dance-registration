@@ -45,46 +45,65 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let schema_service = Arc::new(SchemaService::new(schema_store));
 
-    let registration_service = proto::registration_service_server::RegistrationServiceServer::new(
-        RegistrationService::new(registration_store),
-    );
+    let registration_service = Arc::new(RegistrationService::new(registration_store));
 
     let organization_service = Arc::new(OrganizationService::new(organization_store));
 
     let authentication_service =
-        proto::authentication_service_server::AuthenticationServiceServer::new(
-            AuthenticationService::new(key_manager, user_store.clone()),
+        Arc::new(AuthenticationService::new(key_manager, user_store.clone()));
+
+    let user_service = Arc::new(UserService::new(user_store));
+
+    let event_grpc =
+        proto::event_service_server::EventServiceServer::from_arc(event_service.clone());
+
+    let registration_schema_grpc =
+        proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
+            schema_service.clone(),
         );
 
-    let user_service =
-        proto::user_service_server::UserServiceServer::new(UserService::new(user_store));
+    let registration_grpc = proto::registration_service_server::RegistrationServiceServer::from_arc(
+        registration_service.clone(),
+    );
+
+    let organization_grpc = proto::organization_service_server::OrganizationServiceServer::from_arc(
+        organization_service.clone(),
+    );
+
+    let user_grpc = proto::user_service_server::UserServiceServer::from_arc(user_service.clone());
+
+    let authentication_grpc =
+        proto::authentication_service_server::AuthenticationServiceServer::from_arc(
+            authentication_service.clone(),
+        );
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
-        .build()?;
+        .build_v1()?;
 
-    let grpc_addr = "[::1]:50051".parse()?;
+    let grpc_addr = "[::1]:50050".parse()?;
 
     let grpc_server = Server::builder()
-        .accept_http1(true)
-        .add_service(proto::event_service_server::EventServiceServer::from_arc(
-            event_service.clone(),
-        ))
-        .add_service(
-            proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
-                schema_service.clone(),
-            ),
-        )
-        .add_service(registration_service)
-        .add_service(
-            proto::organization_service_server::OrganizationServiceServer::from_arc(
-                organization_service.clone(),
-            ),
-        )
-        .add_service(user_service)
-        .add_service(authentication_service)
+        .add_service(event_grpc.clone())
+        .add_service(registration_schema_grpc.clone())
+        .add_service(registration_grpc.clone())
+        .add_service(organization_grpc.clone())
+        .add_service(user_grpc.clone())
+        .add_service(authentication_grpc.clone())
         .add_service(reflection_service)
         .serve(grpc_addr);
+
+    let grpc_web_addr = "[::1]:50051".parse()?;
+
+    let grpc_web_server = Server::builder()
+        .accept_http1(true)
+        .add_service(tonic_web::enable(event_grpc))
+        .add_service(tonic_web::enable(registration_schema_grpc))
+        .add_service(tonic_web::enable(registration_grpc))
+        .add_service(tonic_web::enable(organization_grpc))
+        .add_service(tonic_web::enable(user_grpc))
+        .add_service(tonic_web::enable(authentication_grpc))
+        .serve(grpc_web_addr);
 
     let organization_provider_state = Box::new(move || {
         Box::new(AnyOrganizationService::new_sqlite(
@@ -118,8 +137,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let addr = dioxus_cli_config::fullstack_address_or_localhost();
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     let server = axum::serve(listener, webserver);
-    let (grpc_err, axum_err) = futures::join!(grpc_server, server.into_future());
+
+    let (grpc_err, grpc_web_err, axum_err) =
+        futures::join!(grpc_server, grpc_web_server, server.into_future());
     grpc_err.map_err(ServerError::GrpcError)?;
+    grpc_web_err.map_err(ServerError::GrpcError)?;
     axum_err?;
 
     Ok(())

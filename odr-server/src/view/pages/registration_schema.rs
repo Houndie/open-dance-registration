@@ -75,13 +75,15 @@ struct LineLocation {
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
     let events_response = use_server_future(move || {
-        query_events(ProtoWrapper(QueryEventsRequest {
-            query: Some(EventQuery {
-                query: Some(event_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(id.read().clone())),
-                })),
-            }),
-        }))
+        async move{
+            query_events(QueryEventsRequest {
+                query: Some(EventQuery {
+                    query: Some(event_query::Query::Id(StringQuery {
+                        operator: Some(string_query::Operator::Equals(id.read().clone())),
+                    })),
+                }),
+            }).await.map(|r| ProtoWrapper(r))
+        }
     })?;
 
     let ProtoWrapper(mut events_response) = match events_response() {
@@ -106,25 +108,31 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let event_id = event.id.clone();
 
     let organizations_response = use_server_future(move || {
-        query_organizations(ProtoWrapper(QueryOrganizationsRequest {
-            query: Some(OrganizationQuery {
-                query: Some(organization_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(organization_id.clone())),
-                })),
-            }),
-        }))
+        let organization_id = organization_id.clone();
+        async move {
+            query_organizations(QueryOrganizationsRequest {
+                query: Some(OrganizationQuery {
+                    query: Some(organization_query::Query::Id(StringQuery {
+                        operator: Some(string_query::Operator::Equals(organization_id)),
+                    })),
+                }),
+            }).await.map(|r| ProtoWrapper(r))
+        }
     })?;
 
     let registration_schemas_response = {
         let event_id = event_id.clone();
         use_server_future(move || {
-            query_registration_schemas(ProtoWrapper(QueryRegistrationSchemasRequest {
-                query: Some(RegistrationSchemaQuery {
-                    query: Some(registration_schema_query::Query::EventId(StringQuery {
-                        operator: Some(string_query::Operator::Equals(event_id.clone())),
-                    })),
-                }),
-            }))
+            let event_id = event_id.clone();
+            async move {
+                query_registration_schemas(QueryRegistrationSchemasRequest {
+                    query: Some(RegistrationSchemaQuery {
+                        query: Some(registration_schema_query::Query::EventId(StringQuery {
+                            operator: Some(string_query::Operator::Equals(event_id)),
+                        })),
+                    }),
+                }).await.map(|r| ProtoWrapper(r))
+            }
         })?
     };
 
@@ -242,12 +250,12 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
                                 items: send_schema.items.iter().cloned().map(|(_, i)| i).collect(),
                             };
 
-                            let rsp = upsert_registration_schema(ProtoWrapper(UpsertRegistrationSchemasRequest{
+                            let rsp = upsert_registration_schema(UpsertRegistrationSchemasRequest{
                                 registration_schemas: vec![registration_schema],
-                            })).await;
+                            }).await;
 
                             let mut rsp = match rsp {
-                                Ok(ProtoWrapper(rsp)) => rsp,
+                                Ok(rsp) => rsp,
                                 Err(e) => {
                                     toaster.write().new_error(e.to_string());
                                     return
@@ -280,9 +288,9 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
                         };
 
                         spawn(async move {
-                            let rsp = upsert_registration_schema(ProtoWrapper(UpsertRegistrationSchemasRequest{
+                            let rsp = upsert_registration_schema(UpsertRegistrationSchemasRequest{
                                 registration_schemas: vec![registration_schema],
-                            })).await;
+                            }).await;
 
                             match rsp {
                                 Ok(_) => {},
@@ -357,9 +365,9 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
                                                     *schema.write() = schema_copy.clone();
 
 
-                                                    let res = upsert_registration_schema(ProtoWrapper(UpsertRegistrationSchemasRequest{
+                                                    let res = upsert_registration_schema(UpsertRegistrationSchemasRequest{
                                                         registration_schemas: vec![schema_copy.into()],
-                                                    })).await;
+                                                    }).await;
 
                                                     if let Err(e) = res {
                                                         toaster.write().new_error(e.to_string());

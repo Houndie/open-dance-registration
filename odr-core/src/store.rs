@@ -11,19 +11,19 @@ pub enum Error {
     #[error("id {0} does not exist")]
     IdDoesNotExist(String),
 
-    #[error("error inserting new event into data store: {0}")]
+    #[error("error inserting new item into data store: {0}")]
     InsertionError(#[source] sqlx::Error),
 
-    #[error("error fetching event from database: {0}")]
+    #[error("error fetching item from database: {0}")]
     FetchError(#[source] sqlx::Error),
 
-    #[error("error deleting event from database: {0}")]
+    #[error("error deleting item from database: {0}")]
     DeleteError(#[source] sqlx::Error),
 
-    #[error("error checking event existance in database: {0}")]
+    #[error("error checking item existance in database: {0}")]
     CheckExistsError(#[source] sqlx::Error),
 
-    #[error("error updating event: {0}")]
+    #[error("error updating item: {0}")]
     UpdateError(#[source] sqlx::Error),
 
     #[error("transaction failed to commit: {0}")]

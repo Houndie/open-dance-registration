@@ -84,9 +84,23 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 }),
             }).await.map(|r| ProtoWrapper(r))
         }
-    })?;
+    });
 
-    let ProtoWrapper(mut events_response) = match events_response() {
+    let registration_schemas_response =
+        use_server_future(move || {
+            let event_id = id.clone();
+            async move {
+                query_registration_schemas(QueryRegistrationSchemasRequest {
+                    query: Some(RegistrationSchemaQuery {
+                        query: Some(registration_schema_query::Query::EventId(StringQuery {
+                            operator: Some(string_query::Operator::Equals(event_id())),
+                        })),
+                    }),
+                }).await.map(|r| ProtoWrapper(r))
+            }
+        });
+
+    let ProtoWrapper(mut events_response) = match events_response?() {
         Some(Ok(res)) => res,
         Some(Err(e)) => {
             return rsx! {
@@ -105,7 +119,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
 
     let event = events_response.events.remove(0);
     let organization_id = event.organization_id.clone();
-    let event_id = event.id.clone();
 
     let organizations_response = use_server_future(move || {
         let organization_id = organization_id.clone();
@@ -118,26 +131,10 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 }),
             }).await.map(|r| ProtoWrapper(r))
         }
-    })?;
-
-    let registration_schemas_response = {
-        let event_id = event_id.clone();
-        use_server_future(move || {
-            let event_id = event_id.clone();
-            async move {
-                query_registration_schemas(QueryRegistrationSchemasRequest {
-                    query: Some(RegistrationSchemaQuery {
-                        query: Some(registration_schema_query::Query::EventId(StringQuery {
-                            operator: Some(string_query::Operator::Equals(event_id)),
-                        })),
-                    }),
-                }).await.map(|r| ProtoWrapper(r))
-            }
-        })?
-    };
+    });
 
     let (ProtoWrapper(mut organizations_response), ProtoWrapper(mut registration_schemas_response)) =
-        match (organizations_response(), registration_schemas_response()) {
+        match (organizations_response?(), registration_schemas_response?()) {
             (None, _) | (_, None) => return rsx! {},
             (Some(or), Some(rr)) => {
                 let mut errors = Vec::new();
@@ -170,7 +167,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let organization = organizations_response.organizations.remove(0);
 
     let schema = registration_schemas_response.registration_schemas.pop().unwrap_or_else(move || {
-        RegistrationSchema{ event_id, ..Default::default() }
+        RegistrationSchema{ event_id: id(), ..Default::default() }
     });
 
     rsx!{
@@ -183,6 +180,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         }
     }
 }
+
 #[component]
 fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>, registration_schema_items: ReadOnlySignal<Vec<RegistrationSchemaItem>>) -> Element {
     let grabbing_cursor = use_signal(|| false);

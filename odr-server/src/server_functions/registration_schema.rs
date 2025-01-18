@@ -57,15 +57,18 @@ mod server_only {
     pub async fn query(
         request: QueryRegistrationSchemasRequest,
     ) -> Result<QueryRegistrationSchemasResponse, Error> {
+        println!("in schema");
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
-        service
+        let x = service
             .query(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(|e| Error::GrpcError(e.to_string()));
+        println!("out schema");
+        x
     }
 }
 

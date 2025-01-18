@@ -1,5 +1,6 @@
 pub mod event;
 pub mod organization;
+pub mod registration;
 pub mod registration_schema;
 
 use prost;

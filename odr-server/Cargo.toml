@@ -18,6 +18,7 @@ uuid = { version = "1.7.0", features = ["v4", "js"] }
 futures = { version = "0.3.31" }
 tonic = { version = "0.12", default-features = false }
 thiserror = "1.0.56"
+itertools = "0.12.1"
 
 # Server
 sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }

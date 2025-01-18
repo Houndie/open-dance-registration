@@ -1,12 +1,12 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::event::Service, server_functions::Error};
+    use crate::{api::registration::Service, server_functions::Error};
     use common::proto::{
-        event_service_server::EventService, QueryEventsRequest, QueryEventsResponse,
-        UpsertEventsRequest, UpsertEventsResponse,
+        registration_service_server::RegistrationService, QueryRegistrationsRequest,
+        QueryRegistrationsResponse, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
     };
     use dioxus::prelude::*;
-    use odr_core::store::event::SqliteStore;
+    use odr_core::store::registration::SqliteStore;
     use std::sync::Arc;
     use tonic::{Request, Response, Status};
 
@@ -22,24 +22,26 @@ mod server_only {
 
         pub async fn upsert(
             &self,
-            request: Request<UpsertEventsRequest>,
-        ) -> Result<Response<UpsertEventsResponse>, Status> {
+            request: Request<UpsertRegistrationsRequest>,
+        ) -> Result<Response<UpsertRegistrationsResponse>, Status> {
             match self {
-                AnyService::Sqlite(service) => service.upsert_events(request).await,
+                AnyService::Sqlite(service) => service.upsert_registrations(request).await,
             }
         }
 
         pub async fn query(
             &self,
-            request: Request<QueryEventsRequest>,
-        ) -> Result<Response<QueryEventsResponse>, Status> {
+            request: Request<QueryRegistrationsRequest>,
+        ) -> Result<Response<QueryRegistrationsResponse>, Status> {
             match self {
-                AnyService::Sqlite(service) => service.query_events(request).await,
+                AnyService::Sqlite(service) => service.query_registrations(request).await,
             }
         }
     }
 
-    pub async fn upsert(request: UpsertEventsRequest) -> Result<UpsertEventsResponse, Error> {
+    pub async fn upsert(
+        request: UpsertRegistrationsRequest,
+    ) -> Result<UpsertRegistrationsResponse, Error> {
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
@@ -52,20 +54,19 @@ mod server_only {
             .map_err(|e| Error::GrpcError(e.to_string()))
     }
 
-    pub async fn query(request: QueryEventsRequest) -> Result<QueryEventsResponse, Error> {
-        println!("in event");
+    pub async fn query(
+        request: QueryRegistrationsRequest,
+    ) -> Result<QueryRegistrationsResponse, Error> {
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let x = service
+        service
             .query(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()));
-        println!("out event");
-        x
+            .map_err(|e| Error::GrpcError(e.to_string()))
     }
 }
 
@@ -76,25 +77,29 @@ pub use server_only::{query, upsert, AnyService};
 mod web_only {
     use crate::server_functions::{wasm_client, Error};
     use common::proto::{
-        event_service_client::EventServiceClient, QueryEventsRequest, QueryEventsResponse,
-        UpsertEventsRequest, UpsertEventsResponse,
+        registration_service_client::RegistrationServiceClient, QueryRegistrationsRequest,
+        QueryRegistrationsResponse, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
     };
 
-    pub async fn upsert(request: UpsertEventsRequest) -> Result<UpsertEventsResponse, Error> {
-        let mut client = EventServiceClient::new(wasm_client());
+    pub async fn upsert(
+        request: UpsertRegistrationsRequest,
+    ) -> Result<UpsertRegistrationsResponse, Error> {
+        let mut client = RegistrationServiceClient::new(wasm_client());
 
         client
-            .upsert_events(tonic::Request::new(request))
+            .upsert_registrations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
             .map_err(|e| Error::GrpcError(e.to_string()))
     }
 
-    pub async fn query(request: QueryEventsRequest) -> Result<QueryEventsResponse, Error> {
-        let mut client = EventServiceClient::new(wasm_client());
+    pub async fn query(
+        request: QueryRegistrationsRequest,
+    ) -> Result<QueryRegistrationsResponse, Error> {
+        let mut client = RegistrationServiceClient::new(wasm_client());
 
         client
-            .query_events(tonic::Request::new(request))
+            .query_registrations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
             .map_err(|e| Error::GrpcError(e.to_string()))

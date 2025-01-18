@@ -2,7 +2,8 @@ use dioxus::prelude::*;
 
 use crate::view::pages::{
     event::Page as EventPage, landing::Page as LandingPage, not_found::Page as NotFound,
-    organization::Page as OrganizationPage, registration_schema::Page as RegistrationSchemaPage,
+    organization::Page as OrganizationPage, registration::Page as RegistrationPage,
+    registration_schema::Page as RegistrationSchemaPage,
 };
 
 #[component]
@@ -26,10 +27,10 @@ pub enum Routes {
     #[route("/events/:id/registration_schema")]
     RegistrationSchemaPage { id: String },
 
-    /*#[route("/events/:event_id/registrations")]
-    RegistrationPage { event_id: String },
+    #[route("/events/:id/registrations")]
+    RegistrationPage { id: String },
 
-    #[route("/profile")]
+    /*#[route("/profile")]
     ProfilePage,*/
     #[route("/404")]
     NotFound,

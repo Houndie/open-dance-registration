@@ -2400,6 +2400,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "http 1.1.0",
+ "itertools",
  "jsonwebtoken",
  "log",
  "odr-core",

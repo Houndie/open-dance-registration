@@ -19,7 +19,7 @@ use crate::{
         app::Routes,
     },
     hooks::toasts::{use_toasts, ToastManager},
-    server_functions::{ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema},
+    server_functions::{self, ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema},
 };
 use common::proto::{
     self, event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest
@@ -71,104 +71,82 @@ struct LineLocation {
     width: f64,
 }
 
+#[derive(Clone, Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
+enum Error {
+    #[error("Not found")]
+    NotFound,
+    #[error("{0}")]
+    Misc(String),
+    #[error("Server function error: {0}")]
+    ServerFunctionError(#[source] server_functions::Error)
+}
+
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let events_response = use_server_future(move || {
+    let results = use_server_future(move || {
         async move{
-            query_events(QueryEventsRequest {
+            let events_future = query_events(QueryEventsRequest {
                 query: Some(EventQuery {
                     query: Some(event_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(id.read().clone())),
+                        operator: Some(string_query::Operator::Equals(id())),
                     })),
                 }),
-            }).await.map(|r| ProtoWrapper(r))
+            });
+
+            let schemas_future = query_registration_schemas(QueryRegistrationSchemasRequest {
+                query: Some(RegistrationSchemaQuery {
+                    query: Some(registration_schema_query::Query::EventId(StringQuery {
+                        operator: Some(string_query::Operator::Equals(id())),
+                    })),
+                }),
+            });
+
+            let mut events_response = events_future.await.map_err(Error::ServerFunctionError)?;
+            let event = events_response.events.pop().ok_or(Error::NotFound)?;
+
+            let organizations_future = query_organizations(QueryOrganizationsRequest {
+                query: Some(OrganizationQuery {
+                    query: Some(organization_query::Query::Id(StringQuery {
+                        operator: Some(string_query::Operator::Equals(event.organization_id.clone())),
+                    })),
+                }),
+            });
+
+            let mut schemas_response = schemas_future.await.map_err(Error::ServerFunctionError)?;
+            let schema = schemas_response.registration_schemas.pop().unwrap_or_else(|| {
+                RegistrationSchema{ event_id: id(), ..Default::default() }
+            });
+
+            let mut organizations_response = organizations_future.await.map_err(Error::ServerFunctionError)?;
+            let organization = organizations_response.organizations.pop().ok_or(Error::Misc("organization not found".to_owned()))?;
+
+            Ok((ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))
         }
-    });
+    })?;
 
-    let registration_schemas_response =
-        use_server_future(move || {
-            let event_id = id.clone();
-            async move {
-                query_registration_schemas(QueryRegistrationSchemasRequest {
-                    query: Some(RegistrationSchemaQuery {
-                        query: Some(registration_schema_query::Query::EventId(StringQuery {
-                            operator: Some(string_query::Operator::Equals(event_id())),
-                        })),
-                    }),
-                }).await.map(|r| ProtoWrapper(r))
-            }
-        });
-
-    let ProtoWrapper(mut events_response) = match events_response?() {
-        Some(Ok(res)) => res,
-        Some(Err(e)) => {
+    let (event, schema, organization) = match results() {
+        None => return rsx! {},
+        Some(Ok((ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))) => (event, schema, organization),
+        Some(Err(Error::NotFound)) => {
+            nav.push(Routes::NotFound);
+            return rsx! {};
+        },
+        Some(Err(Error::Misc(e))) => {
+            return rsx! {
+                WithToasts{
+                    initial_errors: vec![e],
+                }
+            };
+        },
+        Some(Err(Error::ServerFunctionError(e))) => {
             return rsx! {
                 WithToasts{
                     initial_errors: vec![e.to_string()],
                 }
             };
-        }
-        None => return rsx! {},
+        },
     };
-
-    if events_response.events.is_empty() {
-        nav.push(Routes::NotFound);
-        return rsx! {};
-    }
-
-    let event = events_response.events.remove(0);
-    let organization_id = event.organization_id.clone();
-
-    let organizations_response = use_server_future(move || {
-        let organization_id = organization_id.clone();
-        async move {
-            query_organizations(QueryOrganizationsRequest {
-                query: Some(OrganizationQuery {
-                    query: Some(organization_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(organization_id)),
-                    })),
-                }),
-            }).await.map(|r| ProtoWrapper(r))
-        }
-    });
-
-    let (ProtoWrapper(mut organizations_response), ProtoWrapper(mut registration_schemas_response)) =
-        match (organizations_response?(), registration_schemas_response?()) {
-            (None, _) | (_, None) => return rsx! {},
-            (Some(or), Some(rr)) => {
-                let mut errors = Vec::new();
-                if let Err(ref e) = or {
-                    errors.push(e.to_string());
-                };
-                if let Err(ref e) = rr {
-                    errors.push(e.to_string());
-                };
-
-                if !errors.is_empty() {
-                    return rsx! {
-                        WithToasts {
-                            initial_errors: errors,
-                        }
-                    };
-                };
-
-                (or.unwrap(), rr.unwrap())
-            }
-        };
-
-    if organizations_response.organizations.is_empty() {
-        return rsx! {
-            WithToasts {
-                initial_errors: vec!["Organization not found".to_owned()],
-            }
-        };
-    }
-    let organization = organizations_response.organizations.remove(0);
-
-    let schema = registration_schemas_response.registration_schemas.pop().unwrap_or_else(move || {
-        RegistrationSchema{ event_id: id(), ..Default::default() }
-    });
 
     rsx!{
         WithToasts {

@@ -16,10 +16,10 @@ use crate::{
             with_toasts::WithToasts,
         },
         pages::event::{Menu, MenuItem},
-        app::Routes,
+        app::{Routes, Error},
     },
     hooks::toasts::{use_toasts, ToastManager},
-    server_functions::{self, ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema},
+    server_functions::{ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema},
 };
 use common::proto::{
     self, event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest
@@ -69,16 +69,6 @@ struct LineLocation {
     top: f64,
     left: f64,
     width: f64,
-}
-
-#[derive(Clone, Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
-enum Error {
-    #[error("Not found")]
-    NotFound,
-    #[error("{0}")]
-    Misc(String),
-    #[error("Server function error: {0}")]
-    ServerFunctionError(#[source] server_functions::Error)
 }
 
 #[component]
@@ -132,14 +122,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             nav.push(Routes::NotFound);
             return rsx! {};
         },
-        Some(Err(Error::Misc(e))) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e],
-                }
-            };
-        },
-        Some(Err(Error::ServerFunctionError(e))) => {
+        Some(Err(e)) => {
             return rsx! {
                 WithToasts{
                     initial_errors: vec![e.to_string()],

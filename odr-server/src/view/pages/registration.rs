@@ -8,7 +8,7 @@ use crate::{
         registration_schema::query as query_registration_schemas, ProtoWrapper,
     },
     view::{
-        app::Routes,
+        app::{Error, Routes},
         components::{
             form::{
                 Button, ButtonFlavor, CheckInput, CheckStyle, Field, MultiSelectInput, SelectInput,
@@ -68,50 +68,90 @@ fn to_proto_registration(registration: TableRegistration, event_id: String) -> R
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let events_response = use_server_future(move || async move {
-        query_events(QueryEventsRequest {
+    let results = use_server_future(move || async move {
+        let events_future = query_events(QueryEventsRequest {
             query: Some(EventQuery {
                 query: Some(event_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(id.read().clone())),
+                    operator: Some(string_query::Operator::Equals(id())),
                 })),
             }),
-        })
-        .await
-        .map(|r| ProtoWrapper(r))
-    });
+        });
 
-    let registration_schemas_response = use_server_future(move || {
-        let event_id = id.clone();
-        async move {
-            query_registration_schemas(QueryRegistrationSchemasRequest {
-                query: Some(RegistrationSchemaQuery {
-                    query: Some(registration_schema_query::Query::EventId(StringQuery {
-                        operator: Some(string_query::Operator::Equals(event_id())),
-                    })),
-                }),
-            })
+        let schema_future = query_registration_schemas(QueryRegistrationSchemasRequest {
+            query: Some(RegistrationSchemaQuery {
+                query: Some(registration_schema_query::Query::EventId(StringQuery {
+                    operator: Some(string_query::Operator::Equals(id())),
+                })),
+            }),
+        });
+
+        let registrations_future = query_registrations(QueryRegistrationsRequest {
+            query: Some(RegistrationQuery {
+                query: Some(registration_query::Query::EventId(StringQuery {
+                    operator: Some(string_query::Operator::Equals(id())),
+                })),
+            }),
+        });
+
+        let mut events_response = events_future.await.map_err(Error::ServerFunctionError)?;
+        let event = events_response.events.pop().ok_or(Error::NotFound)?;
+
+        let organization_future = query_organizations(QueryOrganizationsRequest {
+            query: Some(OrganizationQuery {
+                query: Some(organization_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(
+                        event.organization_id.clone(),
+                    )),
+                })),
+            }),
+        });
+
+        let mut schema_response = schema_future.await.map_err(Error::ServerFunctionError)?;
+        let schema = schema_response
+            .registration_schemas
+            .pop()
+            .unwrap_or_else(move || RegistrationSchema {
+                event_id: id(),
+                ..Default::default()
+            });
+
+        let registrations_response = registrations_future
             .await
-            .map(|r| ProtoWrapper(r))
-        }
-    });
+            .map_err(Error::ServerFunctionError)?;
 
-    let registrations_response = use_server_future(move || {
-        let event_id = id.clone();
-        async move {
-            query_registrations(QueryRegistrationsRequest {
-                query: Some(RegistrationQuery {
-                    query: Some(registration_query::Query::EventId(StringQuery {
-                        operator: Some(string_query::Operator::Equals(event_id())),
-                    })),
-                }),
-            })
+        let mut organization_response = organization_future
             .await
-            .map(|r| ProtoWrapper(r))
-        }
-    });
+            .map_err(Error::ServerFunctionError)?;
+        let organization = organization_response
+            .organizations
+            .pop()
+            .ok_or(Error::Misc("organization not found".to_owned()))?;
 
-    let ProtoWrapper(mut events_response) = match events_response?() {
-        Some(Ok(res)) => res,
+        Ok((
+            ProtoWrapper(organization),
+            ProtoWrapper(event),
+            ProtoWrapper(schema),
+            ProtoWrapper(registrations_response),
+        ))
+    })?;
+
+    let (organization, event, schema, registrations) = match results() {
+        None => return rsx! {},
+        Some(Ok((
+            ProtoWrapper(organization),
+            ProtoWrapper(event),
+            ProtoWrapper(schema),
+            ProtoWrapper(registrations_response),
+        ))) => (
+            organization,
+            event,
+            schema,
+            registrations_response.registrations,
+        ),
+        Some(Err(Error::NotFound)) => {
+            nav.push(Routes::NotFound);
+            return rsx! {};
+        }
         Some(Err(e)) => {
             return rsx! {
                 WithToasts{
@@ -119,82 +159,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 }
             };
         }
-        None => return rsx! {},
     };
-
-    if events_response.events.is_empty() {
-        nav.push(Routes::NotFound);
-        return rsx! {};
-    }
-
-    let event = events_response.events.remove(0);
-    let organization_id = event.organization_id.clone();
-
-    let organizations_response = use_server_future(move || {
-        let organization_id = organization_id.clone();
-        async move {
-            query_organizations(QueryOrganizationsRequest {
-                query: Some(OrganizationQuery {
-                    query: Some(organization_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(organization_id)),
-                    })),
-                }),
-            })
-            .await
-            .map(|r| ProtoWrapper(r))
-        }
-    });
-
-    let (
-        ProtoWrapper(mut organizations_response),
-        ProtoWrapper(mut registration_schemas_response),
-        ProtoWrapper(mut registrations_response),
-    ) = match (
-        organizations_response?(),
-        registration_schemas_response?(),
-        registrations_response?(),
-    ) {
-        (None, _, _) | (_, None, _) | (_, _, None) => return rsx! {},
-        (Some(or), Some(rsr), Some(rr)) => {
-            let mut errors = Vec::new();
-            if let Err(ref e) = or {
-                errors.push(e.to_string());
-            };
-            if let Err(ref e) = rsr {
-                errors.push(e.to_string());
-            };
-            if let Err(ref e) = rr {
-                errors.push(e.to_string());
-            };
-
-            if !errors.is_empty() {
-                return rsx! {
-                    WithToasts {
-                        initial_errors: errors,
-                    }
-                };
-            };
-
-            (or.unwrap(), rsr.unwrap(), rr.unwrap())
-        }
-    };
-
-    if organizations_response.organizations.is_empty() {
-        return rsx! {
-            WithToasts {
-                initial_errors: vec!["Organization not found".to_owned()],
-            }
-        };
-    }
-    let organization = organizations_response.organizations.remove(0);
-
-    let schema = registration_schemas_response
-        .registration_schemas
-        .pop()
-        .unwrap_or_else(move || RegistrationSchema {
-            event_id: id(),
-            ..Default::default()
-        });
 
     rsx! {
         WithToasts {
@@ -202,7 +167,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 org: organization,
                 event: event,
                 schema: schema,
-                registrations: registrations_response.registrations,
+                registrations: registrations,
             }
         }
     }

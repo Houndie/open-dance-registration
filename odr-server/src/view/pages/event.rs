@@ -9,7 +9,7 @@ use crate::{
         event::query as query_events, organization::query as query_organizations, ProtoWrapper,
     },
     view::{
-        app::Routes,
+        app::{Error, Routes},
         components::{
             menu::Menu as GenericMenu, page::Page as GenericPage, with_toasts::WithToasts,
         },
@@ -19,8 +19,8 @@ use crate::{
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let events_response = use_server_future(move || async move {
-        query_events(QueryEventsRequest {
+    let results = use_server_future(move || async move {
+        let mut events_response = query_events(QueryEventsRequest {
             query: Some(EventQuery {
                 query: Some(event_query::Query::Id(StringQuery {
                     operator: Some(string_query::Operator::Equals(id.read().clone())),
@@ -28,11 +28,37 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             }),
         })
         .await
-        .map(|r| ProtoWrapper(r))
+        .map_err(Error::ServerFunctionError)?;
+
+        let event = events_response.events.pop().ok_or(Error::NotFound)?;
+
+        let mut organizations_response = query_organizations(QueryOrganizationsRequest {
+            query: Some(OrganizationQuery {
+                query: Some(organization_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(
+                        event.organization_id.clone(),
+                    )),
+                })),
+            }),
+        })
+        .await
+        .map_err(Error::ServerFunctionError)?;
+
+        let organization = organizations_response
+            .organizations
+            .pop()
+            .ok_or(Error::Misc("organization not found".to_owned()))?;
+
+        Ok((ProtoWrapper(organization), ProtoWrapper(event)))
     })?;
 
-    let ProtoWrapper(mut events_response) = match events_response() {
-        Some(Ok(res)) => res,
+    let (organization, event) = match results() {
+        None => return rsx! {},
+        Some(Ok((ProtoWrapper(organization), ProtoWrapper(event)))) => (organization, event),
+        Some(Err(Error::NotFound)) => {
+            nav.push(Routes::NotFound);
+            return rsx! {};
+        }
         Some(Err(e)) => {
             return rsx! {
                 WithToasts{
@@ -40,45 +66,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                 }
             };
         }
-        None => return rsx! {},
     };
-
-    if events_response.events.is_empty() {
-        nav.push(Routes::NotFound);
-        return rsx! {};
-    }
-
-    let event = events_response.events.remove(0);
-    let organization_id = event.organization_id.clone();
-
-    let organizations_response = use_server_future(move || {
-        let organization_id = organization_id.clone();
-        async move {
-            query_organizations(QueryOrganizationsRequest {
-                query: Some(OrganizationQuery {
-                    query: Some(organization_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(organization_id)),
-                    })),
-                }),
-            })
-            .await
-            .map(|r| ProtoWrapper(r))
-        }
-    })?;
-
-    let ProtoWrapper(mut organizations_response) = match organizations_response() {
-        Some(Ok(res)) => res,
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
-                }
-            };
-        }
-        None => return rsx! {},
-    };
-
-    let organization = organizations_response.organizations.remove(0);
 
     rsx! {
         WithToasts{
@@ -162,11 +150,14 @@ pub fn Menu(
 }
 
 #[component]
-fn ServerRenderedPage(org: Organization, event: proto::Event) -> Element {
+fn ServerRenderedPage(
+    org: ReadOnlySignal<Organization>,
+    event: ReadOnlySignal<proto::Event>,
+) -> Element {
     let menu = rsx! {
         Menu {
-            event_name: event.name.clone(),
-            event_id: event.id,
+            event_name: event().name.clone(),
+            event_id: event().id,
             highlight: MenuItem::EventHome,
         }
     };
@@ -176,8 +167,8 @@ fn ServerRenderedPage(org: Organization, event: proto::Event) -> Element {
             title: "Event Home".to_string(),
             breadcrumb: vec![
                 ("Home".to_owned(), Some(Routes::LandingPage)),
-                (org.name.clone(), Some(Routes::OrganizationPage { org_id: org.id.clone() })),
-                (event.name.clone(), None),
+                (org().name.clone(), Some(Routes::OrganizationPage { org_id: org().id.clone() })),
+                (event().name.clone(), None),
             ],
             menu: menu,
             div {

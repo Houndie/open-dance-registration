@@ -6,7 +6,7 @@ use crate::{
         ProtoWrapper,
     },
     view::{
-        app::Routes,
+        app::{Error, Routes},
         components::{
             form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
             menu::Menu as GenericMenu,
@@ -28,81 +28,77 @@ use dioxus::prelude::*;
 pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
 
-    let organizations_response = use_server_future(move || async move {
-        query_organizations(QueryOrganizationsRequest {
+    let results = use_server_future(move || async move {
+        let organizations_future = query_organizations(QueryOrganizationsRequest {
             query: Some(OrganizationQuery {
                 query: Some(organization_query::Query::Id(StringQuery {
                     operator: Some(string_query::Operator::Equals(org_id())),
                 })),
             }),
-        })
-        .await
-        .map(|r| ProtoWrapper(r))
-    })?;
+        });
 
-    let events_response = use_server_future(move || async move {
-        query_events(QueryEventsRequest {
+        let events_future = query_events(QueryEventsRequest {
             query: Some(EventQuery {
                 query: Some(event_query::Query::OrganizationId(StringQuery {
                     operator: Some(string_query::Operator::Equals(org_id())),
                 })),
             }),
-        })
-        .await
-        .map(|r| ProtoWrapper(r))
+        });
+
+        let mut organizations_response = organizations_future
+            .await
+            .map_err(Error::ServerFunctionError)?;
+        let organization = organizations_response
+            .organizations
+            .pop()
+            .ok_or(Error::NotFound)?;
+
+        let events_response = events_future.await.map_err(Error::ServerFunctionError)?;
+
+        Ok((ProtoWrapper(organization), ProtoWrapper(events_response)))
     })?;
 
-    let (ProtoWrapper(mut organizations_response), ProtoWrapper(events_response)) =
-        match (organizations_response(), events_response()) {
-            (None, _) | (_, None) => return rsx! {},
-            (Some(or), Some(er)) => {
-                let mut errors = Vec::new();
-                if let Err(ref e) = or {
-                    errors.push(e.to_string());
-                };
-                if let Err(ref e) = er {
-                    errors.push(e.to_string());
-                };
-
-                if !errors.is_empty() {
-                    return rsx! {
-                        WithToasts {
-                            initial_errors: errors,
-                        }
-                    };
-                };
-
-                (or.unwrap(), er.unwrap())
-            }
-        };
-
-    if organizations_response.organizations.is_empty() {
-        nav.push(Routes::NotFound);
-        return rsx! {};
-    }
-
-    let org = organizations_response.organizations.remove(0);
+    let (organization, events) = match results() {
+        None => return rsx! {},
+        Some(Ok((ProtoWrapper(organization), ProtoWrapper(events_response)))) => {
+            (organization, events_response.events)
+        }
+        Some(Err(Error::NotFound)) => {
+            nav.push(Routes::NotFound);
+            return rsx! {};
+        }
+        Some(Err(e)) => {
+            return rsx! {
+                WithToasts{
+                    initial_errors: vec![e.to_string()],
+                }
+            };
+        }
+    };
 
     rsx! {
         WithToasts{
             ServerRenderedPage {
-                org: org,
-                events: events_response.events,
+                org: organization,
+                events: events,
             }
         }
     }
 }
 
 #[component]
-fn ServerRenderedPage(org: Organization, events: Vec<Event>) -> Element {
-    let mut events = use_signal(move || events);
+fn ServerRenderedPage(
+    org: ReadOnlySignal<Organization>,
+    events: ReadOnlySignal<Vec<Event>>,
+) -> Element {
+    let mut events = use_signal(move || events());
     let mut show_event_modal = use_signal(|| false);
     let nav = use_navigator();
 
     let menu = rsx! {
         Menu {
-            org_name: org.name.clone(),
-            org_id: org.id.clone(),
+            org_name: org().name.clone(),
+            org_id: org().id.clone(),
             highlight: MenuItem::OrganizationHome,
         }
     };
@@ -110,7 +106,7 @@ fn ServerRenderedPage(org: Organization, events: Vec<Event>) -> Element {
     let event_modal = if *show_event_modal.read() {
         rsx! {
             EventModal {
-                org_id: org.id,
+                org_id: org().id,
                 onsubmit: move |event| {
                     show_event_modal.set(false);
                     events.write().push(event);
@@ -174,10 +170,10 @@ fn ServerRenderedPage(org: Organization, events: Vec<Event>) -> Element {
 
     rsx! {
         GenericPage {
-            title: org.name.clone(),
+            title: org().name.clone(),
             breadcrumb: vec![
                 ("Home".to_owned(), Some(Routes::LandingPage)),
-                (org.name, None),
+                (org().name, None),
             ],
             menu: menu,
             { page_body }

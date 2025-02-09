@@ -46,16 +46,14 @@ pub fn Page() -> Element {
     };
 
     rsx! {
-        WithToasts{
-            GenericPage {
-                title: "My Organizations".to_owned(),
-                breadcrumb: vec![
-                    ("Home".to_owned(), None)
-                ],
-                menu: menu,
-                PageBody{
-                    orgs: res.organizations,
-                }
+        GenericPage {
+            title: "My Organizations".to_owned(),
+            breadcrumb: vec![
+                ("Home".to_owned(), None)
+            ],
+            menu: menu,
+            PageBody{
+                orgs: res.organizations,
             }
         }
     }

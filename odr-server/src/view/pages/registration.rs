@@ -162,28 +162,26 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     };
 
     rsx! {
-        WithToasts {
-            GenericPage {
-                title: "View Registrations".to_owned(),
-                breadcrumb: vec![
-                    ("Home".to_owned(), Some(Routes::LandingPage)),
-                    (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                    (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
-                    ("Registrations".to_owned(), None),
-                ],
-                menu: rsx!{
-                    Menu {
-                        event_name: event.name.clone(),
-                        event_id: event.id.clone(),
-                        highlight: MenuItem::Registrations,
-                    }
-                },
-                PageBody{
-                    org: organization,
-                    event: event,
-                    schema: schema,
-                    registrations: registrations,
+        GenericPage {
+            title: "View Registrations".to_owned(),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::LandingPage)),
+                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                ("Registrations".to_owned(), None),
+            ],
+            menu: rsx!{
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id.clone(),
+                    highlight: MenuItem::Registrations,
                 }
+            },
+            PageBody{
+                org: organization,
+                event: event,
+                schema: schema,
+                registrations: registrations,
             }
         }
     }

@@ -142,29 +142,27 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     });
 
     rsx! {
-        WithToasts {
-            GenericPage {
-                title: "Modify Registration Schema".to_owned(),
-                style: Into::<ReadOnlySignal<String>>::into(cursor),
-                breadcrumb: vec![
-                    ("Home".to_owned(), Some(Routes::LandingPage)),
-                    (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                    (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
-                    ("Registration Schema".to_owned(), None),
-                ],
-                menu: rsx!{
-                    Menu {
-                        event_name: event.name.clone(),
-                        event_id: event.id.clone(),
-                        highlight: MenuItem::RegistrationSchema,
-                    }
-                },
-                PageBody{
-                    org: organization,
-                    event: event,
-                    registration_schema_items: schema.items,
-                    grabbing_cursor: grabbing_cursor,
+        GenericPage {
+            title: "Modify Registration Schema".to_owned(),
+            style: Into::<ReadOnlySignal<String>>::into(cursor),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::LandingPage)),
+                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                ("Registration Schema".to_owned(), None),
+            ],
+            menu: rsx!{
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id.clone(),
+                    highlight: MenuItem::RegistrationSchema,
                 }
+            },
+            PageBody{
+                org: organization,
+                event: event,
+                registration_schema_items: schema.items,
+                grabbing_cursor: grabbing_cursor,
             }
         }
     }

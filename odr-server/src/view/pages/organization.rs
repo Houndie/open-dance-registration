@@ -85,18 +85,16 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     };
 
     rsx! {
-        WithToasts{
-            GenericPage {
-                title: organization.name.clone(),
-                breadcrumb: vec![
-                    ("Home".to_owned(), Some(Routes::LandingPage)),
-                    (organization.name.clone(), None),
-                ],
-                menu: menu,
-                PageBody {
-                    org: organization,
-                    events: events,
-                }
+        GenericPage {
+            title: organization.name.clone(),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::LandingPage)),
+                (organization.name.clone(), None),
+            ],
+            menu: menu,
+            PageBody {
+                org: organization,
+                events: events,
             }
         }
     }

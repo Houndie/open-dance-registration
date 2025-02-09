@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 
-use crate::view::{app::Routes, components::breadcrumb::Breadcrumb};
+use crate::view::{
+    app::Routes,
+    components::{breadcrumb::Breadcrumb, with_toasts::WithToasts},
+};
 
 #[component]
 pub fn Page(
@@ -30,27 +33,29 @@ pub fn Page(
     });
 
     rsx! {
-        div {
-            style: "{style}",
-            { menu }
+        WithToasts{
             div {
-                style: "display: inline-block; padding: 20px; width: calc(100% - 400px);",
+                style: "{style}",
+                { menu }
                 div {
-                    class: "columns",
+                    style: "display: inline-block; padding: 20px; width: calc(100% - 400px);",
                     div {
-                        class: "column",
-                        h1 {
-                            class: "title is-1",
-                            "{title}"
+                        class: "columns",
+                        div {
+                            class: "column",
+                            h1 {
+                                class: "title is-1",
+                                "{title}"
+                            }
+                        }
+                        div {
+                            class: "column is-one-third has-text-right",
+                            //LoginMenu {}
                         }
                     }
-                    div {
-                        class: "column is-one-third has-text-right",
-                        //LoginMenu {}
-                    }
+                    { breadcrumb }
+                    { children }
                 }
-                { breadcrumb }
-                { children }
             }
         }
     }

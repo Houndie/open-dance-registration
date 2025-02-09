@@ -131,19 +131,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         },
     };
 
-    rsx!{
-        WithToasts {
-            ServerRenderedPage{
-                org: organization,
-                event: event,
-                registration_schema_items: schema.items,
-            }
-        }
-    }
-}
-
-#[component]
-fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>, registration_schema_items: ReadOnlySignal<Vec<RegistrationSchemaItem>>) -> Element {
     let grabbing_cursor = use_signal(|| false);
     let cursor = use_memo(move || {
         if *grabbing_cursor.read() {
@@ -154,6 +141,37 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
         .to_owned()
     });
 
+    rsx! {
+        WithToasts {
+            GenericPage {
+                title: "Modify Registration Schema".to_owned(),
+                style: Into::<ReadOnlySignal<String>>::into(cursor),
+                breadcrumb: vec![
+                    ("Home".to_owned(), Some(Routes::LandingPage)),
+                    (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                    (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                    ("Registration Schema".to_owned(), None),
+                ],
+                menu: rsx!{
+                    Menu {
+                        event_name: event.name.clone(),
+                        event_id: event.id.clone(),
+                        highlight: MenuItem::RegistrationSchema,
+                    }
+                },
+                PageBody{
+                    org: organization,
+                    event: event,
+                    registration_schema_items: schema.items,
+                    grabbing_cursor: grabbing_cursor,
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PageBody(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>, registration_schema_items: ReadOnlySignal<Vec<RegistrationSchemaItem>>, grabbing_cursor: Signal<bool>) -> Element {
     let mut toaster = use_toasts();
 
     let mut show_schema_item_modal = use_signal(|| None);
@@ -270,7 +288,7 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
         })
     };
 
-    let page_body = rsx! {
+    rsx! {
         Table {
             is_striped: true,
             is_fullwidth: true,
@@ -369,29 +387,7 @@ fn ServerRenderedPage(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<p
         { drag_line }
         { schema_item_modal }
         { delete_item_modal }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "Modify Registration Schema".to_owned(),
-            style: Into::<ReadOnlySignal<String>>::into(cursor),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (org().name.clone(), Some(Routes::OrganizationPage { org_id: org().id.clone() })),
-                (event().name.clone(), Some(Routes::EventPage{ id: event().id.clone() })),
-                ("Registration Schema".to_owned(), None),
-            ],
-            menu: rsx!{
-                Menu {
-                    event_name: event().name.clone(),
-                    event_id: event().id.clone(),
-                    highlight: MenuItem::RegistrationSchema,
-                }
-            },
-            { page_body }
-        }
     }
-
 }
 
 #[derive(EnumIter, PartialEq, strum::Display)]

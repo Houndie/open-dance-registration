@@ -39,17 +39,30 @@ pub fn Page() -> Element {
         None => return rsx! {},
     };
 
+    let menu = rsx! {
+        Menu {
+            highlight: MenuItem::Home,
+        }
+    };
+
     rsx! {
         WithToasts{
-            ServerRenderedPage {
-                orgs: res.organizations,
+            GenericPage {
+                title: "My Organizations".to_owned(),
+                breadcrumb: vec![
+                    ("Home".to_owned(), None)
+                ],
+                menu: menu,
+                PageBody{
+                    orgs: res.organizations,
+                }
             }
         }
     }
 }
 
 #[component]
-fn ServerRenderedPage(orgs: Vec<Organization>) -> Element {
+fn PageBody(orgs: Vec<Organization>) -> Element {
     let nav = use_navigator();
 
     let mut orgs = use_signal(|| orgs);
@@ -69,13 +82,7 @@ fn ServerRenderedPage(orgs: Vec<Organization>) -> Element {
         rsx! {}
     };
 
-    let menu = rsx! {
-        Menu {
-            highlight: MenuItem::Home,
-        }
-    };
-
-    let page_body = rsx! {
+    rsx! {
         Table {
             is_striped: true,
             is_fullwidth: true,
@@ -123,17 +130,6 @@ fn ServerRenderedPage(orgs: Vec<Organization>) -> Element {
             "Create New Organization"
         }
         { org_modal }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "My Organizations".to_owned(),
-            breadcrumb: vec![
-                ("Home".to_owned(), None)
-            ],
-            menu: menu,
-            { page_body }
-        }
     }
 }
 

@@ -1,6 +1,6 @@
 use common::proto::{
-    self, event_query, organization_query, string_query, EventQuery, Organization,
-    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
+    event_query, organization_query, string_query, EventQuery, OrganizationQuery,
+    QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
 };
 use dioxus::prelude::*;
 
@@ -68,11 +68,24 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         }
     };
 
+    let menu = rsx! {
+        Menu {
+            event_name: event.name.clone(),
+            event_id: event.id,
+            highlight: MenuItem::EventHome,
+        }
+    };
+
     rsx! {
-        WithToasts{
-            ServerRenderedPage {
-                org: organization,
-                event: event,
+        GenericPage {
+            title: "Event Home".to_string(),
+            breadcrumb: vec![
+                ("Home".to_owned(), Some(Routes::LandingPage)),
+                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                (event.name.clone(), None),
+            ],
+            menu: menu,
+            div {
             }
         }
     }
@@ -144,34 +157,6 @@ pub fn Menu(
                         "Registration Schema"
                     }
                 }
-            }
-        }
-    }
-}
-
-#[component]
-fn ServerRenderedPage(
-    org: ReadOnlySignal<Organization>,
-    event: ReadOnlySignal<proto::Event>,
-) -> Element {
-    let menu = rsx! {
-        Menu {
-            event_name: event().name.clone(),
-            event_id: event().id,
-            highlight: MenuItem::EventHome,
-        }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "Event Home".to_string(),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (org().name.clone(), Some(Routes::OrganizationPage { org_id: org().id.clone() })),
-                (event().name.clone(), None),
-            ],
-            menu: menu,
-            div {
             }
         }
     }

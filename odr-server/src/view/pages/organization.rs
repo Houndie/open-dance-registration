@@ -76,32 +76,37 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
         }
     };
 
+    let menu = rsx! {
+        Menu {
+            org_name: organization.name.clone(),
+            org_id: organization.id.clone(),
+            highlight: MenuItem::OrganizationHome,
+        }
+    };
+
     rsx! {
         WithToasts{
-            ServerRenderedPage {
-                org: organization,
-                events: events,
+            GenericPage {
+                title: organization.name.clone(),
+                breadcrumb: vec![
+                    ("Home".to_owned(), Some(Routes::LandingPage)),
+                    (organization.name.clone(), None),
+                ],
+                menu: menu,
+                PageBody {
+                    org: organization,
+                    events: events,
+                }
             }
         }
     }
 }
 
 #[component]
-fn ServerRenderedPage(
-    org: ReadOnlySignal<Organization>,
-    events: ReadOnlySignal<Vec<Event>>,
-) -> Element {
+fn PageBody(org: ReadOnlySignal<Organization>, events: ReadOnlySignal<Vec<Event>>) -> Element {
     let mut events = use_signal(move || events());
     let mut show_event_modal = use_signal(|| false);
     let nav = use_navigator();
-
-    let menu = rsx! {
-        Menu {
-            org_name: org().name.clone(),
-            org_id: org().id.clone(),
-            highlight: MenuItem::OrganizationHome,
-        }
-    };
 
     let event_modal = if *show_event_modal.read() {
         rsx! {
@@ -118,7 +123,7 @@ fn ServerRenderedPage(
         rsx! {}
     };
 
-    let page_body = rsx! {
+    rsx! {
         Table {
             is_striped: true,
             is_fullwidth: true,
@@ -166,18 +171,6 @@ fn ServerRenderedPage(
             "Create New Event"
         }
         { event_modal }
-    };
-
-    rsx! {
-        GenericPage {
-            title: org().name.clone(),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (org().name, None),
-            ],
-            menu: menu,
-            { page_body }
-        }
     }
 }
 

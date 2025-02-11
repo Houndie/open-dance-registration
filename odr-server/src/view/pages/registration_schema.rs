@@ -1,9 +1,13 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    rc::Rc,
-};
 use crate::{
+    hooks::toasts::{use_toasts, ToastManager},
+    server_functions::{
+        authentication::claims, event::query as query_events,
+        organization::query as query_organizations,
+        registration_schema::query as query_registration_schemas,
+        registration_schema::upsert as upsert_registration_schema, ProtoWrapper,
+    },
     view::{
+        app::{Error, Routes},
         components::{
             form::{
                 Button, ButtonFlavor, CheckInput, CheckStyle, Field, SelectInput, TextInput,
@@ -15,17 +19,24 @@ use crate::{
             with_toasts::WithToasts,
         },
         pages::event::{Menu, MenuItem},
-        app::{Routes, Error},
     },
-    hooks::toasts::{use_toasts, ToastManager},
-    server_functions::{ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema, authentication::claims},
 };
 use common::proto::{
-    self, event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest, ClaimsRequest
+    self, event_query, multi_select_type, organization_query,
+    registration_schema_item_type::Type as ItemType, registration_schema_query, select_type,
+    string_query, text_type, CheckboxType, ClaimsRequest, EventQuery, MultiSelectType,
+    Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
+    QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem,
+    RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery,
+    TextType, UpsertRegistrationSchemasRequest,
 };
 use dioxus::prelude::*;
 use futures::join;
-use strum::{IntoEnumIterator, EnumIter};
+use std::{
+    collections::{BTreeSet, HashMap},
+    rc::Rc,
+};
+use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 fn default_registration_schema_item() -> RegistrationSchemaItem {
@@ -73,7 +84,7 @@ struct LineLocation {
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let results = use_server_future(move || async move{
+    let results = use_server_future(move || async move {
         let claims_future = claims(ClaimsRequest {});
 
         let events_future = query_events(QueryEventsRequest {
@@ -104,36 +115,57 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         let organizations_future = query_organizations(QueryOrganizationsRequest {
             query: Some(OrganizationQuery {
                 query: Some(organization_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(event.organization_id.clone())),
+                    operator: Some(string_query::Operator::Equals(
+                        event.organization_id.clone(),
+                    )),
                 })),
             }),
         });
 
         let mut schemas_response = schemas_future.await.map_err(Error::from_server_fn_error)?;
-        let schema = schemas_response.registration_schemas.pop().unwrap_or_else(|| {
-            RegistrationSchema{ event_id: id(), ..Default::default() }
-        });
+        let schema = schemas_response
+            .registration_schemas
+            .pop()
+            .unwrap_or_else(|| RegistrationSchema {
+                event_id: id(),
+                ..Default::default()
+            });
 
-        let mut organizations_response = organizations_future.await.map_err(Error::from_server_fn_error)?;
-        let organization = organizations_response.organizations.pop().ok_or(Error::Misc("organization not found".to_owned()))?;
+        let mut organizations_response = organizations_future
+            .await
+            .map_err(Error::from_server_fn_error)?;
+        let organization = organizations_response
+            .organizations
+            .pop()
+            .ok_or(Error::Misc("organization not found".to_owned()))?;
 
-        Ok((ProtoWrapper(claims), ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))
+        Ok((
+            ProtoWrapper(claims),
+            ProtoWrapper(event),
+            ProtoWrapper(schema),
+            ProtoWrapper(organization),
+        ))
     })?;
 
     let (claims, event, schema, organization) = match results() {
         None => return rsx! {},
-        Some(Ok((ProtoWrapper(claims), ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))) => (claims, event, schema, organization),
+        Some(Ok((
+            ProtoWrapper(claims),
+            ProtoWrapper(event),
+            ProtoWrapper(schema),
+            ProtoWrapper(organization),
+        ))) => (claims, event, schema, organization),
         Some(Err(Error::NotFound)) => {
             nav.push(Routes::NotFound);
             return rsx! {};
-        },
+        }
         Some(Err(e)) => {
             return rsx! {
                 WithToasts{
                     initial_errors: vec![e.to_string()],
                 }
             };
-        },
+        }
     };
 
     let grabbing_cursor = use_signal(|| false);
@@ -175,7 +207,12 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
 }
 
 #[component]
-fn PageBody(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Event>, registration_schema_items: ReadOnlySignal<Vec<RegistrationSchemaItem>>, grabbing_cursor: Signal<bool>) -> Element {
+fn PageBody(
+    org: ReadOnlySignal<Organization>,
+    event: ReadOnlySignal<proto::Event>,
+    registration_schema_items: ReadOnlySignal<Vec<RegistrationSchemaItem>>,
+    grabbing_cursor: Signal<bool>,
+) -> Element {
     let mut toaster = use_toasts();
 
     let mut show_schema_item_modal = use_signal(|| None);
@@ -193,11 +230,12 @@ fn PageBody(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Even
     });
 
     let mut schema: Signal<Schema> = use_signal(move || {
-        registration_schema_items.with(|schema| {
-            Schema {
-                items: schema.iter().map(|item| (Uuid::new_v4(), item.clone())).collect(),
-                event_id: event().id.clone(),
-            }
+        registration_schema_items.with(|schema| Schema {
+            items: schema
+                .iter()
+                .map(|item| (Uuid::new_v4(), item.clone()))
+                .collect(),
+            event_id: event().id.clone(),
         })
     });
 
@@ -253,7 +291,7 @@ fn PageBody(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Even
                     },
                     onclose: move |_| show_schema_item_modal.set(None),
                 }
-            } 
+            }
         })
     };
 
@@ -279,7 +317,6 @@ fn PageBody(org: ReadOnlySignal<Organization>, event: ReadOnlySignal<proto::Even
                                     toaster.write().new_error(e.to_string());
                                 }
                             }
-                       
                         });
 
                         schema.write().items.remove(idx);
@@ -489,7 +526,13 @@ fn SchemaItemModal(
     let multi_select_display_selects = use_memo(enum_selects::<MultiSelectDisplayType>);
     let drag_data = use_signal(|| None);
     let mut field_refs = use_signal(HashMap::default);
-    let success_text = use_memo(move || if initial().id.is_empty() { "Create" } else { "Update" });
+    let success_text = use_memo(move || {
+        if initial().id.is_empty() {
+            "Create"
+        } else {
+            "Update"
+        }
+    });
 
     let mut fields = use_signal(|| {
         let item = initial().clone();
@@ -582,7 +625,7 @@ fn SchemaItemModal(
     });
 
     let validation_error = fields.read().validation_error.as_ref().map(|err| {
-        rsx!{
+        rsx! {
             p {
                 class: "help is-danger",
                 "{err}"

@@ -3,5 +3,6 @@ pub mod landing;
 pub mod login;
 pub mod not_found;
 pub mod organization;
+pub mod profile;
 pub mod registration;
 pub mod registration_schema;

@@ -5,7 +5,7 @@ use crate::{
     view::pages::{
         event::Page as EventPage, landing::Page as LandingPage, login::Page as LoginPage,
         not_found::Page as NotFound, organization::Page as OrganizationPage,
-        registration::Page as RegistrationPage,
+        profile::Page as ProfilePage, registration::Page as RegistrationPage,
         registration_schema::Page as RegistrationSchemaPage,
     },
 };
@@ -61,8 +61,9 @@ pub enum Routes {
     #[route("/login")]
     LoginPage,
 
-    /*#[route("/profile")]
-    ProfilePage,*/
+    #[route("/profile")]
+    ProfilePage,
+
     #[route("/404")]
     NotFound,
 }

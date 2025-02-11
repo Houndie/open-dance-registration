@@ -113,7 +113,7 @@ fn UserMenu(claims: ReadOnlySignal<Claims>) -> Element {
                                     a {
                                         onclick: move |e| {
                                             e.prevent_default();
-                                            nav.push(Routes::LandingPage);
+                                            nav.push(Routes::ProfilePage);
                                         },
                                         "My Profile"
                                     }

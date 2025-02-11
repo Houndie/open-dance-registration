@@ -51,24 +51,21 @@ mod server_only {
             .upsert(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(
         request: QueryOrganizationsRequest,
     ) -> Result<QueryOrganizationsResponse, Error> {
-        println!("in org");
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
-        let x = service
+        service
             .query(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()));
-        println!("out org");
-        x
+            .map_err(Error::GrpcError)
     }
 }
 
@@ -92,7 +89,7 @@ mod web_only {
             .upsert_organizations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(
@@ -104,7 +101,7 @@ mod web_only {
             .query_organizations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 }
 

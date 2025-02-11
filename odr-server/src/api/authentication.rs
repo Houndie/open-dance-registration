@@ -216,7 +216,8 @@ impl<KStore: KeyStore, UStore: UserStore>
             ))
             .secure(true)
             .http_only(true)
-            .same_site(SameSite::Strict);
+            .same_site(SameSite::Strict)
+            .path("/");
 
         let mut response = Response::new(LoginResponse {
             claims: Some(access_claims.into()),
@@ -280,6 +281,7 @@ fn delete_cookie() -> CookieBuilder<'static> {
         .secure(true)
         .http_only(true)
         .same_site(SameSite::Strict)
+        .path("/")
 }
 
 #[derive(thiserror::Error, Debug)]

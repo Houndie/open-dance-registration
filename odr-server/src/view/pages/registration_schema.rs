@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeSet, HashMap},
     rc::Rc,
 };
-
 use crate::{
     view::{
         components::{
@@ -19,10 +18,10 @@ use crate::{
         app::{Routes, Error},
     },
     hooks::toasts::{use_toasts, ToastManager},
-    server_functions::{ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema},
+    server_functions::{ProtoWrapper, event::query as query_events, organization::query as query_organizations, registration_schema::query as query_registration_schemas, registration_schema::upsert as upsert_registration_schema, authentication::claims},
 };
 use common::proto::{
-    self, event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest
+    self, event_query, multi_select_type, organization_query, registration_schema_item_type::Type as ItemType, registration_schema_query, select_type, string_query, text_type, CheckboxType, EventQuery, MultiSelectType, Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery, TextType, UpsertRegistrationSchemasRequest, ClaimsRequest
 };
 use dioxus::prelude::*;
 use futures::join;
@@ -74,50 +73,56 @@ struct LineLocation {
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
-    let results = use_server_future(move || {
-        async move{
-            let events_future = query_events(QueryEventsRequest {
-                query: Some(EventQuery {
-                    query: Some(event_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(id())),
-                    })),
-                }),
-            });
+    let results = use_server_future(move || async move{
+        let claims_future = claims(ClaimsRequest {});
 
-            let schemas_future = query_registration_schemas(QueryRegistrationSchemasRequest {
-                query: Some(RegistrationSchemaQuery {
-                    query: Some(registration_schema_query::Query::EventId(StringQuery {
-                        operator: Some(string_query::Operator::Equals(id())),
-                    })),
-                }),
-            });
+        let events_future = query_events(QueryEventsRequest {
+            query: Some(EventQuery {
+                query: Some(event_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(id())),
+                })),
+            }),
+        });
 
-            let mut events_response = events_future.await.map_err(Error::ServerFunctionError)?;
-            let event = events_response.events.pop().ok_or(Error::NotFound)?;
+        let schemas_future = query_registration_schemas(QueryRegistrationSchemasRequest {
+            query: Some(RegistrationSchemaQuery {
+                query: Some(registration_schema_query::Query::EventId(StringQuery {
+                    operator: Some(string_query::Operator::Equals(id())),
+                })),
+            }),
+        });
 
-            let organizations_future = query_organizations(QueryOrganizationsRequest {
-                query: Some(OrganizationQuery {
-                    query: Some(organization_query::Query::Id(StringQuery {
-                        operator: Some(string_query::Operator::Equals(event.organization_id.clone())),
-                    })),
-                }),
-            });
+        let claims = claims_future
+            .await
+            .map_err(Error::from_server_fn_error)?
+            .claims
+            .ok_or(Error::Unauthenticated)?;
 
-            let mut schemas_response = schemas_future.await.map_err(Error::ServerFunctionError)?;
-            let schema = schemas_response.registration_schemas.pop().unwrap_or_else(|| {
-                RegistrationSchema{ event_id: id(), ..Default::default() }
-            });
+        let mut events_response = events_future.await.map_err(Error::from_server_fn_error)?;
+        let event = events_response.events.pop().ok_or(Error::NotFound)?;
 
-            let mut organizations_response = organizations_future.await.map_err(Error::ServerFunctionError)?;
-            let organization = organizations_response.organizations.pop().ok_or(Error::Misc("organization not found".to_owned()))?;
+        let organizations_future = query_organizations(QueryOrganizationsRequest {
+            query: Some(OrganizationQuery {
+                query: Some(organization_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(event.organization_id.clone())),
+                })),
+            }),
+        });
 
-            Ok((ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))
-        }
+        let mut schemas_response = schemas_future.await.map_err(Error::from_server_fn_error)?;
+        let schema = schemas_response.registration_schemas.pop().unwrap_or_else(|| {
+            RegistrationSchema{ event_id: id(), ..Default::default() }
+        });
+
+        let mut organizations_response = organizations_future.await.map_err(Error::from_server_fn_error)?;
+        let organization = organizations_response.organizations.pop().ok_or(Error::Misc("organization not found".to_owned()))?;
+
+        Ok((ProtoWrapper(claims), ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))
     })?;
 
-    let (event, schema, organization) = match results() {
+    let (claims, event, schema, organization) = match results() {
         None => return rsx! {},
-        Some(Ok((ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))) => (event, schema, organization),
+        Some(Ok((ProtoWrapper(claims), ProtoWrapper(event), ProtoWrapper(schema), ProtoWrapper(organization)))) => (claims, event, schema, organization),
         Some(Err(Error::NotFound)) => {
             nav.push(Routes::NotFound);
             return rsx! {};
@@ -158,6 +163,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                     highlight: MenuItem::RegistrationSchema,
                 }
             },
+            claims: claims,
             PageBody{
                 org: organization,
                 event: event,

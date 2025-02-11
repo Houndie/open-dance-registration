@@ -1,6 +1,7 @@
 use crate::{
     hooks::toasts::use_toasts,
     server_functions::{
+        authentication::claims,
         event::{query as query_events, upsert as upsert_events},
         organization::query as query_organizations,
         ProtoWrapper,
@@ -18,7 +19,7 @@ use crate::{
     },
 };
 use common::proto::{
-    event_query, organization_query, string_query, Event, EventQuery, Organization,
+    event_query, organization_query, string_query, ClaimsRequest, Event, EventQuery, Organization,
     OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
     UpsertEventsRequest,
 };
@@ -29,6 +30,8 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
 
     let results = use_server_future(move || async move {
+        let claims_future = claims(ClaimsRequest {});
+
         let organizations_future = query_organizations(QueryOrganizationsRequest {
             query: Some(OrganizationQuery {
                 query: Some(organization_query::Query::Id(StringQuery {
@@ -45,24 +48,36 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
+        let claims = claims_future
+            .await
+            .map_err(Error::from_server_fn_error)?
+            .claims
+            .ok_or(Error::Unauthenticated)?;
+
         let mut organizations_response = organizations_future
             .await
-            .map_err(Error::ServerFunctionError)?;
+            .map_err(Error::from_server_fn_error)?;
         let organization = organizations_response
             .organizations
             .pop()
             .ok_or(Error::NotFound)?;
 
-        let events_response = events_future.await.map_err(Error::ServerFunctionError)?;
+        let events_response = events_future.await.map_err(Error::from_server_fn_error)?;
 
-        Ok((ProtoWrapper(organization), ProtoWrapper(events_response)))
+        Ok((
+            ProtoWrapper(claims),
+            ProtoWrapper(organization),
+            ProtoWrapper(events_response),
+        ))
     })?;
 
-    let (organization, events) = match results() {
+    let (claims, organization, events) = match results() {
         None => return rsx! {},
-        Some(Ok((ProtoWrapper(organization), ProtoWrapper(events_response)))) => {
-            (organization, events_response.events)
-        }
+        Some(Ok((
+            ProtoWrapper(claims),
+            ProtoWrapper(organization),
+            ProtoWrapper(events_response),
+        ))) => (claims, organization, events_response.events),
         Some(Err(Error::NotFound)) => {
             nav.push(Routes::NotFound);
             return rsx! {};
@@ -92,6 +107,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                 (organization.name.clone(), None),
             ],
             menu: menu,
+            claims: claims,
             PageBody {
                 org: organization,
                 events: events,

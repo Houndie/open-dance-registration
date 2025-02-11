@@ -51,7 +51,7 @@ mod server_only {
             .upsert(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(
@@ -66,7 +66,7 @@ mod server_only {
             .query(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 }
 
@@ -90,7 +90,7 @@ mod web_only {
             .upsert_registrations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(
@@ -102,7 +102,7 @@ mod web_only {
             .query_registrations(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 }
 

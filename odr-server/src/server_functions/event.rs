@@ -49,7 +49,7 @@ mod server_only {
             .upsert(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(request: QueryEventsRequest) -> Result<QueryEventsResponse, Error> {
@@ -63,7 +63,7 @@ mod server_only {
             .query(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()));
+            .map_err(Error::GrpcError);
         println!("out event");
         x
     }
@@ -87,7 +87,7 @@ mod web_only {
             .upsert_events(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 
     pub async fn query(request: QueryEventsRequest) -> Result<QueryEventsResponse, Error> {
@@ -97,7 +97,7 @@ mod web_only {
             .query_events(tonic::Request::new(request))
             .await
             .map(|r| r.into_inner())
-            .map_err(|e| Error::GrpcError(e.to_string()))
+            .map_err(Error::GrpcError)
     }
 }
 

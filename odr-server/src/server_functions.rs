@@ -1,3 +1,4 @@
+pub mod authentication;
 pub mod event;
 pub mod organization;
 pub mod registration;
@@ -42,11 +43,11 @@ fn wasm_client() -> tonic_web_wasm_client::Client {
     )
 }
 
-#[derive(thiserror::Error, Clone, Debug, Deserialize, Serialize)]
+#[derive(thiserror::Error, Clone, Debug)]
 pub enum Error {
     #[error("service not found in server context")]
     ServiceNotInContext,
 
     #[error("error calling grpc function: {0}")]
-    GrpcError(String),
+    GrpcError(tonic::Status),
 }

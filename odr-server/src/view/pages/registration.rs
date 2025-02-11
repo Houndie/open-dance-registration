@@ -1,10 +1,9 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
-
 use crate::{
     hooks::toasts::use_toasts,
     server_functions::{
-        event::query as query_events, organization::query as query_organizations,
-        registration::query as query_registrations, registration::upsert as upsert_registrations,
+        authentication::claims, event::query as query_events,
+        organization::query as query_organizations, registration::query as query_registrations,
+        registration::upsert as upsert_registrations,
         registration_schema::query as query_registration_schemas, ProtoWrapper,
     },
     view::{
@@ -24,12 +23,14 @@ use crate::{
 };
 use common::proto::{
     self, event_query, organization_query, registration_query, registration_schema_item_type,
-    registration_schema_query, string_query, EventQuery, Organization, OrganizationQuery,
-    QueryEventsRequest, QueryOrganizationsRequest, QueryRegistrationSchemasRequest,
-    QueryRegistrationsRequest, Registration, RegistrationItem, RegistrationQuery,
-    RegistrationSchema, RegistrationSchemaQuery, StringQuery, UpsertRegistrationsRequest,
+    registration_schema_query, string_query, ClaimsRequest, EventQuery, Organization,
+    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
+    QueryRegistrationSchemasRequest, QueryRegistrationsRequest, Registration, RegistrationItem,
+    RegistrationQuery, RegistrationSchema, RegistrationSchemaQuery, StringQuery,
+    UpsertRegistrationsRequest,
 };
 use dioxus::prelude::*;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Default, Clone)]
 struct TableRegistration {
@@ -69,6 +70,8 @@ fn to_proto_registration(registration: TableRegistration, event_id: String) -> R
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
     let nav = use_navigator();
     let results = use_server_future(move || async move {
+        let claims_future = claims(ClaimsRequest {});
+
         let events_future = query_events(QueryEventsRequest {
             query: Some(EventQuery {
                 query: Some(event_query::Query::Id(StringQuery {
@@ -93,7 +96,13 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
-        let mut events_response = events_future.await.map_err(Error::ServerFunctionError)?;
+        let claims = claims_future
+            .await
+            .map_err(Error::from_server_fn_error)?
+            .claims
+            .ok_or(Error::Unauthenticated)?;
+
+        let mut events_response = events_future.await.map_err(Error::from_server_fn_error)?;
         let event = events_response.events.pop().ok_or(Error::NotFound)?;
 
         let organization_future = query_organizations(QueryOrganizationsRequest {
@@ -106,7 +115,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
-        let mut schema_response = schema_future.await.map_err(Error::ServerFunctionError)?;
+        let mut schema_response = schema_future.await.map_err(Error::from_server_fn_error)?;
         let schema = schema_response
             .registration_schemas
             .pop()
@@ -117,17 +126,18 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
 
         let registrations_response = registrations_future
             .await
-            .map_err(Error::ServerFunctionError)?;
+            .map_err(Error::from_server_fn_error)?;
 
         let mut organization_response = organization_future
             .await
-            .map_err(Error::ServerFunctionError)?;
+            .map_err(Error::from_server_fn_error)?;
         let organization = organization_response
             .organizations
             .pop()
             .ok_or(Error::Misc("organization not found".to_owned()))?;
 
         Ok((
+            ProtoWrapper(claims),
             ProtoWrapper(organization),
             ProtoWrapper(event),
             ProtoWrapper(schema),
@@ -135,14 +145,16 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         ))
     })?;
 
-    let (organization, event, schema, registrations) = match results() {
+    let (claims, organization, event, schema, registrations) = match results() {
         None => return rsx! {},
         Some(Ok((
+            ProtoWrapper(claims),
             ProtoWrapper(organization),
             ProtoWrapper(event),
             ProtoWrapper(schema),
             ProtoWrapper(registrations_response),
         ))) => (
+            claims,
             organization,
             event,
             schema,
@@ -177,6 +189,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                     highlight: MenuItem::Registrations,
                 }
             },
+            claims: claims,
             PageBody{
                 org: organization,
                 event: event,

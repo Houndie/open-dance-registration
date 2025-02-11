@@ -1,11 +1,12 @@
 use crate::{
     hooks::toasts::use_toasts,
     server_functions::{
+        authentication::claims,
         organization::{query, upsert},
         ProtoWrapper,
     },
     view::{
-        app::Routes,
+        app::{Error, Routes},
         components::{
             form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
             menu::Menu as GenericMenu,
@@ -16,19 +17,47 @@ use crate::{
         },
     },
 };
-use common::proto::{Organization, QueryOrganizationsRequest, UpsertOrganizationsRequest};
+use common::proto::{
+    ClaimsRequest, Organization, QueryOrganizationsRequest, UpsertOrganizationsRequest,
+};
 use dioxus::prelude::*;
 
 #[component]
 pub fn Page() -> Element {
-    let res = use_server_future(|| async {
-        query(QueryOrganizationsRequest { query: None })
-            .await
-            .map(|r| ProtoWrapper(r))
+    let nav = use_navigator();
+    let mut needs_login = use_signal(|| false);
+    use_effect(move || {
+        if *needs_login.read() {
+            nav.push(Routes::LoginPage);
+        }
+    });
+
+    let results: Resource<Result<_, Error>> = use_server_future(|| async {
+        let organizations_future = query(QueryOrganizationsRequest { query: None });
+        let claims_future = claims(ClaimsRequest {});
+
+        let (organizations_response, claims_response) =
+            futures::join!(organizations_future, claims_future);
+
+        let claims = claims_response
+            .map_err(Error::from_server_fn_error)?
+            .claims
+            .ok_or(Error::Unauthenticated)?;
+
+        let organizations_response = organizations_response.map_err(Error::from_server_fn_error)?;
+
+        Ok((ProtoWrapper(organizations_response), ProtoWrapper(claims)))
     })?;
 
-    let ProtoWrapper(res) = match res() {
-        Some(Ok(res)) => res,
+    let (organizations, claims) = match results() {
+        None => return rsx! {},
+        Some(Ok((ProtoWrapper(organizations_response), ProtoWrapper(claims)))) => {
+            (organizations_response.organizations, claims)
+        }
+        Some(Err(Error::Unauthenticated)) => {
+            *needs_login.write() = true;
+            return rsx! {};
+        }
         Some(Err(e)) => {
             return rsx! {
                 WithToasts{
@@ -36,7 +65,6 @@ pub fn Page() -> Element {
                 }
             };
         }
-        None => return rsx! {},
     };
 
     let menu = rsx! {
@@ -52,8 +80,9 @@ pub fn Page() -> Element {
                 ("Home".to_owned(), None)
             ],
             menu: menu,
+            claims: claims,
             PageBody{
-                orgs: res.organizations,
+                orgs: organizations,
             }
         }
     }

@@ -7,6 +7,7 @@ use crate::{
         registration_schema::Service as SchemaService, user::Service as UserService,
     },
     server_functions::{
+        authentication::AnyService as AnyAuthenticationService,
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
         registration_schema::AnyService as AnyRegistrationSchemaService,
     },
@@ -124,8 +125,16 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     })
         as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
 
+    let authentication_provider_state = Box::new(move || {
+        Box::new(AnyAuthenticationService::new_sqlite(
+            authentication_service.clone(),
+        )) as Box<dyn std::any::Any>
+    })
+        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+
     let dioxus_config = ServeConfig::builder()
         .context_providers(Arc::new(vec![
+            authentication_provider_state,
             event_provider_state,
             organization_provider_state,
             registration_schema_provider_state,

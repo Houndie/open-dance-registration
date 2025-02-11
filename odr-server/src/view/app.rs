@@ -3,8 +3,9 @@ use dioxus::prelude::*;
 use crate::{
     server_functions,
     view::pages::{
-        event::Page as EventPage, landing::Page as LandingPage, not_found::Page as NotFound,
-        organization::Page as OrganizationPage, registration::Page as RegistrationPage,
+        event::Page as EventPage, landing::Page as LandingPage, login::Page as LoginPage,
+        not_found::Page as NotFound, organization::Page as OrganizationPage,
+        registration::Page as RegistrationPage,
         registration_schema::Page as RegistrationSchemaPage,
     },
 };
@@ -16,7 +17,21 @@ pub enum Error {
     #[error("{0}")]
     Misc(String),
     #[error("Server function error: {0}")]
-    ServerFunctionError(#[source] server_functions::Error),
+    ServerFunctionError(String),
+    #[error("unauthenticated")]
+    Unauthenticated,
+}
+
+impl Error {
+    pub fn from_server_fn_error(e: server_functions::Error) -> Self {
+        if let server_functions::Error::GrpcError(e) = &e {
+            if e.code() == tonic::Code::Unauthenticated {
+                return Self::Unauthenticated;
+            }
+        }
+
+        Self::ServerFunctionError(e.to_string())
+    }
 }
 
 #[component]
@@ -42,6 +57,9 @@ pub enum Routes {
 
     #[route("/events/:id/registrations")]
     RegistrationPage { id: String },
+
+    #[route("/login")]
+    LoginPage,
 
     /*#[route("/profile")]
     ProfilePage,*/

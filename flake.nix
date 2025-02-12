@@ -44,6 +44,27 @@
       nativeBuildInputs = [ pkgs.pkg-config pkgs.cacert myrust ];
       buildInputs = [ pkgs.openssl ];
     };
+
+    devserver = (pkgs.writeShellScriptBin ",devserver" ''
+      set -e
+    
+      ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
+    
+      # Wart:  rustup will install it's own binaries but they match our versions and we can ignore them:-)
+      PATH=${pkgs.rustup}/bin:$PATH
+    
+      rustup show
+    
+      cd $ROOT; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
+    '');
+
+    testscript = (pkgs.writeShellScriptBin ",test" ''
+      set -e
+    
+      ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
+
+      cd $ROOT; ${myrust}/bin/cargo test --features server
+    '');
   in
   {
     devShell.${system} = pkgs.mkShell {
@@ -56,19 +77,8 @@
         grpcuiScript
         pkgs.entr
 	pkgs.cargo-expand
-
-        (pkgs.writeShellScriptBin ",devserver" ''
-	  set -e
-
-	  ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
-
-	  # Wart:  rustup will install it's own binaries but they match our versions and we can ignore them:-)
-	  PATH=${pkgs.rustup}/bin:$PATH
-
-	  rustup show
-
-	  cd $ROOT; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
-	'')
+        devserver
+	testscript
       ];
       PROTOC = "${pkgs.protobuf_23}/bin/protoc";
       PROTOC_INCLUDE = "${pkgs.protobuf_23}/include";

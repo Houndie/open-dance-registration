@@ -267,7 +267,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::migrate!("../migrations").run(&db).await.unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
 
         Init { db }
     }

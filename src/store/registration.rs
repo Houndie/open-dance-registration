@@ -623,7 +623,7 @@ mod tests {
         )
         .await
         .unwrap();
-        sqlx::migrate!("../migrations").run(&db).await.unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
 
         let org_id = new_id();
         let org_name = "Org 1";

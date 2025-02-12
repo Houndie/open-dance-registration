@@ -272,7 +272,7 @@ mod tests {
         Sqlite::create_database(db_url).await.unwrap();
 
         let db = SqlitePool::connect(db_url).await.unwrap();
-        sqlx::migrate!("../migrations").run(&db).await.unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
 
         let org = new_id();
         let org_name = "Organization 1";

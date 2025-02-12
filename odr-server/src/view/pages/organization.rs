@@ -45,11 +45,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
-        let claims = claims_future
-            .await
-            .map_err(Error::from_server_fn_error)?
-            .claims
-            .ok_or(Error::Unauthenticated)?;
+        let _ = claims_future.await.map_err(Error::from_server_fn_error)?;
 
         let mut organizations_response = organizations_future
             .await
@@ -61,16 +57,12 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
 
         let events_response = events_future.await.map_err(Error::from_server_fn_error)?;
 
-        Ok((
-            ProtoWrapper(claims),
-            ProtoWrapper(organization),
-            ProtoWrapper(events_response),
-        ))
+        Ok((ProtoWrapper(organization), ProtoWrapper(events_response)))
     })?;
 
     use_handle_error(
         results.suspend()?,
-        |(ProtoWrapper(claims), ProtoWrapper(organization), ProtoWrapper(events_response))| {
+        |(ProtoWrapper(organization), ProtoWrapper(events_response))| {
             let menu = rsx! {
                 Menu {
                     org_name: organization.name.clone(),
@@ -87,7 +79,6 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                         (organization.name.clone(), None),
                     ],
                     menu: menu,
-                    claims: claims,
                     PageBody {
                         org: organization,
                         events: events_response.events,

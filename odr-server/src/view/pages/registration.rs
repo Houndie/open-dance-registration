@@ -94,11 +94,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
-        let claims = claims_future
-            .await
-            .map_err(Error::from_server_fn_error)?
-            .claims
-            .ok_or(Error::Unauthenticated)?;
+        let _ = claims_future.await.map_err(Error::from_server_fn_error)?;
 
         let mut events_response = events_future.await.map_err(Error::from_server_fn_error)?;
         let event = events_response.events.pop().ok_or(Error::NotFound)?;
@@ -135,7 +131,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             .ok_or(Error::Misc("organization not found".to_owned()))?;
 
         Ok((
-            ProtoWrapper(claims),
             ProtoWrapper(organization),
             ProtoWrapper(event),
             ProtoWrapper(schema),
@@ -146,7 +141,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
     use_handle_error(
         results.suspend()?,
         |(
-            ProtoWrapper(claims),
             ProtoWrapper(organization),
             ProtoWrapper(event),
             ProtoWrapper(schema),
@@ -168,7 +162,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                             highlight: MenuItem::Registrations,
                         }
                     },
-                    claims: claims,
                     PageBody{
                         org: organization,
                         event: event,

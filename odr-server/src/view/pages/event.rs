@@ -28,11 +28,7 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             }),
         });
 
-        let claims = claims_future
-            .await
-            .map_err(Error::from_server_fn_error)?
-            .claims
-            .ok_or(Error::Unauthenticated)?;
+        let _ = claims_future.await.map_err(Error::from_server_fn_error)?;
 
         let mut events_response = events_future.await.map_err(Error::from_server_fn_error)?;
 
@@ -55,16 +51,12 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
             .pop()
             .ok_or(Error::Misc("organization not found".to_owned()))?;
 
-        Ok((
-            ProtoWrapper(claims),
-            ProtoWrapper(organization),
-            ProtoWrapper(event),
-        ))
+        Ok((ProtoWrapper(organization), ProtoWrapper(event)))
     })?;
 
     use_handle_error(
         results.suspend()?,
-        |(ProtoWrapper(claims), ProtoWrapper(organization), ProtoWrapper(event))| {
+        |(ProtoWrapper(organization), ProtoWrapper(event))| {
             let menu = rsx! {
                 Menu {
                     event_name: event.name.clone(),
@@ -82,7 +74,6 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
                         (event.name.clone(), None),
                     ],
                     menu: menu,
-                    claims: claims,
                     div {
                     }
                 }

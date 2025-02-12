@@ -1,5 +1,3 @@
-use dioxus::prelude::*;
-
 use crate::{
     hooks::toasts::use_toasts,
     server_functions::authentication::logout,
@@ -8,8 +6,8 @@ use crate::{
         components::{breadcrumb::Breadcrumb, with_toasts::WithToasts},
     },
 };
-
-use common::proto::{Claims, LogoutRequest};
+use common::proto::LogoutRequest;
+use dioxus::prelude::*;
 
 #[component]
 pub fn Page(
@@ -18,7 +16,6 @@ pub fn Page(
     style: Option<ReadOnlySignal<String>>,
     breadcrumb: Option<Vec<(String, Option<Routes>)>>,
     menu: Option<Element>,
-    claims: ReadOnlySignal<Claims>,
 ) -> Element {
     let style = use_memo(move || style.map(|style| style.read().clone()).unwrap_or_default());
 
@@ -57,9 +54,7 @@ pub fn Page(
                         }
                         div {
                             class: "column is-one-third has-text-right",
-                            UserMenu {
-                                claims: claims,
-                            }
+                            UserMenu {}
                         }
                     }
                     { breadcrumb }
@@ -71,7 +66,7 @@ pub fn Page(
 }
 
 #[component]
-fn UserMenu(claims: ReadOnlySignal<Claims>) -> Element {
+fn UserMenu() -> Element {
     let mut show_menu = use_signal(|| false);
     let menu_is_active = if *show_menu.read() { "is-active" } else { "" };
 

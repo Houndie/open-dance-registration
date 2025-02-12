@@ -1,5 +1,5 @@
 use crate::{
-    hooks::toasts::use_toasts,
+    hooks::{handle_error::use_handle_error, toasts::use_toasts},
     server_functions::{
         authentication::claims,
         user::{query as query_users, upsert as upsert_users},
@@ -11,7 +11,6 @@ use crate::{
             form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
             menu::Menu as GenericMenu,
             page::Page as GenericPage,
-            with_toasts::WithToasts,
         },
     },
 };
@@ -41,15 +40,6 @@ impl From<User> for ProfileForm {
 
 #[component]
 pub fn Page() -> Element {
-    let nav = use_navigator();
-
-    let mut needs_login = use_signal(|| false);
-    use_effect(move || {
-        if *needs_login.read() {
-            nav.push(Routes::LoginPage);
-        }
-    });
-
     let results = use_server_future(move || async move {
         let claims = claims(ClaimsRequest {})
             .await
@@ -69,50 +59,31 @@ pub fn Page() -> Element {
 
         let user = users.users.pop().ok_or(Error::NotFound)?;
 
-        Ok((ProtoWrapper(claims), ProtoWrapper(user)))
+        Ok(ProtoWrapper(user))
     })?;
 
-    let (claims, user) = match results() {
-        None => return rsx! {},
-        Some(Ok((ProtoWrapper(claims), ProtoWrapper(user)))) => (claims, user),
-        Some(Err(Error::Unauthenticated)) => {
-            *needs_login.write() = true;
-            return rsx! {};
-        }
-        Some(Err(Error::NotFound)) => {
-            nav.push(Routes::NotFound);
-            return rsx! {};
-        }
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
+    use_handle_error(results.suspend()?, |ProtoWrapper(user)| {
+        let menu = rsx! {
+            Menu {
+                user_name: user.display_name.clone(),
+                highlight: MenuItem::AccountSettings,
+            }
+        };
+
+        rsx! {
+            GenericPage {
+                title: user.display_name.clone(),
+                breadcrumb: vec![
+                    ("Home".to_owned(), Some(Routes::LandingPage)),
+                    (user.display_name.clone(), None),
+                ],
+                menu: menu,
+                PageBody {
+                    user: user,
                 }
-            };
-        }
-    };
-
-    let menu = rsx! {
-        Menu {
-            user_name: user.display_name.clone(),
-            highlight: MenuItem::AccountSettings,
-        }
-    };
-
-    rsx! {
-        GenericPage {
-            title: user.display_name.clone(),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (user.display_name.clone(), None),
-            ],
-            menu: menu,
-            claims: claims,
-            PageBody {
-                user: user,
             }
         }
-    }
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]

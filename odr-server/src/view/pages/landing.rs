@@ -30,19 +30,16 @@ pub fn Page() -> Element {
         let (organizations_response, claims_response) =
             futures::join!(organizations_future, claims_future);
 
-        let claims = claims_response
-            .map_err(Error::from_server_fn_error)?
-            .claims
-            .ok_or(Error::Unauthenticated)?;
+        let _ = claims_response.map_err(Error::from_server_fn_error)?;
 
         let organizations_response = organizations_response.map_err(Error::from_server_fn_error)?;
 
-        Ok((ProtoWrapper(organizations_response), ProtoWrapper(claims)))
+        Ok(ProtoWrapper(organizations_response))
     })?;
 
     use_handle_error(
         results.suspend()?,
-        |(ProtoWrapper(organizations_response), ProtoWrapper(claims))| {
+        |ProtoWrapper(organizations_response)| {
             let menu = rsx! {
                 Menu {
                     highlight: MenuItem::Home,
@@ -56,7 +53,6 @@ pub fn Page() -> Element {
                         ("Home".to_owned(), None)
                     ],
                     menu: menu,
-                    claims: claims,
                     PageBody{
                         orgs: organizations_response.organizations,
                     }

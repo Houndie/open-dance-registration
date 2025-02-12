@@ -1,5 +1,5 @@
 use crate::{
-    hooks::toasts::use_toasts,
+    hooks::{handle_error::use_handle_error, toasts::use_toasts},
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations, registration::query as query_registrations,
@@ -16,7 +16,6 @@ use crate::{
             modal::Modal,
             page::Page as GenericPage,
             table::Table,
-            with_toasts::WithToasts,
         },
         pages::event::{Menu, MenuItem},
     },
@@ -68,7 +67,6 @@ fn to_proto_registration(registration: TableRegistration, event_id: String) -> R
 
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
-    let nav = use_navigator();
     let results = use_server_future(move || async move {
         let claims_future = claims(ClaimsRequest {});
 
@@ -145,59 +143,42 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         ))
     })?;
 
-    let (claims, organization, event, schema, registrations) = match results() {
-        None => return rsx! {},
-        Some(Ok((
+    use_handle_error(
+        results.suspend()?,
+        |(
             ProtoWrapper(claims),
             ProtoWrapper(organization),
             ProtoWrapper(event),
             ProtoWrapper(schema),
             ProtoWrapper(registrations_response),
-        ))) => (
-            claims,
-            organization,
-            event,
-            schema,
-            registrations_response.registrations,
-        ),
-        Some(Err(Error::NotFound)) => {
-            nav.push(Routes::NotFound);
-            return rsx! {};
-        }
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
+        )| {
+            rsx! {
+                GenericPage {
+                    title: "View Registrations".to_owned(),
+                    breadcrumb: vec![
+                        ("Home".to_owned(), Some(Routes::LandingPage)),
+                        (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                        (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                        ("Registrations".to_owned(), None),
+                    ],
+                    menu: rsx!{
+                        Menu {
+                            event_name: event.name.clone(),
+                            event_id: event.id.clone(),
+                            highlight: MenuItem::Registrations,
+                        }
+                    },
+                    claims: claims,
+                    PageBody{
+                        org: organization,
+                        event: event,
+                        schema: schema,
+                        registrations: registrations_response.registrations,
+                    }
                 }
-            };
-        }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "View Registrations".to_owned(),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
-                ("Registrations".to_owned(), None),
-            ],
-            menu: rsx!{
-                Menu {
-                    event_name: event.name.clone(),
-                    event_id: event.id.clone(),
-                    highlight: MenuItem::Registrations,
-                }
-            },
-            claims: claims,
-            PageBody{
-                org: organization,
-                event: event,
-                schema: schema,
-                registrations: registrations,
             }
-        }
-    }
+        },
+    )
 }
 
 #[component]

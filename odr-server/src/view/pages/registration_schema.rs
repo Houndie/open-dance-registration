@@ -1,5 +1,8 @@
 use crate::{
-    hooks::toasts::{use_toasts, ToastManager},
+    hooks::{
+        handle_error::use_handle_error,
+        toasts::{use_toasts, ToastManager},
+    },
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations,
@@ -83,7 +86,6 @@ struct LineLocation {
 
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
-    let nav = use_navigator();
     let results = use_server_future(move || async move {
         let claims_future = claims(ClaimsRequest {});
 
@@ -147,63 +149,52 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         ))
     })?;
 
-    let (claims, event, schema, organization) = match results() {
-        None => return rsx! {},
-        Some(Ok((
+    use_handle_error(
+        results.suspend()?,
+        |(
             ProtoWrapper(claims),
             ProtoWrapper(event),
             ProtoWrapper(schema),
             ProtoWrapper(organization),
-        ))) => (claims, event, schema, organization),
-        Some(Err(Error::NotFound)) => {
-            nav.push(Routes::NotFound);
-            return rsx! {};
-        }
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
+        )| {
+            let grabbing_cursor = use_signal(|| false);
+            let cursor = use_memo(move || {
+                if *grabbing_cursor.read() {
+                    "cursor: grabbing; cursor: -moz-grabbing; cursor: -webkit-grabbing;"
+                } else {
+                    "cursor: auto"
                 }
-            };
-        }
-    };
+                .to_owned()
+            });
 
-    let grabbing_cursor = use_signal(|| false);
-    let cursor = use_memo(move || {
-        if *grabbing_cursor.read() {
-            "cursor: grabbing; cursor: -moz-grabbing; cursor: -webkit-grabbing;"
-        } else {
-            "cursor: auto"
-        }
-        .to_owned()
-    });
-
-    rsx! {
-        GenericPage {
-            title: "Modify Registration Schema".to_owned(),
-            style: Into::<ReadOnlySignal<String>>::into(cursor),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
-                ("Registration Schema".to_owned(), None),
-            ],
-            menu: rsx!{
-                Menu {
-                    event_name: event.name.clone(),
-                    event_id: event.id.clone(),
-                    highlight: MenuItem::RegistrationSchema,
+            rsx! {
+                GenericPage {
+                    title: "Modify Registration Schema".to_owned(),
+                    style: Into::<ReadOnlySignal<String>>::into(cursor),
+                    breadcrumb: vec![
+                        ("Home".to_owned(), Some(Routes::LandingPage)),
+                        (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                        (event.name.clone(), Some(Routes::EventPage{ id: event.id.clone() })),
+                        ("Registration Schema".to_owned(), None),
+                    ],
+                    menu: rsx!{
+                        Menu {
+                            event_name: event.name.clone(),
+                            event_id: event.id.clone(),
+                            highlight: MenuItem::RegistrationSchema,
+                        }
+                    },
+                    claims: claims,
+                    PageBody{
+                        org: organization,
+                        event: event,
+                        registration_schema_items: schema.items,
+                        grabbing_cursor: grabbing_cursor,
+                    }
                 }
-            },
-            claims: claims,
-            PageBody{
-                org: organization,
-                event: event,
-                registration_schema_items: schema.items,
-                grabbing_cursor: grabbing_cursor,
             }
-        }
-    }
+        },
+    )
 }
 
 #[component]

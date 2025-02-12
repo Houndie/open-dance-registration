@@ -1,13 +1,12 @@
 use crate::{
+    hooks::handle_error::use_handle_error,
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations, ProtoWrapper,
     },
     view::{
         app::{Error, Routes},
-        components::{
-            menu::Menu as GenericMenu, page::Page as GenericPage, with_toasts::WithToasts,
-        },
+        components::{menu::Menu as GenericMenu, page::Page as GenericPage},
     },
 };
 use common::proto::{
@@ -18,7 +17,6 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Page(id: ReadOnlySignal<String>) -> Element {
-    let nav = use_navigator();
     let results = use_server_future(move || async move {
         let claims_future = claims(ClaimsRequest {});
 
@@ -64,46 +62,33 @@ pub fn Page(id: ReadOnlySignal<String>) -> Element {
         ))
     })?;
 
-    let (claims, organization, event) = match results() {
-        None => return rsx! {},
-        Some(Ok((ProtoWrapper(claims), ProtoWrapper(organization), ProtoWrapper(event)))) => {
-            (claims, organization, event)
-        }
-        Some(Err(Error::NotFound)) => {
-            nav.push(Routes::NotFound);
-            return rsx! {};
-        }
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
+    use_handle_error(
+        results.suspend()?,
+        |(ProtoWrapper(claims), ProtoWrapper(organization), ProtoWrapper(event))| {
+            let menu = rsx! {
+                Menu {
+                    event_name: event.name.clone(),
+                    event_id: event.id,
+                    highlight: MenuItem::EventHome,
                 }
             };
-        }
-    };
 
-    let menu = rsx! {
-        Menu {
-            event_name: event.name.clone(),
-            event_id: event.id,
-            highlight: MenuItem::EventHome,
-        }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "Event Home".to_string(),
-            breadcrumb: vec![
-                ("Home".to_owned(), Some(Routes::LandingPage)),
-                (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                (event.name.clone(), None),
-            ],
-            menu: menu,
-            claims: claims,
-            div {
+            rsx! {
+                GenericPage {
+                    title: "Event Home".to_string(),
+                    breadcrumb: vec![
+                        ("Home".to_owned(), Some(Routes::LandingPage)),
+                        (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                        (event.name.clone(), None),
+                    ],
+                    menu: menu,
+                    claims: claims,
+                    div {
+                    }
+                }
             }
-        }
-    }
+        },
+    )
 }
 
 #[derive(Clone, Copy, PartialEq)]

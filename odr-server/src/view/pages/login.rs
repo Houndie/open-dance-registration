@@ -21,6 +21,12 @@ struct LoginForm {
 #[component]
 pub fn Page() -> Element {
     let nav = use_navigator();
+    let mut redirect_to = use_signal(|| None);
+    use_effect(move || {
+        if let Some(redirect) = redirect_to.read().clone() {
+            nav.push(redirect);
+        }
+    });
 
     let results = use_server_future(|| async {
         claims(ClaimsRequest {})
@@ -32,14 +38,13 @@ pub fn Page() -> Element {
         Ok(())
     })?;
 
-    match results() {
-        None => return rsx! {},
-        Some(Ok(())) => {
-            nav.push(Routes::LandingPage);
+    match results.suspend()?() {
+        Ok(()) => {
+            *redirect_to.write() = Some(Routes::LandingPage);
             return rsx! {};
         }
-        Some(Err(Error::Unauthenticated)) => (),
-        Some(Err(e)) => {
+        Err(Error::Unauthenticated) => (),
+        Err(e) => {
             return rsx! {
                 WithToasts{
                     initial_errors: vec![e.to_string()],

@@ -1,5 +1,5 @@
 use crate::{
-    hooks::toasts::use_toasts,
+    hooks::{handle_error::use_handle_error, toasts::use_toasts},
     server_functions::{
         authentication::claims,
         organization::{query, upsert},
@@ -13,7 +13,6 @@ use crate::{
             modal::Modal,
             page::Page as GenericPage,
             table::Table,
-            with_toasts::WithToasts,
         },
     },
 };
@@ -24,15 +23,7 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn Page() -> Element {
-    let nav = use_navigator();
-    let mut needs_login = use_signal(|| false);
-    use_effect(move || {
-        if *needs_login.read() {
-            nav.push(Routes::LoginPage);
-        }
-    });
-
-    let results: Resource<Result<_, Error>> = use_server_future(|| async {
+    let results = use_server_future(|| async {
         let organizations_future = query(QueryOrganizationsRequest { query: None });
         let claims_future = claims(ClaimsRequest {});
 
@@ -49,43 +40,30 @@ pub fn Page() -> Element {
         Ok((ProtoWrapper(organizations_response), ProtoWrapper(claims)))
     })?;
 
-    let (organizations, claims) = match results() {
-        None => return rsx! {},
-        Some(Ok((ProtoWrapper(organizations_response), ProtoWrapper(claims)))) => {
-            (organizations_response.organizations, claims)
-        }
-        Some(Err(Error::Unauthenticated)) => {
-            *needs_login.write() = true;
-            return rsx! {};
-        }
-        Some(Err(e)) => {
-            return rsx! {
-                WithToasts{
-                    initial_errors: vec![e.to_string()],
+    use_handle_error(
+        results.suspend()?,
+        |(ProtoWrapper(organizations_response), ProtoWrapper(claims))| {
+            let menu = rsx! {
+                Menu {
+                    highlight: MenuItem::Home,
                 }
             };
-        }
-    };
 
-    let menu = rsx! {
-        Menu {
-            highlight: MenuItem::Home,
-        }
-    };
-
-    rsx! {
-        GenericPage {
-            title: "My Organizations".to_owned(),
-            breadcrumb: vec![
-                ("Home".to_owned(), None)
-            ],
-            menu: menu,
-            claims: claims,
-            PageBody{
-                orgs: organizations,
+            rsx! {
+                GenericPage {
+                    title: "My Organizations".to_owned(),
+                    breadcrumb: vec![
+                        ("Home".to_owned(), None)
+                    ],
+                    menu: menu,
+                    claims: claims,
+                    PageBody{
+                        orgs: organizations_response.organizations,
+                    }
+                }
             }
-        }
-    }
+        },
+    )
 }
 
 #[component]

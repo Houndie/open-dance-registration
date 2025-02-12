@@ -4,7 +4,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
     tonic_build::configure()
         .file_descriptor_set_path(out_dir.join("descriptors.bin"))
-        .compile(
+        .compile_protos(
             &[
                 "proto/event.proto",
                 "proto/registration_schema.proto",

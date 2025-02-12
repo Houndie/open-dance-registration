@@ -14,8 +14,8 @@ pub fn Breadcrumb(items: ReadOnlySignal<Vec<(String, Option<Routes>)>>) -> Eleme
                     rsx!{
                         li {
                             a {
-                                prevent_default: "onclick",
-                                onclick: move |_| {
+                                onclick: move |e| {
+                                    e.prevent_default();
                                     if let Some(route) = route.as_ref() {
                                         nav.push(route.clone());
                                     }

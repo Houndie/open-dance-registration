@@ -31,10 +31,6 @@ mod proto_wrapper {
     }
 }
 
-fn status_to_server_fn_error(status: tonic::Status) -> dioxus::prelude::ServerFnError {
-    dioxus::prelude::ServerFnError::ServerError(status.message().to_string())
-}
-
 #[cfg(feature = "web")]
 fn wasm_client() -> tonic_web_wasm_client::Client {
     tonic_web_wasm_client::Client::new_with_options(

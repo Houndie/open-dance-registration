@@ -67,7 +67,7 @@
 
 	  rustup show
 
-	  cd $ROOT/odr-server; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
+	  cd $ROOT; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
 	'')
       ];
       PROTOC = "${pkgs.protobuf_23}/bin/protoc";

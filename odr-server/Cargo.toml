@@ -2,8 +2,16 @@
 name = "odr-server"
 version = "0.1.0"
 edition = "2021"
+default-run = "odr-server"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "odr-server"
+path = "src/bin/odr-server.rs"
+
+[[bin]]
+name = "odr-cli"
+path = "src/bin/odr-cli.rs"
+required-features = ["server"]
 
 [dependencies]
 # Server/Client
@@ -37,6 +45,9 @@ axum = { version = "0.7.9", optional = true }
 dioxus-liveview = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
 dioxus-cli-config = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
 odr-core = { path = "../odr-core", optional = true }
+clap = { version = "4.5.3", features = ["derive"], optional = true }
+anyhow = { version = "1.0.81", optional = true }
+inquire = { version = "0.7.2", optional = true }
 
 # Client
 wasm-bindgen = { version = "=0.2.99", optional = true }
@@ -46,4 +57,4 @@ tracing = "0.1.41"
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:tonic-web-wasm-client"]
-server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "common/transport", "tonic/default"]
+server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "dep:clap", "dep:anyhow", "dep:inquire", "common/transport", "tonic/default"]

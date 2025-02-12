@@ -2288,19 +2288,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "odr-cmd"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "common",
- "inquire",
- "odr-core",
- "sqlx",
- "tokio",
-]
-
-[[package]]
 name = "odr-core"
 version = "0.1.0"
 dependencies = [
@@ -2324,9 +2311,11 @@ dependencies = [
 name = "odr-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "argon2",
  "axum",
  "chrono",
+ "clap",
  "common",
  "cookie",
  "dioxus",
@@ -2335,6 +2324,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "http",
+ "inquire",
  "itertools",
  "jsonwebtoken",
  "log",

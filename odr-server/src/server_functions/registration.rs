@@ -1,12 +1,13 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::registration::Service, server_functions::Error};
+    use crate::{
+        api::registration::Service, server_functions::Error, store::registration::SqliteStore,
+    };
     use common::proto::{
         registration_service_server::RegistrationService, QueryRegistrationsRequest,
         QueryRegistrationsResponse, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
     };
     use dioxus::prelude::*;
-    use odr_core::store::registration::SqliteStore;
     use std::sync::Arc;
     use tonic::{Request, Response, Status};
 

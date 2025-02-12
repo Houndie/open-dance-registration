@@ -1,5 +1,11 @@
-use std::sync::Arc;
-
+use crate::{
+    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    store::{
+        user::{self, PasswordType, Query, Store},
+        CompoundOperator, CompoundQuery,
+    },
+    user::hash_password,
+};
 use common::{
     password,
     proto::{
@@ -8,17 +14,8 @@ use common::{
         UpsertUsersResponse, UserQuery,
     },
 };
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
-
-use odr_core::{
-    store::{
-        user::{self, PasswordType, Query, Store},
-        CompoundOperator, CompoundQuery,
-    },
-    user::hash_password,
-};
-
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
 
 pub struct Service<StoreType: Store> {
     store: Arc<StoreType>,

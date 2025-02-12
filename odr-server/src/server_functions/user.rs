@@ -1,12 +1,11 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::user::Service, server_functions::Error};
+    use crate::{api::user::Service, server_functions::Error, store::user::SqliteStore};
     use common::proto::{
         user_service_server::UserService, QueryUsersRequest, QueryUsersResponse,
         UpsertUsersRequest, UpsertUsersResponse,
     };
     use dioxus::prelude::*;
-    use odr_core::store::user::SqliteStore;
     use std::sync::Arc;
     use tonic::{metadata::MetadataMap, Request, Response, Status};
 

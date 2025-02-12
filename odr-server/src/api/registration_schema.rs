@@ -1,7 +1,10 @@
-use std::sync::Arc;
-
-use tonic::{Request, Response, Status};
-
+use crate::{
+    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    store::{
+        registration_schema::{Query, Store},
+        CompoundOperator, CompoundQuery,
+    },
+};
 use common::proto::{
     self, compound_registration_schema_query, multi_select_type, registration_schema_item_type,
     registration_schema_query, select_type, text_type, DeleteRegistrationSchemasResponse,
@@ -9,12 +12,8 @@ use common::proto::{
     RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
     UpsertRegistrationSchemasResponse,
 };
-use odr_core::store::{
-    registration_schema::{Query, Store},
-    CompoundOperator, CompoundQuery,
-};
-
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {

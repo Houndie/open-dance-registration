@@ -1,17 +1,16 @@
-use std::sync::Arc;
-
-use tonic::{Request, Response, Status};
-
+use crate::{
+    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    store::{
+        event::{Query, Store},
+        CompoundOperator, CompoundQuery,
+    },
+};
 use common::proto::{
     self, compound_event_query, event_query, DeleteEventsResponse, EventQuery, QueryEventsRequest,
     QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
 };
-use odr_core::store::{
-    event::{Query, Store},
-    CompoundOperator, CompoundQuery,
-};
-
-use super::{common::try_logical_string_query, store_error_to_status, ValidationError};
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
 pub struct Service<StoreType: Store> {

@@ -11,14 +11,15 @@ use crate::{
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
         registration_schema::AnyService as AnyRegistrationSchemaService,
     },
+    store::{
+        event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
+        organization::SqliteStore as OrganizationStore,
+        registration::SqliteStore as RegistrationStore,
+        registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
+    },
 };
 use common::proto;
 use dioxus::prelude::{DioxusRouterExt, ServeConfig};
-use odr_core::store::{
-    event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
-    organization::SqliteStore as OrganizationStore, registration::SqliteStore as RegistrationStore,
-    registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
-};
 use sqlx::SqlitePool;
 use std::{env, future::IntoFuture, sync::Arc};
 use thiserror::Error;
@@ -40,7 +41,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let user_store = Arc::new(UserStore::new(db.clone()));
     let key_store = Arc::new(KeyStore::new(db.clone()));
 
-    let key_manager = Arc::new(odr_core::keys::KeyManager::new(key_store));
+    let key_manager = Arc::new(crate::keys::KeyManager::new(key_store));
 
     let event_service = Arc::new(EventService::new(event_store));
 

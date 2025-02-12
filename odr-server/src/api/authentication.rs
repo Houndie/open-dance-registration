@@ -1,11 +1,5 @@
-use super::store_error_to_status;
-use argon2::{Argon2, PasswordVerifier};
-use common::proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse};
-use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
-use ed25519_dalek::pkcs8::EncodePrivateKey;
-use http::header::{HeaderMap, COOKIE, SET_COOKIE};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
-use odr_core::{
+use crate::{
+    api::store_error_to_status,
     keys::KeyManager,
     store::{
         self,
@@ -14,6 +8,12 @@ use odr_core::{
         CompoundOperator, CompoundQuery,
     },
 };
+use argon2::{Argon2, PasswordVerifier};
+use common::proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse};
+use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
+use ed25519_dalek::pkcs8::EncodePrivateKey;
+use http::header::{HeaderMap, COOKIE, SET_COOKIE};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
 use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

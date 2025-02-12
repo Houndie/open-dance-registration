@@ -22,7 +22,7 @@ prost = { version = "0.13" }
 common = { path = "../common" }
 log = "0.4.20"
 serde_bytes = "0.11.15"
-uuid = { version = "1.7.0", features = ["v4", "js"] }
+uuid = { version = "1.7.0", features = ["v4", "js", "v7"] }
 futures = { version = "0.3.31" }
 tonic = { version = "0.12", default-features = false }
 thiserror = "1.0.56"
@@ -44,10 +44,10 @@ prost-types = { version = "0.13", optional = true }
 axum = { version = "0.7.9", optional = true }
 dioxus-liveview = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
 dioxus-cli-config = { git = "https://github.com/dioxusLabs/dioxus.git", rev = "857c3e232ecd024c752176bd0af14a5654014527", optional = true }
-odr-core = { path = "../odr-core", optional = true }
 clap = { version = "4.5.3", features = ["derive"], optional = true }
 anyhow = { version = "1.0.81", optional = true }
 inquire = { version = "0.7.2", optional = true }
+rand = { version = "0.8.5", optional = true }
 
 # Client
 wasm-bindgen = { version = "=0.2.99", optional = true }
@@ -57,4 +57,4 @@ tracing = "0.1.41"
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:tonic-web-wasm-client"]
-server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:odr-core", "dep:clap", "dep:anyhow", "dep:inquire", "common/transport", "tonic/default"]
+server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:prost-types", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:clap", "dep:anyhow", "dep:inquire", "dep:rand", "common/transport", "tonic/default"]

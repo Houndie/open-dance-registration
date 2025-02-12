@@ -1,12 +1,13 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::organization::Service, server_functions::Error};
+    use crate::{
+        api::organization::Service, server_functions::Error, store::organization::SqliteStore,
+    };
     use common::proto::{
         organization_service_server::OrganizationService, QueryOrganizationsRequest,
         QueryOrganizationsResponse, UpsertOrganizationsRequest, UpsertOrganizationsResponse,
     };
     use dioxus::prelude::*;
-    use odr_core::store::organization::SqliteStore;
     use std::sync::Arc;
     use tonic::{Request, Response, Status};
 

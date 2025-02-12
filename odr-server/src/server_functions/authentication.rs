@@ -1,14 +1,15 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::authentication::Service, server_functions::Error};
+    use crate::{
+        api::authentication::Service,
+        server_functions::Error,
+        store::{keys::SqliteStore as KeySqliteStore, user::SqliteStore as UserSqliteStore},
+    };
     use common::proto::{
         authentication_service_server::AuthenticationService, ClaimsRequest, ClaimsResponse,
         LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
     };
     use dioxus::prelude::*;
-    use odr_core::store::{
-        keys::SqliteStore as KeySqliteStore, user::SqliteStore as UserSqliteStore,
-    };
     use std::sync::Arc;
     use tonic::{metadata::MetadataMap, Request, Response, Status};
 

@@ -1,8 +1,5 @@
+use crate::{api::ValidationError, store};
 use common::proto::{string_query, StringQuery};
-
-use odr_core::store;
-
-use super::ValidationError;
 
 pub fn try_logical_string_query<F: store::Field<Item = String>>(
     q: StringQuery,

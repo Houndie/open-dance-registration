@@ -1,5 +1,10 @@
 use crate::{
     hooks::{handle_error::use_handle_error, toasts::use_toasts},
+    proto::{
+        event_query, organization_query, string_query, ClaimsRequest, Event, EventQuery,
+        Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
+        StringQuery, UpsertEventsRequest,
+    },
     server_functions::{
         authentication::claims,
         event::{query as query_events, upsert as upsert_events},
@@ -16,11 +21,6 @@ use crate::{
             table::Table,
         },
     },
-};
-use common::proto::{
-    event_query, organization_query, string_query, ClaimsRequest, Event, EventQuery, Organization,
-    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
-    UpsertEventsRequest,
 };
 use dioxus::prelude::*;
 

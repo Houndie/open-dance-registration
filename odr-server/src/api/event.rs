@@ -1,13 +1,13 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    proto::{
+        self, compound_event_query, event_query, DeleteEventsResponse, EventQuery,
+        QueryEventsRequest, QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
+    },
     store::{
         event::{Query, Store},
         CompoundOperator, CompoundQuery,
     },
-};
-use common::proto::{
-    self, compound_event_query, event_query, DeleteEventsResponse, EventQuery, QueryEventsRequest,
-    QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

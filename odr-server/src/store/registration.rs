@@ -1,12 +1,12 @@
-use std::{collections::HashMap, future::Future, iter, sync::Arc};
-
-use common::proto::{Registration, RegistrationItem};
-use sqlx::SqlitePool;
-
-use super::{
-    common::{ids_in_table, new_id},
-    Bindable as _, Error, Queryable as _,
+use crate::{
+    proto::{Registration, RegistrationItem},
+    store::{
+        common::{ids_in_table, new_id},
+        Bindable as _, Error, Queryable as _,
+    },
 };
+use sqlx::SqlitePool;
+use std::{collections::HashMap, future::Future, iter, sync::Arc};
 
 #[derive(sqlx::FromRow)]
 struct RegistrationRow {
@@ -587,17 +587,18 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::Arc};
-
-    use common::proto::{Registration, RegistrationItem};
+    use super::{attach_items, RegistrationItemRow, RegistrationRow, SqliteStore, Store};
+    use crate::{
+        proto::{Registration, RegistrationItem},
+        store::{
+            common::new_id, registration::Query, CompoundOperator, CompoundQuery, Error,
+            LogicalQuery,
+        },
+    };
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
-
-    use super::{attach_items, RegistrationItemRow, RegistrationRow, SqliteStore, Store};
-    use crate::store::{
-        common::new_id, registration::Query, CompoundOperator, CompoundQuery, Error, LogicalQuery,
-    };
+    use std::{str::FromStr, sync::Arc};
     use test_case::test_case;
 
     struct Init {

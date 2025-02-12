@@ -1,6 +1,7 @@
 use crate::{
     api::store_error_to_status,
     keys::KeyManager,
+    proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse},
     store::{
         self,
         keys::Store as KeyStore,
@@ -9,7 +10,6 @@ use crate::{
     },
 };
 use argon2::{Argon2, PasswordVerifier};
-use common::proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use http::header::{HeaderMap, COOKIE, SET_COOKIE};

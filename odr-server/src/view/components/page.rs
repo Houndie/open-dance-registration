@@ -1,12 +1,12 @@
 use crate::{
     hooks::toasts::use_toasts,
+    proto::LogoutRequest,
     server_functions::authentication::logout,
     view::{
         app::Routes,
         components::{breadcrumb::Breadcrumb, with_toasts::WithToasts},
     },
 };
-use common::proto::LogoutRequest;
 use dioxus::prelude::*;
 
 #[component]

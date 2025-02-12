@@ -1,9 +1,13 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::user::Service, server_functions::Error, store::user::SqliteStore};
-    use common::proto::{
-        user_service_server::UserService, QueryUsersRequest, QueryUsersResponse,
-        UpsertUsersRequest, UpsertUsersResponse,
+    use crate::{
+        api::user::Service,
+        proto::{
+            user_service_server::UserService, QueryUsersRequest, QueryUsersResponse,
+            UpsertUsersRequest, UpsertUsersResponse,
+        },
+        server_functions::Error,
+        store::user::SqliteStore,
     };
     use dioxus::prelude::*;
     use std::sync::Arc;
@@ -97,10 +101,12 @@ pub use server_only::{query, upsert, AnyService};
 
 #[cfg(feature = "web")]
 mod web_only {
-    use crate::server_functions::{wasm_client, Error};
-    use common::proto::{
-        user_service_client::UserServiceClient, QueryUsersRequest, QueryUsersResponse,
-        UpsertUsersRequest, UpsertUsersResponse,
+    use crate::{
+        proto::{
+            user_service_client::UserServiceClient, QueryUsersRequest, QueryUsersResponse,
+            UpsertUsersRequest, UpsertUsersResponse,
+        },
+        server_functions::{wasm_client, Error},
     };
 
     pub async fn upsert(request: UpsertUsersRequest) -> Result<UpsertUsersResponse, Error> {

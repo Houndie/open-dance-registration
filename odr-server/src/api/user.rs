@@ -1,18 +1,16 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
-    store::{
-        user::{self, PasswordType, Query, Store},
-        CompoundOperator, CompoundQuery,
-    },
-    user::hash_password,
-};
-use common::{
     password,
     proto::{
         self, compound_user_query, user::Password, user_query, DeleteUsersRequest,
         DeleteUsersResponse, QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest,
         UpsertUsersResponse, UserQuery,
     },
+    store::{
+        user::{self, PasswordType, Query, Store},
+        CompoundOperator, CompoundQuery,
+    },
+    user::hash_password,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

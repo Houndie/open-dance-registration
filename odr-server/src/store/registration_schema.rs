@@ -1,20 +1,19 @@
+use crate::{
+    proto::{
+        multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
+        CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
+        RegistrationSchemaItemType, SelectOption, SelectType, TextType,
+    },
+    store::{
+        common::{ids_in_table, new_id},
+        Bindable as _, Error, Queryable as _,
+    },
+};
+use sqlx::SqlitePool;
 use std::{
     collections::{BTreeMap, HashMap},
     future::Future,
     sync::Arc,
-};
-
-use sqlx::SqlitePool;
-
-use common::proto::{
-    multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
-    CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
-    RegistrationSchemaItemType, SelectOption, SelectType, TextType,
-};
-
-use super::{
-    common::{ids_in_table, new_id},
-    Bindable as _, Error, Queryable as _,
 };
 
 #[derive(sqlx::FromRow)]
@@ -832,25 +831,23 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, str::FromStr, sync::Arc};
-
-    use common::proto::{
-        multi_select_type, registration_schema_item_type::Type as ItemType, select_type, text_type,
-        CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
-        RegistrationSchemaItemType, SelectOption, SelectType, TextType,
+    use super::{items_to_schema, ItemRow, Query, SqliteStore};
+    use crate::{
+        proto::{
+            multi_select_type, registration_schema_item_type::Type as ItemType, select_type,
+            text_type, CheckboxType, MultiSelectType, RegistrationSchema, RegistrationSchemaItem,
+            RegistrationSchemaItemType, SelectOption, SelectType, TextType,
+        },
+        store::{
+            common::new_id,
+            registration_schema::{OptionRow, Store},
+            CompoundOperator, CompoundQuery, Error, LogicalQuery,
+        },
     };
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
-
-    use crate::store::{
-        common::new_id,
-        registration_schema::{OptionRow, Store},
-        CompoundOperator, CompoundQuery, Error, LogicalQuery,
-    };
-
-    use super::{items_to_schema, ItemRow, Query, SqliteStore};
-
+    use std::{collections::HashMap, str::FromStr, sync::Arc};
     use test_case::test_case;
 
     struct Init {

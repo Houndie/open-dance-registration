@@ -1,13 +1,12 @@
-use std::{future::Future, sync::Arc};
-
-use sqlx::SqlitePool;
-
-use common::proto::Event;
-
-use super::{
-    common::{ids_in_table, new_id},
-    Bindable as _, Error, Queryable as _,
+use crate::{
+    proto::Event,
+    store::{
+        common::{ids_in_table, new_id},
+        Bindable as _, Error, Queryable as _,
+    },
 };
+use sqlx::SqlitePool;
+use std::{future::Future, sync::Arc};
 
 #[derive(sqlx::FromRow)]
 struct EventRow {
@@ -253,15 +252,13 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
-    use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
-
-    use common::proto::Event;
-
-    use crate::store::{common::new_id, CompoundOperator, CompoundQuery, LogicalQuery};
-
     use super::{Error, EventRow, Query, SqliteStore, Store};
+    use crate::{
+        proto::Event,
+        store::{common::new_id, CompoundOperator, CompoundQuery, LogicalQuery},
+    };
+    use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
+    use std::sync::Arc;
 
     struct Init {
         org: String,

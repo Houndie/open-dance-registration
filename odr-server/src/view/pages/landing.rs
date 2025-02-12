@@ -1,5 +1,6 @@
 use crate::{
     hooks::{handle_error::use_handle_error, toasts::use_toasts},
+    proto::{ClaimsRequest, Organization, QueryOrganizationsRequest, UpsertOrganizationsRequest},
     server_functions::{
         authentication::claims,
         organization::{query, upsert},
@@ -15,9 +16,6 @@ use crate::{
             table::Table,
         },
     },
-};
-use common::proto::{
-    ClaimsRequest, Organization, QueryOrganizationsRequest, UpsertOrganizationsRequest,
 };
 use dioxus::prelude::*;
 

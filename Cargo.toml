@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "common", "odr-server"]
+members = [ "odr-server"]
 
 [profile]
 

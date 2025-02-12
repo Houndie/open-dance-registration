@@ -1,5 +1,9 @@
 use crate::{
     hooks::handle_error::use_handle_error,
+    proto::{
+        event_query, organization_query, string_query, ClaimsRequest, EventQuery,
+        OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
+    },
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations, ProtoWrapper,
@@ -8,10 +12,6 @@ use crate::{
         app::{Error, Routes},
         components::{menu::Menu as GenericMenu, page::Page as GenericPage},
     },
-};
-use common::proto::{
-    event_query, organization_query, string_query, ClaimsRequest, EventQuery, OrganizationQuery,
-    QueryEventsRequest, QueryOrganizationsRequest, StringQuery,
 };
 use dioxus::prelude::*;
 

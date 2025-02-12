@@ -1,5 +1,13 @@
 use crate::{
     hooks::{handle_error::use_handle_error, toasts::use_toasts},
+    proto::{
+        self, event_query, organization_query, registration_query, registration_schema_item_type,
+        registration_schema_query, string_query, ClaimsRequest, EventQuery, Organization,
+        OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
+        QueryRegistrationSchemasRequest, QueryRegistrationsRequest, Registration, RegistrationItem,
+        RegistrationQuery, RegistrationSchema, RegistrationSchemaQuery, StringQuery,
+        UpsertRegistrationsRequest,
+    },
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations, registration::query as query_registrations,
@@ -19,14 +27,6 @@ use crate::{
         },
         pages::event::{Menu, MenuItem},
     },
-};
-use common::proto::{
-    self, event_query, organization_query, registration_query, registration_schema_item_type,
-    registration_schema_query, string_query, ClaimsRequest, EventQuery, Organization,
-    OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
-    QueryRegistrationSchemasRequest, QueryRegistrationsRequest, Registration, RegistrationItem,
-    RegistrationQuery, RegistrationSchema, RegistrationSchemaQuery, StringQuery,
-    UpsertRegistrationsRequest,
 };
 use dioxus::prelude::*;
 use std::collections::{BTreeSet, HashMap, HashSet};

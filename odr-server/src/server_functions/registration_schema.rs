@@ -1,13 +1,14 @@
 #[cfg(feature = "server")]
 mod server_only {
     use crate::{
-        api::registration_schema::Service, server_functions::Error,
+        api::registration_schema::Service,
+        proto::{
+            registration_schema_service_server::RegistrationSchemaService,
+            QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
+            UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
+        },
+        server_functions::Error,
         store::registration_schema::SqliteStore,
-    };
-    use common::proto::{
-        registration_schema_service_server::RegistrationSchemaService,
-        QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
-        UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
     };
     use dioxus::prelude::*;
     use std::sync::Arc;
@@ -79,11 +80,13 @@ pub use server_only::{query, upsert, AnyService};
 
 #[cfg(feature = "web")]
 mod web_only {
-    use crate::server_functions::{wasm_client, Error};
-    use common::proto::{
-        registration_schema_service_client::RegistrationSchemaServiceClient,
-        QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
-        UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
+    use crate::{
+        proto::{
+            registration_schema_service_client::RegistrationSchemaServiceClient,
+            QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
+            UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
+        },
+        server_functions::{wasm_client, Error},
     };
 
     pub async fn upsert(

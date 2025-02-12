@@ -1,5 +1,8 @@
-use crate::{api::ValidationError, store};
-use common::proto::{string_query, StringQuery};
+use crate::{
+    api::ValidationError,
+    proto::{string_query, StringQuery},
+    store,
+};
 
 pub fn try_logical_string_query<F: store::Field<Item = String>>(
     q: StringQuery,

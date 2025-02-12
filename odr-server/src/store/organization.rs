@@ -1,11 +1,12 @@
-use std::{future::Future, sync::Arc};
-
-use super::{
-    common::{ids_in_table, new_id},
-    Bindable as _, Error, Queryable as _,
+use crate::{
+    proto::Organization,
+    store::{
+        common::{ids_in_table, new_id},
+        Bindable as _, Error, Queryable as _,
+    },
 };
-use common::proto::Organization;
 use sqlx::SqlitePool;
+use std::{future::Future, sync::Arc};
 
 #[derive(sqlx::FromRow)]
 struct OrganizationRow {
@@ -240,17 +241,15 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::Arc};
-
-    use common::proto::Organization;
+    use super::{OrganizationRow, Query, SqliteStore, Store};
+    use crate::{
+        proto::Organization,
+        store::{common::new_id, CompoundOperator, CompoundQuery, Error, LogicalQuery},
+    };
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
-
-    use crate::store::{common::new_id, CompoundOperator, CompoundQuery, Error, LogicalQuery};
-
-    use super::{OrganizationRow, Query, SqliteStore, Store};
-
+    use std::{str::FromStr, sync::Arc};
     use test_case::test_case;
 
     struct Init {

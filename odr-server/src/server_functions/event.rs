@@ -1,9 +1,13 @@
 #[cfg(feature = "server")]
 mod server_only {
-    use crate::{api::event::Service, server_functions::Error, store::event::SqliteStore};
-    use common::proto::{
-        event_service_server::EventService, QueryEventsRequest, QueryEventsResponse,
-        UpsertEventsRequest, UpsertEventsResponse,
+    use crate::{
+        api::event::Service,
+        proto::{
+            event_service_server::EventService, QueryEventsRequest, QueryEventsResponse,
+            UpsertEventsRequest, UpsertEventsResponse,
+        },
+        server_functions::Error,
+        store::event::SqliteStore,
     };
     use dioxus::prelude::*;
     use std::sync::Arc;
@@ -73,10 +77,12 @@ pub use server_only::{query, upsert, AnyService};
 
 #[cfg(feature = "web")]
 mod web_only {
-    use crate::server_functions::{wasm_client, Error};
-    use common::proto::{
-        event_service_client::EventServiceClient, QueryEventsRequest, QueryEventsResponse,
-        UpsertEventsRequest, UpsertEventsResponse,
+    use crate::{
+        proto::{
+            event_service_client::EventServiceClient, QueryEventsRequest, QueryEventsResponse,
+            UpsertEventsRequest, UpsertEventsResponse,
+        },
+        server_functions::{wasm_client, Error},
     };
 
     pub async fn upsert(request: UpsertEventsRequest) -> Result<UpsertEventsResponse, Error> {

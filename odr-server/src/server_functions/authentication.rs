@@ -2,12 +2,12 @@
 mod server_only {
     use crate::{
         api::authentication::Service,
+        proto::{
+            authentication_service_server::AuthenticationService, ClaimsRequest, ClaimsResponse,
+            LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
+        },
         server_functions::Error,
         store::{keys::SqliteStore as KeySqliteStore, user::SqliteStore as UserSqliteStore},
-    };
-    use common::proto::{
-        authentication_service_server::AuthenticationService, ClaimsRequest, ClaimsResponse,
-        LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
     };
     use dioxus::prelude::*;
     use std::sync::Arc;
@@ -138,10 +138,12 @@ pub use server_only::{claims, login, logout, AnyService};
 
 #[cfg(feature = "web")]
 mod web_only {
-    use crate::server_functions::{wasm_client, Error};
-    use common::proto::{
-        authentication_service_client::AuthenticationServiceClient, ClaimsRequest, ClaimsResponse,
-        LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
+    use crate::{
+        proto::{
+            authentication_service_client::AuthenticationServiceClient, ClaimsRequest,
+            ClaimsResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
+        },
+        server_functions::{wasm_client, Error},
     };
 
     pub async fn login(request: LoginRequest) -> Result<LoginResponse, Error> {

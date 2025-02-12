@@ -3,6 +3,15 @@ use crate::{
         handle_error::use_handle_error,
         toasts::{use_toasts, ToastManager},
     },
+    proto::{
+        self, event_query, multi_select_type, organization_query,
+        registration_schema_item_type::Type as ItemType, registration_schema_query, select_type,
+        string_query, text_type, CheckboxType, ClaimsRequest, EventQuery, MultiSelectType,
+        Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
+        QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem,
+        RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery,
+        TextType, UpsertRegistrationSchemasRequest,
+    },
     server_functions::{
         authentication::claims, event::query as query_events,
         organization::query as query_organizations,
@@ -22,15 +31,6 @@ use crate::{
         },
         pages::event::{Menu, MenuItem},
     },
-};
-use common::proto::{
-    self, event_query, multi_select_type, organization_query,
-    registration_schema_item_type::Type as ItemType, registration_schema_query, select_type,
-    string_query, text_type, CheckboxType, ClaimsRequest, EventQuery, MultiSelectType,
-    Organization, OrganizationQuery, QueryEventsRequest, QueryOrganizationsRequest,
-    QueryRegistrationSchemasRequest, RegistrationSchema, RegistrationSchemaItem,
-    RegistrationSchemaItemType, RegistrationSchemaQuery, SelectOption, SelectType, StringQuery,
-    TextType, UpsertRegistrationSchemasRequest,
 };
 use dioxus::prelude::*;
 use futures::join;

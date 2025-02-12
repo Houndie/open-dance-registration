@@ -1,5 +1,6 @@
 use crate::{
     hooks::toasts::use_toasts,
+    proto::{ClaimsRequest, LoginRequest},
     server_functions::authentication::{claims, login},
     view::{
         app::{Error, Routes},
@@ -9,7 +10,6 @@ use crate::{
         },
     },
 };
-use common::proto::{ClaimsRequest, LoginRequest};
 use dioxus::prelude::*;
 
 #[derive(Default)]

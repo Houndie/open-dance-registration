@@ -1,16 +1,16 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    proto::{
+        self, compound_registration_schema_query, multi_select_type, registration_schema_item_type,
+        registration_schema_query, select_type, text_type, DeleteRegistrationSchemasResponse,
+        QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse, RegistrationSchema,
+        RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
+        UpsertRegistrationSchemasResponse,
+    },
     store::{
         registration_schema::{Query, Store},
         CompoundOperator, CompoundQuery,
     },
-};
-use common::proto::{
-    self, compound_registration_schema_query, multi_select_type, registration_schema_item_type,
-    registration_schema_query, select_type, text_type, DeleteRegistrationSchemasResponse,
-    QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse, RegistrationSchema,
-    RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
-    UpsertRegistrationSchemasResponse,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};

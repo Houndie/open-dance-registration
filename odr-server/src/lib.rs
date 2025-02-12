@@ -14,5 +14,7 @@ pub mod store;
 pub mod user;
 
 pub mod hooks;
+pub mod password;
+pub mod proto;
 pub mod server_functions;
 pub mod view;

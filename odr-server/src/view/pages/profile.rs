@@ -1,5 +1,9 @@
 use crate::{
     hooks::{handle_error::use_handle_error, toasts::use_toasts},
+    proto::{
+        string_query, user, user_query, ClaimsRequest, QueryUsersRequest, StringQuery,
+        UpsertUsersRequest, User, UserQuery,
+    },
     server_functions::{
         authentication::claims,
         user::{query as query_users, upsert as upsert_users},
@@ -13,10 +17,6 @@ use crate::{
             page::Page as GenericPage,
         },
     },
-};
-use common::proto::{
-    string_query, user, user_query, ClaimsRequest, QueryUsersRequest, StringQuery,
-    UpsertUsersRequest, User, UserQuery,
 };
 use dioxus::prelude::*;
 

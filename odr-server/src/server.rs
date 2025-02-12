@@ -6,6 +6,7 @@ use crate::{
         organization::Service as OrganizationService, registration::Service as RegistrationService,
         registration_schema::Service as SchemaService, user::Service as UserService,
     },
+    proto,
     server_functions::{
         authentication::AnyService as AnyAuthenticationService,
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
@@ -18,7 +19,6 @@ use crate::{
         registration_schema::SqliteStore as SchemaStore, user::SqliteStore as UserStore,
     },
 };
-use common::proto;
 use dioxus::prelude::{DioxusRouterExt, ServeConfig};
 use sqlx::SqlitePool;
 use std::{env, future::IntoFuture, sync::Arc};

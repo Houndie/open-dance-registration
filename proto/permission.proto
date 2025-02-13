@@ -1,0 +1,80 @@
+syntax = "proto3";
+package proto;
+
+import "queries.proto";
+
+service PermissionService {
+	rpc UpsertPermissions(UpsertPermissionsRequest) returns (UpsertPermissionsResponse) {}
+	rpc QueryPermissions(QueryPermissionsRequest) returns (QueryPermissionsResponse) {}
+	rpc DeletePermissions(DeletePermissionsRequest) returns (DeletePermissionsResponse) {}
+}
+
+message UpsertPermissionsRequest {
+	repeated Permission permissions = 1;
+}
+
+message UpsertPermissionsResponse {
+	repeated Permission permissions = 1;
+}
+
+message QueryPermissionsRequest {
+	// leave empty to fetch all permissions
+	PermissionQuery query = 1;
+}
+
+message QueryPermissionsResponse {
+	repeated Permission permissions = 1;
+}
+
+message DeletePermissionsRequest {
+	repeated string ids = 1;
+}
+
+message DeletePermissionsResponse {}
+
+message Permission {
+	string id = 1;
+	string user_id = 2;
+	oneof role {
+		ServerAdminRole server_admin = 3;
+		OrganizationAdminRole organization_admin = 4;
+		OrganizationViewerRole organization_viewer = 5;
+		EventAdminRole event_admin = 6;
+		EventEditorRole event_editor = 7;
+		EventViewerRole event_viewer = 8;
+	}
+}
+
+message ServerAdminRole {}
+message OrganizationAdminRole {
+	string organization_id = 1;
+}
+message OrganizationViewerRole {
+	string organization_id = 1;
+}
+message EventAdminRole {
+	string event_id = 1;
+}
+message EventEditorRole {
+	string event_id = 1;
+}
+message EventViewerRole {
+	string event_id = 1;
+}
+
+message PermissionQuery {
+	oneof query {
+		StringQuery id = 1;
+		StringQuery user_id = 2;
+		CompoundPermissionQuery compound = 3;
+	}
+}
+
+message CompoundPermissionQuery {
+	enum Operator {
+		AND = 0;
+		OR = 1;
+	}
+	Operator operator = 1;
+	repeated PermissionQuery queries = 2;
+}

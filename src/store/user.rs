@@ -1,12 +1,10 @@
-use std::{future::Future, sync::Arc};
-
-use argon2::password_hash::PasswordHashString;
-use sqlx::SqlitePool;
-
-use super::{
+use crate::store::{
     common::{ids_in_table, new_id},
     Bindable as _, Error, Queryable as _,
 };
+use argon2::password_hash::PasswordHashString;
+use sqlx::SqlitePool;
+use std::{future::Future, sync::Arc};
 
 #[derive(sqlx::FromRow)]
 struct UserRow {
@@ -355,8 +353,10 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::Arc};
-
+    use super::{PasswordType, SqliteStore, Store, User, UserRow};
+    use crate::store::{
+        common::new_id, user::Query, CompoundOperator, CompoundQuery, Error, LogicalQuery,
+    };
     use argon2::{
         password_hash::{PasswordHashString, SaltString},
         Argon2, PasswordHasher,
@@ -365,13 +365,7 @@ mod tests {
     use sqlx::{
         migrate::MigrateDatabase, sqlite::SqliteConnectOptions, ConnectOptions, Sqlite, SqlitePool,
     };
-
-    use crate::store::{
-        common::new_id, user::Query, CompoundOperator, CompoundQuery, Error, LogicalQuery,
-    };
-
-    use super::{PasswordType, SqliteStore, Store, User, UserRow};
-
+    use std::{str::FromStr, sync::Arc};
     use test_case::test_case;
 
     struct Init {

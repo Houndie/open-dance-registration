@@ -1,6 +1,7 @@
 pub mod authentication;
 pub mod event;
 pub mod organization;
+pub mod permission;
 pub mod registration;
 pub mod registration_schema;
 pub mod user;
@@ -47,4 +48,31 @@ pub enum Error {
 
     #[error("error calling grpc function: {0}")]
     GrpcError(tonic::Status),
+}
+
+#[cfg(feature = "server")]
+pub fn tonic_request<T>(request: T) -> tonic::Request<T> {
+    use dioxus::prelude::*;
+
+    let server_context = server_context();
+
+    let mut tonic_request = tonic::Request::new(request);
+    *tonic_request.metadata_mut() =
+        tonic::metadata::MetadataMap::from_headers(server_context.request_parts().headers.clone());
+
+    tonic_request
+}
+
+#[cfg(feature = "server")]
+pub fn tonic_response<T>(mut response: tonic::Response<T>) -> T {
+    use dioxus::prelude::*;
+
+    let server_context = server_context();
+    let metadata = std::mem::take(response.metadata_mut());
+    server_context
+        .response_parts_mut()
+        .headers
+        .extend(metadata.into_headers());
+
+    response.into_inner()
 }

@@ -6,13 +6,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         .file_descriptor_set_path(out_dir.join("descriptors.bin"))
         .compile_protos(
             &[
+                "proto/authentication.proto",
                 "proto/event.proto",
+                "proto/organization.proto",
+                "proto/permission.proto",
+                "proto/queries.proto",
                 "proto/registration_schema.proto",
                 "proto/registration.proto",
-                "proto/organization.proto",
                 "proto/user.proto",
-                "proto/queries.proto",
-                "proto/authentication.proto",
             ],
             &["proto"],
         )?;

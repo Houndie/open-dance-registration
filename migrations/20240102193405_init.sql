@@ -71,3 +71,15 @@ CREATE TABLE keys
 	eddsa_key  BLOB NOT NULL,
 	created_at INT NOT NULL
 );
+
+CREATE TABLE permissions
+(
+	id           TEXT                                                                                                                               NOT NULL PRIMARY KEY,
+	user         TEXT                                                                                                                               NOT NULL,
+	role         TEXT CHECK( role IN ("SERVER_ADMIN", "ORGANIZATION_ADMIN", "ORGANIZATION_VIEWER", "EVENT_ADMIN", "EVENT_EDITOR", "EVENT_VIEWER") ) NOT NULL,
+	organization TEXT,
+	event        TEXT,
+	FOREIGN KEY (user) REFERENCES users (id) ON DELETE CASCADE
+	FOREIGN KEY (organization) REFERENCES organizations (id) ON DELETE CASCADE
+	FOREIGN KEY (event) REFERENCES events (id) ON DELETE CASCADE
+);

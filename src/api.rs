@@ -7,6 +7,7 @@ pub mod authentication;
 mod common;
 pub mod event;
 pub mod organization;
+pub mod permission;
 pub mod registration;
 pub mod registration_schema;
 pub mod user;

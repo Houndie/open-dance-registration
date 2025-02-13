@@ -6,7 +6,7 @@ mod server_only {
             authentication_service_server::AuthenticationService, ClaimsRequest, ClaimsResponse,
             LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
         },
-        server_functions::Error,
+        server_functions::{tonic_request, tonic_response, Error},
         store::{keys::SqliteStore as KeySqliteStore, user::SqliteStore as UserSqliteStore},
     };
     use dioxus::prelude::*;
@@ -57,23 +57,12 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let server_context = server_context();
+        let response = service
+            .login(tonic_request(request))
+            .await
+            .map_err(Error::GrpcError)?;
 
-        let mut tonic_request = tonic::Request::new(request);
-        *tonic_request.metadata_mut() =
-            MetadataMap::from_headers(server_context.request_parts().headers.clone());
-
-        let mut response = service.login(tonic_request).await.map_err(Error::GrpcError);
-
-        if let Ok(ref mut response) = response {
-            let metadata = std::mem::take(response.metadata_mut());
-            server_context
-                .response_parts_mut()
-                .headers
-                .extend(metadata.into_headers());
-        }
-
-        response.map(|r| r.into_inner())
+        Ok(tonic_response(response))
     }
 
     pub async fn logout(request: LogoutRequest) -> Result<LogoutResponse, Error> {
@@ -82,26 +71,12 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let server_context = server_context();
-
-        let mut tonic_request = tonic::Request::new(request);
-        *tonic_request.metadata_mut() =
-            MetadataMap::from_headers(server_context.request_parts().headers.clone());
-
-        let mut response = service
-            .logout(tonic_request)
+        let response = service
+            .logout(tonic_request(request))
             .await
-            .map_err(Error::GrpcError);
+            .map_err(Error::GrpcError)?;
 
-        if let Ok(ref mut response) = response {
-            let metadata = std::mem::take(response.metadata_mut());
-            server_context
-                .response_parts_mut()
-                .headers
-                .extend(metadata.into_headers());
-        }
-
-        response.map(|r| r.into_inner())
+        Ok(tonic_response(response))
     }
 
     pub async fn claims(request: ClaimsRequest) -> Result<ClaimsResponse, Error> {
@@ -110,26 +85,12 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let server_context = server_context();
-
-        let mut tonic_request = tonic::Request::new(request);
-        *tonic_request.metadata_mut() =
-            MetadataMap::from_headers(server_context.request_parts().headers.clone());
-
-        let mut response = service
-            .claims(tonic_request)
+        let response = service
+            .claims(tonic_request(request))
             .await
-            .map_err(Error::GrpcError);
+            .map_err(Error::GrpcError)?;
 
-        if let Ok(ref mut response) = response {
-            let metadata = std::mem::take(response.metadata_mut());
-            server_context
-                .response_parts_mut()
-                .headers
-                .extend(metadata.into_headers());
-        }
-
-        response.map(|r| r.into_inner())
+        Ok(tonic_response(response))
     }
 }
 

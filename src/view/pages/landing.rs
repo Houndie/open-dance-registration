@@ -136,6 +136,7 @@ fn PageBody(orgs: Vec<Organization>) -> Element {
 pub enum MenuItem {
     None,
     Home,
+    ServerSettings,
 }
 
 impl MenuItem {
@@ -170,6 +171,16 @@ pub fn Menu(highlight: Option<MenuItem>) -> Element {
                             nav.push(Routes::LandingPage);
                         },
                         "Home"
+                    }
+                }
+                li {
+                    a {
+                        class: highlight.is_active(&MenuItem::ServerSettings),
+                        onclick: move |e| {
+                            e.prevent_default();
+                            nav.push(Routes::ServerSettings);
+                        },
+                        "Settings"
                     }
                 }
             }

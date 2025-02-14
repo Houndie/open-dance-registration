@@ -7,6 +7,7 @@ use crate::{
         not_found::Page as NotFound, organization::Page as OrganizationPage,
         profile::Page as ProfilePage, registration::Page as RegistrationPage,
         registration_schema::Page as RegistrationSchemaPage,
+        server_settings::Page as ServerSettings,
     },
 };
 
@@ -66,4 +67,7 @@ pub enum Routes {
 
     #[route("/404")]
     NotFound,
+
+    #[route("/settings")]
+    ServerSettings,
 }

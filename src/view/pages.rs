@@ -6,3 +6,4 @@ pub mod organization;
 pub mod profile;
 pub mod registration;
 pub mod registration_schema;
+pub mod server_settings;

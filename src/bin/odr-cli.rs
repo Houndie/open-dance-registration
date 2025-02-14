@@ -3,8 +3,13 @@ use std::{env, sync::Arc};
 use clap::{Parser, Subcommand};
 use odr_server::{
     keys::KeyManager,
+    proto::{
+        permission_role, EventAdminRole, EventEditorRole, EventViewerRole, OrganizationAdminRole,
+        OrganizationViewerRole, Permission, PermissionRole, ServerAdminRole,
+    },
     store::{
         keys::{SqliteStore as KeyStore, Store as _},
+        permission::{SqliteStore as PermissionStore, Store as _},
         user::{self, PasswordType, SqliteStore as UserStore, Store as _, User},
     },
     user::hash_password,
@@ -28,6 +33,11 @@ enum Commands {
     User {
         #[clap(subcommand)]
         subcmd: UserSubcommand,
+    },
+
+    Permission {
+        #[clap(subcommand)]
+        subcmd: PermissionSubcommand,
     },
 
     Init {
@@ -67,6 +77,23 @@ enum UserSubcommand {
 
         #[clap(long)]
         password: Option<String>,
+
+        #[clap(long)]
+        nointeractive: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PermissionSubcommand {
+    Add {
+        #[clap(long)]
+        email: Option<String>,
+
+        #[clap(long)]
+        permission: Option<String>,
+
+        #[clap(long)]
+        id: Option<String>,
 
         #[clap(long)]
         nointeractive: bool,
@@ -126,6 +153,16 @@ async fn main() -> Result<(), anyhow::Error> {
                 set_password(email, password, !nointeractive).await?;
             }
         },
+        Commands::Permission { subcmd } => match subcmd {
+            PermissionSubcommand::Add {
+                email,
+                permission,
+                id,
+                nointeractive,
+            } => {
+                add_permission(email, permission, id, !nointeractive).await?;
+            }
+        },
         Commands::Init {
             email,
             password,
@@ -182,7 +219,7 @@ async fn add_user(
     password: Option<String>,
     display_name: Option<String>,
     interactive: bool,
-) -> Result<(), anyhow::Error> {
+) -> Result<String, anyhow::Error> {
     let user_store = UserStore::new(db.clone());
     let email = match email {
         Some(email) => email,
@@ -224,7 +261,7 @@ async fn add_user(
     let hashed_password =
         hash_password(&password).map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
 
-    user_store
+    let mut user = user_store
         .upsert(vec![User {
             id: "".to_owned(),
             display_name,
@@ -232,7 +269,8 @@ async fn add_user(
             password: PasswordType::Set(hashed_password),
         }])
         .await?;
-    Ok(())
+
+    Ok(user.remove(0).id)
 }
 
 async fn set_password(
@@ -289,6 +327,114 @@ async fn set_password(
     Ok(())
 }
 
+async fn add_permission(
+    email: Option<String>,
+    permission: Option<String>,
+    id: Option<String>,
+    interactive: bool,
+) -> Result<(), anyhow::Error> {
+    let db_url = db_url();
+    let db = Arc::new(SqlitePool::connect(&db_url).await?);
+    let user_store = UserStore::new(db.clone());
+    let permission_store = PermissionStore::new(db.clone());
+
+    let email = match email {
+        Some(email) => email,
+        None => {
+            if interactive {
+                inquire::Text::new("Email").prompt()?
+            } else {
+                return Err(anyhow::anyhow!("--nointeractive set, --email must be set"));
+            }
+        }
+    };
+
+    let mut user = user_store
+        .query(Some(&user::Query::Email(user::EmailQuery::Equals(
+            email.clone(),
+        ))))
+        .await?;
+
+    let user = match user.pop() {
+        Some(user) => user,
+        None => {
+            return Err(anyhow::anyhow!("User not found"));
+        }
+    };
+
+    let permission = match permission {
+        Some(permission) => permission,
+        None => {
+            if interactive {
+                inquire::Text::new("Permission").prompt()?
+            } else {
+                return Err(anyhow::anyhow!(
+                    "--nointeractive set, --permission must be set"
+                ));
+            }
+        }
+    };
+
+    let get_id = || match id {
+        Some(id) => Ok(id),
+        None => {
+            if interactive {
+                inquire::Text::new("ID").prompt().map_err(|e| e.into())
+            } else {
+                Err(anyhow::anyhow!("--nointeractive set, --id must be set"))
+            }
+        }
+    };
+
+    let role = match permission.as_str() {
+        "SERVER_ADMIN" => PermissionRole {
+            role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+        },
+        "ORGANIZATION_ADMIN" => PermissionRole {
+            role: Some(permission_role::Role::OrganizationAdmin(
+                OrganizationAdminRole {
+                    organization_id: get_id()?,
+                },
+            )),
+        },
+        "ORGANIZATION_VIEWER" => PermissionRole {
+            role: Some(permission_role::Role::OrganizationViewer(
+                OrganizationViewerRole {
+                    organization_id: get_id()?,
+                },
+            )),
+        },
+        "EVENT_ADMIN" => PermissionRole {
+            role: Some(permission_role::Role::EventAdmin(EventAdminRole {
+                event_id: get_id()?,
+            })),
+        },
+        "EVENT_EDITOR" => PermissionRole {
+            role: Some(permission_role::Role::EventEditor(EventEditorRole {
+                event_id: get_id()?,
+            })),
+        },
+        "EVENT_VIEWER" => PermissionRole {
+            role: Some(permission_role::Role::EventViewer(EventViewerRole {
+                event_id: get_id()?,
+            })),
+        },
+        _ => {
+            return Err(anyhow::anyhow!("Invalid permission"));
+        }
+    };
+
+    permission_store
+        .upsert(vec![Permission {
+            id: "".to_owned(),
+            user_id: user.id,
+            role: Some(role),
+        }])
+        .await?;
+
+    Ok(())
+}
+
 async fn init(
     email: Option<String>,
     password: Option<String>,
@@ -313,7 +459,18 @@ async fn init(
     let user_store = UserStore::new(db.clone());
     if user_store.query(None).await?.is_empty() {
         println!("No users found, adding new user");
-        add_user(db, email, password, display_name, interactive).await?;
+        let user_id = add_user(db.clone(), email, password, display_name, interactive).await?;
+
+        let permission_store = PermissionStore::new(db.clone());
+        permission_store
+            .upsert(vec![Permission {
+                id: "".to_owned(),
+                user_id,
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                }),
+            }])
+            .await?;
     }
 
     Ok(())

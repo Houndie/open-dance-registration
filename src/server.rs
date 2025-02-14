@@ -13,6 +13,7 @@ use crate::{
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
         permission::AnyService as AnyPermissionService,
         registration_schema::AnyService as AnyRegistrationSchemaService,
+        user::AnyService as AnyUserService,
     },
     store::{
         event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
@@ -144,6 +145,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     })
         as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
 
+    let user_provider_state = Box::new(move || {
+        Box::new(AnyUserService::new_sqlite(user_service.clone())) as Box<dyn std::any::Any>
+    })
+        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+
     let permission_provider_state = Box::new(move || {
         Box::new(AnyPermissionService::new_sqlite(permission_service.clone()))
             as Box<dyn std::any::Any>
@@ -156,6 +162,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             event_provider_state,
             organization_provider_state,
             registration_schema_provider_state,
+            user_provider_state,
             permission_provider_state,
         ]))
         .build()?;

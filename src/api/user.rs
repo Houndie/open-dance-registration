@@ -39,18 +39,18 @@ fn proto_to_user(proto_user: proto::User) -> Result<user::User, Status> {
 
     Ok(user::User {
         id: proto_user.id,
-        email: proto_user.email,
+        username: proto_user.username,
         password,
-        display_name: proto_user.display_name,
+        email: proto_user.email,
     })
 }
 
 fn user_to_proto(user: user::User) -> proto::User {
     proto::User {
         id: user.id,
-        email: user.email,
+        username: user.username,
         password: None,
-        display_name: user.display_name,
+        email: user.email,
     }
 }
 
@@ -59,7 +59,7 @@ fn validate_user(user: &proto::User) -> Result<(), ValidationError> {
         return Err(ValidationError::new_empty("email"));
     }
 
-    if user.display_name == "" {
+    if user.username == "" {
         return Err(ValidationError::new_empty("display_name"));
     }
 
@@ -95,7 +95,7 @@ fn try_parse_user_query(query: UserQuery) -> Result<Query, ValidationError> {
             try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
         )),
 
-        Some(user_query::Query::DisplayName(display_name_query)) => Ok(Query::DisplayName(
+        Some(user_query::Query::Username(display_name_query)) => Ok(Query::Username(
             try_logical_string_query(display_name_query).map_err(|e| e.with_context("query.id"))?,
         )),
 

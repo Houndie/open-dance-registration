@@ -42,16 +42,16 @@ enum Commands {
 
     Init {
         #[clap(long)]
-        email: Option<String>,
+        username: Option<String>,
 
         #[clap(long)]
         password: Option<String>,
 
         #[clap(long)]
-        display_name: Option<String>,
+        nointeractive: bool,
 
         #[clap(long)]
-        nointeractive: bool,
+        email: Option<String>,
     },
 }
 
@@ -65,7 +65,7 @@ enum UserSubcommand {
         password: Option<String>,
 
         #[clap(long)]
-        display_name: Option<String>,
+        username: Option<String>,
 
         #[clap(long)]
         nointeractive: bool,
@@ -73,7 +73,7 @@ enum UserSubcommand {
 
     SetPassword {
         #[clap(long)]
-        email: Option<String>,
+        username: Option<String>,
 
         #[clap(long)]
         password: Option<String>,
@@ -87,7 +87,7 @@ enum UserSubcommand {
 enum PermissionSubcommand {
     Add {
         #[clap(long)]
-        email: Option<String>,
+        username: Option<String>,
 
         #[clap(long)]
         permission: Option<String>,
@@ -138,38 +138,38 @@ async fn main() -> Result<(), anyhow::Error> {
             UserSubcommand::Add {
                 email,
                 password,
-                display_name,
+                username,
                 nointeractive,
             } => {
                 let db_url = db_url();
                 let db = Arc::new(SqlitePool::connect(&db_url).await?);
-                add_user(db, email, password, display_name, !nointeractive).await?;
+                add_user(db, email, password, username, !nointeractive).await?;
             }
             UserSubcommand::SetPassword {
-                email,
+                username,
                 password,
                 nointeractive,
             } => {
-                set_password(email, password, !nointeractive).await?;
+                set_password(username, password, !nointeractive).await?;
             }
         },
         Commands::Permission { subcmd } => match subcmd {
             PermissionSubcommand::Add {
-                email,
+                username,
                 permission,
                 id,
                 nointeractive,
             } => {
-                add_permission(email, permission, id, !nointeractive).await?;
+                add_permission(username, permission, id, !nointeractive).await?;
             }
         },
         Commands::Init {
             email,
             password,
-            display_name,
+            username,
             nointeractive,
         } => {
-            init(email, password, display_name, !nointeractive).await?;
+            init(email, password, username, !nointeractive).await?;
         }
     };
 
@@ -217,17 +217,20 @@ async fn add_user(
     db: Arc<SqlitePool>,
     email: Option<String>,
     password: Option<String>,
-    display_name: Option<String>,
+    username: Option<String>,
     interactive: bool,
 ) -> Result<String, anyhow::Error> {
     let user_store = UserStore::new(db.clone());
-    let email = match email {
-        Some(email) => email,
+
+    let username = match username {
+        Some(username) => username,
         None => {
             if interactive {
-                inquire::Text::new("Email").prompt()?
+                inquire::Text::new("Username").prompt()?
             } else {
-                return Err(anyhow::anyhow!("--nointeractive set, --email must be set"));
+                return Err(anyhow::anyhow!(
+                    "--nointeractive set, --username must be set"
+                ));
             }
         }
     };
@@ -245,42 +248,6 @@ async fn add_user(
         }
     };
 
-    let display_name = match display_name {
-        Some(display_name) => display_name,
-        None => {
-            if interactive {
-                inquire::Text::new("Display Name").prompt()?
-            } else {
-                return Err(anyhow::anyhow!(
-                    "--nointeractive set, --display_name must be set"
-                ));
-            }
-        }
-    };
-
-    let hashed_password =
-        hash_password(&password).map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
-
-    let mut user = user_store
-        .upsert(vec![User {
-            id: "".to_owned(),
-            display_name,
-            email,
-            password: PasswordType::Set(hashed_password),
-        }])
-        .await?;
-
-    Ok(user.remove(0).id)
-}
-
-async fn set_password(
-    email: Option<String>,
-    password: Option<String>,
-    interactive: bool,
-) -> Result<(), anyhow::Error> {
-    let db_url = db_url();
-    let db = Arc::new(SqlitePool::connect(&db_url).await?);
-    let user_store = UserStore::new(db.clone());
     let email = match email {
         Some(email) => email,
         None => {
@@ -292,9 +259,43 @@ async fn set_password(
         }
     };
 
+    let hashed_password =
+        hash_password(&password).map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
+
     let mut user = user_store
-        .query(Some(&user::Query::Email(user::EmailQuery::Equals(
-            email.clone(),
+        .upsert(vec![User {
+            id: "".to_owned(),
+            username,
+            email,
+            password: PasswordType::Set(hashed_password),
+        }])
+        .await?;
+
+    Ok(user.remove(0).id)
+}
+
+async fn set_password(
+    username: Option<String>,
+    password: Option<String>,
+    interactive: bool,
+) -> Result<(), anyhow::Error> {
+    let db_url = db_url();
+    let db = Arc::new(SqlitePool::connect(&db_url).await?);
+    let user_store = UserStore::new(db.clone());
+    let username = match username {
+        Some(username) => username,
+        None => {
+            if interactive {
+                inquire::Text::new("Email").prompt()?
+            } else {
+                return Err(anyhow::anyhow!("--nointeractive set, --email must be set"));
+            }
+        }
+    };
+
+    let mut user = user_store
+        .query(Some(&user::Query::Username(user::UsernameQuery::Equals(
+            username.clone(),
         ))))
         .await?;
 
@@ -328,7 +329,7 @@ async fn set_password(
 }
 
 async fn add_permission(
-    email: Option<String>,
+    username: Option<String>,
     permission: Option<String>,
     id: Option<String>,
     interactive: bool,
@@ -338,8 +339,8 @@ async fn add_permission(
     let user_store = UserStore::new(db.clone());
     let permission_store = PermissionStore::new(db.clone());
 
-    let email = match email {
-        Some(email) => email,
+    let username = match username {
+        Some(username) => username,
         None => {
             if interactive {
                 inquire::Text::new("Email").prompt()?
@@ -350,8 +351,8 @@ async fn add_permission(
     };
 
     let mut user = user_store
-        .query(Some(&user::Query::Email(user::EmailQuery::Equals(
-            email.clone(),
+        .query(Some(&user::Query::Username(user::UsernameQuery::Equals(
+            username.clone(),
         ))))
         .await?;
 
@@ -438,7 +439,7 @@ async fn add_permission(
 async fn init(
     email: Option<String>,
     password: Option<String>,
-    display_name: Option<String>,
+    username: Option<String>,
     interactive: bool,
 ) -> Result<(), anyhow::Error> {
     println!("Initializing database");
@@ -459,7 +460,7 @@ async fn init(
     let user_store = UserStore::new(db.clone());
     if user_store.query(None).await?.is_empty() {
         println!("No users found, adding new user");
-        let user_id = add_user(db.clone(), email, password, display_name, interactive).await?;
+        let user_id = add_user(db.clone(), email, password, username, interactive).await?;
 
         let permission_store = PermissionStore::new(db.clone());
         permission_store

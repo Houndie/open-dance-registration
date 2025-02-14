@@ -5,7 +5,7 @@ use crate::{
     store::{
         self,
         keys::Store as KeyStore,
-        user::{EmailQuery, PasswordType, Query, Store as UserStore},
+        user::{PasswordType, Query, Store as UserStore, UsernameQuery},
         CompoundOperator, CompoundQuery,
     },
 };
@@ -148,7 +148,7 @@ impl<KStore: KeyStore, UStore: UserStore>
                 Some(Query::CompoundQuery(CompoundQuery {
                     operator: CompoundOperator::And,
                     queries: vec![
-                        Query::Email(EmailQuery::Equals(credentials.email)),
+                        Query::Username(UsernameQuery::Equals(credentials.email)),
                         Query::PasswordIsSet(true),
                     ],
                 }))

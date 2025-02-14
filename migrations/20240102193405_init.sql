@@ -60,9 +60,9 @@ CREATE TABLE registration_items
 CREATE TABLE users
 (
 	id           TEXT NOT NULL PRIMARY KEY,
-	email        TEXT NOT NULL,
+	username     TEXT NOT NULL UNIQUE,
 	password     TEXT,
-	display_name TEXT NOT NULL
+	email        TEXT
 );
 
 CREATE TABLE keys

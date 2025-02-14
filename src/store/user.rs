@@ -11,7 +11,7 @@ struct UserRow {
     id: String,
     email: String,
     password: Option<String>,
-    display_name: String,
+    username: String,
 }
 
 impl TryFrom<UserRow> for User {
@@ -30,7 +30,7 @@ impl TryFrom<UserRow> for User {
             id: row.id,
             email: row.email,
             password,
-            display_name: row.display_name,
+            username: row.username,
         })
     }
 }
@@ -55,7 +55,7 @@ pub struct User {
     pub id: String,
     pub email: String,
     pub password: PasswordType,
-    pub display_name: String,
+    pub username: String,
 }
 
 pub struct IdField;
@@ -82,22 +82,22 @@ impl super::Field for EmailField {
 
 pub type EmailQuery = super::LogicalQuery<EmailField>;
 
-pub struct DisplayNameField;
+pub struct UsernameField;
 
-impl super::Field for DisplayNameField {
+impl super::Field for UsernameField {
     type Item = String;
 
     fn field() -> &'static str {
-        "display_name"
+        "username"
     }
 }
 
-pub type DisplayNameQuery = super::LogicalQuery<DisplayNameField>;
+pub type UsernameQuery = super::LogicalQuery<UsernameField>;
 
 pub enum Query {
     Id(IdQuery),
     Email(EmailQuery),
-    DisplayName(DisplayNameQuery),
+    Username(UsernameQuery),
     PasswordIsSet(bool),
     CompoundQuery(super::CompoundQuery<Query>),
 }
@@ -107,7 +107,7 @@ impl super::Queryable for Query {
         match self {
             Query::Id(q) => q.where_clause(),
             Query::Email(q) => q.where_clause(),
-            Query::DisplayName(q) => q.where_clause(),
+            Query::Username(q) => q.where_clause(),
             Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
             Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
             Query::CompoundQuery(compound_query) => compound_query.where_clause(),
@@ -131,7 +131,7 @@ where
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::Email(q) => q.bind(query_builder),
-            Query::DisplayName(q) => q.bind(query_builder),
+            Query::Username(q) => q.bind(query_builder),
             Query::PasswordIsSet(_) => query_builder,
             Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
         }
@@ -153,7 +153,7 @@ fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilde
         PasswordType::Unchanged => query_builder,
     };
 
-    query_builder.bind(&user.display_name)
+    query_builder.bind(&user.username)
 }
 
 pub trait Store: Send + Sync + 'static {
@@ -217,7 +217,7 @@ impl Store for SqliteStore {
             .collect::<String>();
 
             let query = format!(
-                "INSERT INTO users (id, email, password, display_name) VALUES {}",
+                "INSERT INTO users (id, email, password, username) VALUES {}",
                 values_clause
             );
 
@@ -242,11 +242,11 @@ impl Store for SqliteStore {
             .collect::<String>();
 
             let query = format!(
-                "WITH mydata(id, email, password, display_name) AS (VALUES {}) 
+                "WITH mydata(id, email, password, username) AS (VALUES {}) 
                     UPDATE users 
                     SET email = mydata.email, 
                         password = mydata.password, 
-                        display_name = mydata.display_name
+                        username = mydata.username
                     FROM mydata
                     WHERE users.id = mydata.id",
                 values_clause
@@ -273,10 +273,10 @@ impl Store for SqliteStore {
             .collect::<String>();
 
             let query = format!(
-                "WITH mydata(id, email, display_name) AS (VALUES {}) 
+                "WITH mydata(id, email, username) AS (VALUES {}) 
                     UPDATE users 
                     SET email = mydata.email, 
-                        display_name = mydata.display_name
+                        username = mydata.username
                     FROM mydata
                     WHERE users.id = mydata.id",
                 values_clause
@@ -315,7 +315,7 @@ impl Store for SqliteStore {
     }
 
     async fn query(&self, query: Option<&Query>) -> Result<Vec<User>, Error> {
-        let base_query_string = "SELECT id, email, password, display_name FROM users";
+        let base_query_string = "SELECT id, email, password, username FROM users";
         let query_string = match query {
             Some(query) => format!("{} WHERE {}", base_query_string, query.where_clause()),
             None => base_query_string.to_owned(),
@@ -414,22 +414,23 @@ mod tests {
         let user1_id = new_id();
         let user1_email = "a@gmail.com";
         let user1_password = new_password("abcde");
-        let user1_display_name = "a";
+        let user1_username = "a";
         let user2_id = new_id();
         let user2_email = "b@gmail.com";
         let user2_password = new_password("fghij");
-        let user2_display_name = "b";
+        let user2_username = "b";
 
-        let query = "INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?), (?, ?, ?, ?)";
+        let query =
+            "INSERT INTO users (id, email, password, username) VALUES (?, ?, ?, ?), (?, ?, ?, ?)";
         sqlx::query(query)
             .bind(&user1_id)
             .bind(user1_email)
             .bind(Some(user1_password.as_str()))
-            .bind(user1_display_name)
+            .bind(user1_username)
             .bind(&user2_id)
             .bind(user2_email)
             .bind(Some(user2_password.as_str()))
-            .bind(user2_display_name)
+            .bind(user2_username)
             .execute(&init.db)
             .await
             .unwrap();
@@ -439,13 +440,13 @@ mod tests {
                 id: user1_id,
                 email: user1_email.to_string(),
                 password: PasswordType::Set(user1_password),
-                display_name: user1_display_name.to_string(),
+                username: user1_username.to_string(),
             },
             User {
                 id: user2_id,
                 email: user2_email.to_string(),
                 password: PasswordType::Set(user2_password),
-                display_name: user2_display_name.to_string(),
+                username: user2_username.to_string(),
             },
         ];
 
@@ -463,13 +464,13 @@ mod tests {
                 id: "".to_string(),
                 email: "a@gmail.com".to_string(),
                 password: PasswordType::Set(new_password("abcde")),
-                display_name: "a".to_string(),
+                username: "a".to_string(),
             },
             User {
                 id: "".to_string(),
                 email: "b@gmail.com".to_string(),
                 password: PasswordType::Set(new_password("fghij")),
-                display_name: "b".to_string(),
+                username: "b".to_string(),
             },
         ];
 
@@ -487,7 +488,7 @@ mod tests {
         assert_eq!(users, returned_users);
 
         let store_user_rows: Vec<UserRow> =
-            sqlx::query_as("SELECT id, email, password, display_name FROM users")
+            sqlx::query_as("SELECT id, email, password, username FROM users")
                 .fetch_all(&*db)
                 .await
                 .unwrap();
@@ -511,7 +512,7 @@ mod tests {
         let db = Arc::new(init.db);
         let store = SqliteStore::new(db.clone());
 
-        users[0].display_name = "new name".to_string();
+        users[0].username = "new name".to_string();
         let password_backup = std::mem::take(&mut users[0].password);
         users[1].email = "c@gmail.com".to_string();
         users[1].password = PasswordType::Set(new_password("klmno"));
@@ -521,7 +522,7 @@ mod tests {
         assert_eq!(users, returned_users);
 
         let store_user_rows: Vec<UserRow> =
-            sqlx::query_as("SELECT id, email, password, display_name FROM users")
+            sqlx::query_as("SELECT id, email, password, username FROM users")
                 .fetch_all(&*db)
                 .await
                 .unwrap();
@@ -551,7 +552,7 @@ mod tests {
                 id: id.clone(),
                 email: "whatever".to_string(),
                 password: PasswordType::Set(new_password("whatever")),
-                display_name: "whatever".to_string(),
+                username: "whatever".to_string(),
             }])
             .await;
 
@@ -641,7 +642,7 @@ mod tests {
         store.delete(&[users[0].id.clone()]).await.unwrap();
 
         let store_user_rows: Vec<UserRow> =
-            sqlx::query_as("SELECT id, email, password, display_name FROM users")
+            sqlx::query_as("SELECT id, email, password, username FROM users")
                 .fetch_all(&*db)
                 .await
                 .unwrap();

@@ -176,7 +176,7 @@ fn PageBody(
                     let permission = permission.clone();
                     let user_map = user_map.read();
                     let user = user_map.get(&permission.user_id).unwrap().clone();
-                    let user_name = user.display_name.clone();
+                    let user_name = user.username.clone();
                     rsx!{
                         tr {
                             key: "{permission.id}",
@@ -205,7 +205,7 @@ fn PageBody(
 
 #[derive(Default)]
 struct AddPermissionFormState {
-    display_name: String,
+    username: String,
 }
 
 #[component]
@@ -217,7 +217,7 @@ fn AddPermissionModal(
 ) -> Element {
     let mut form_state = use_signal(|| match &permission {
         Some((_, user)) => AddPermissionFormState {
-            display_name: user.display_name.clone(),
+            username: user.username.clone(),
         },
         None => AddPermissionFormState::default(),
     });
@@ -225,7 +225,7 @@ fn AddPermissionModal(
     let mut toaster = use_toasts();
 
     let title = match &permission {
-        Some((_, user)) => user.display_name.clone(),
+        Some((_, user)) => user.username.clone(),
         None => "Add User".to_string(),
     };
 
@@ -267,8 +267,8 @@ fn AddPermissionModal(
                 spawn( async move {
                     let user_response= query_users(QueryUsersRequest {
                         query: Some(UserQuery {
-                            query: Some(user_query::Query::DisplayName(StringQuery {
-                                operator: Some(string_query::Operator::Equals(form_state.read().display_name.clone())), })),
+                            query: Some(user_query::Query::Username(StringQuery {
+                                operator: Some(string_query::Operator::Equals(form_state.read().username.clone())), })),
                         }),
                     }).await;
 
@@ -318,10 +318,10 @@ fn AddPermissionModal(
                 div {
                     class: "mb-3",
                     Field {
-                        label: "Display Name",
+                        label: "User Name",
                         TextInput {
-                            value: TextInputType::Text(form_state.read().display_name.clone()),
-                            oninput: move |evt: FormEvent| form_state.write().display_name = evt.value(),
+                            value: TextInputType::Text(form_state.read().username.clone()),
+                            oninput: move |evt: FormEvent| form_state.write().username = evt.value(),
                         }
                     }
                 }

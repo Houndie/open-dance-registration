@@ -21,7 +21,7 @@ use crate::{
 use dioxus::prelude::*;
 
 struct ProfileForm {
-    display_name: String,
+    username: String,
     password: String,
     password_confirm: String,
     passwords_match: bool,
@@ -30,7 +30,7 @@ struct ProfileForm {
 impl From<User> for ProfileForm {
     fn from(user: User) -> Self {
         Self {
-            display_name: user.display_name,
+            username: user.username,
             password: "".to_owned(),
             password_confirm: "".to_owned(),
             passwords_match: true,
@@ -65,17 +65,17 @@ pub fn Page() -> Element {
     use_handle_error(results.suspend()?, |ProtoWrapper(user)| {
         let menu = rsx! {
             Menu {
-                user_name: user.display_name.clone(),
+                user_name: user.username.clone(),
                 highlight: MenuItem::AccountSettings,
             }
         };
 
         rsx! {
             GenericPage {
-                title: user.display_name.clone(),
+                title: user.username.clone(),
                 breadcrumb: vec![
                     ("Home".to_owned(), Some(Routes::LandingPage)),
-                    (user.display_name.clone(), None),
+                    (user.username.clone(), None),
                 ],
                 menu: menu,
                 PageBody {
@@ -140,9 +140,9 @@ fn PageBody(user: ReadOnlySignal<User>) -> Element {
             Field {
                 label: "Display Name",
                 TextInput {
-                    value: TextInputType::Text(profile_form.read().display_name.clone()),
+                    value: TextInputType::Text(profile_form.read().username.clone()),
                     oninput: move |v: FormEvent| {
-                        profile_form.write().display_name = v.value();
+                        profile_form.write().username = v.value();
                     },
                 }
             }
@@ -201,7 +201,7 @@ fn PageBody(user: ReadOnlySignal<User>) -> Element {
                                     id: user.id.clone(),
                                     email: user.email.clone(),
                                     password: password,
-                                    display_name: form.display_name.clone(),
+                                    username: form.username.clone(),
                                 }
                             })
                         });

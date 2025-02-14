@@ -35,21 +35,21 @@ message DeleteUsersResponse {}
 
 message User {
 	string id = 1;
-	string email = 2;
+	string username = 2;
 
 	oneof password {
 		string set = 3;
 		google.protobuf.Empty unset = 4;
 		google.protobuf.Empty unchanged = 5;
 	}
-	string display_name = 6;
+	string email = 6;
 }
 
 message UserQuery {
 	oneof query {
 		StringQuery email = 1;
 		StringQuery id = 2;
-		StringQuery display_name = 3;
+		StringQuery username = 3;
 		CompoundUserQuery compound = 4;
 	}
 }

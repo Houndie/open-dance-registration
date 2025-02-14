@@ -95,6 +95,10 @@ fn try_parse_user_query(query: UserQuery) -> Result<Query, ValidationError> {
             try_logical_string_query(id_query).map_err(|e| e.with_context("query.id"))?,
         )),
 
+        Some(user_query::Query::DisplayName(display_name_query)) => Ok(Query::DisplayName(
+            try_logical_string_query(display_name_query).map_err(|e| e.with_context("query.id"))?,
+        )),
+
         Some(user_query::Query::Compound(compound_query)) => {
             let operator = match compound_user_query::Operator::try_from(compound_query.operator) {
                 Ok(compound_user_query::Operator::And) => CompoundOperator::And,

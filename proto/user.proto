@@ -49,7 +49,8 @@ message UserQuery {
 	oneof query {
 		StringQuery email = 1;
 		StringQuery id = 2;
-		CompoundUserQuery compound = 3;
+		StringQuery display_name = 3;
+		CompoundUserQuery compound = 4;
 	}
 }
 

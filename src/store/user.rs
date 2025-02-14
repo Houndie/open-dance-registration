@@ -82,9 +82,22 @@ impl super::Field for EmailField {
 
 pub type EmailQuery = super::LogicalQuery<EmailField>;
 
+pub struct DisplayNameField;
+
+impl super::Field for DisplayNameField {
+    type Item = String;
+
+    fn field() -> &'static str {
+        "display_name"
+    }
+}
+
+pub type DisplayNameQuery = super::LogicalQuery<DisplayNameField>;
+
 pub enum Query {
     Id(IdQuery),
     Email(EmailQuery),
+    DisplayName(DisplayNameQuery),
     PasswordIsSet(bool),
     CompoundQuery(super::CompoundQuery<Query>),
 }
@@ -94,6 +107,7 @@ impl super::Queryable for Query {
         match self {
             Query::Id(q) => q.where_clause(),
             Query::Email(q) => q.where_clause(),
+            Query::DisplayName(q) => q.where_clause(),
             Query::PasswordIsSet(true) => "password IS NOT NULL".to_owned(),
             Query::PasswordIsSet(false) => "password IS NULL".to_owned(),
             Query::CompoundQuery(compound_query) => compound_query.where_clause(),
@@ -117,6 +131,7 @@ where
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::Email(q) => q.bind(query_builder),
+            Query::DisplayName(q) => q.bind(query_builder),
             Query::PasswordIsSet(_) => query_builder,
             Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
         }

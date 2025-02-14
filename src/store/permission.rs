@@ -1,7 +1,7 @@
 use crate::{
     proto::{
-        permission::Role, EventAdminRole, EventEditorRole, EventViewerRole, OrganizationAdminRole,
-        OrganizationViewerRole, Permission, ServerAdminRole,
+        permission_role, EventAdminRole, EventEditorRole, EventViewerRole, OrganizationAdminRole,
+        OrganizationViewerRole, Permission, PermissionRole, ServerAdminRole,
     },
     store::{
         common::{ids_in_table, new_id},
@@ -25,24 +25,28 @@ impl TryFrom<PermissionRow> for Permission {
 
     fn try_from(row: PermissionRow) -> Result<Self, Error> {
         let role = match row.role.as_str() {
-            "SERVER_ADMIN" => Role::ServerAdmin(ServerAdminRole {}),
-            "ORGANIZATION_ADMIN" => Role::OrganizationAdmin(OrganizationAdminRole {
-                organization_id: row
-                    .organization
-                    .ok_or(Error::ColumnParseError("organization"))?,
-            }),
-            "ORGANIZATION_VIEWER" => Role::OrganizationViewer(OrganizationViewerRole {
-                organization_id: row
-                    .organization
-                    .ok_or(Error::ColumnParseError("organization"))?,
-            }),
-            "EVENT_ADMIN" => Role::EventAdmin(EventAdminRole {
+            "SERVER_ADMIN" => permission_role::Role::ServerAdmin(ServerAdminRole {}),
+            "ORGANIZATION_ADMIN" => {
+                permission_role::Role::OrganizationAdmin(OrganizationAdminRole {
+                    organization_id: row
+                        .organization
+                        .ok_or(Error::ColumnParseError("organization"))?,
+                })
+            }
+            "ORGANIZATION_VIEWER" => {
+                permission_role::Role::OrganizationViewer(OrganizationViewerRole {
+                    organization_id: row
+                        .organization
+                        .ok_or(Error::ColumnParseError("organization"))?,
+                })
+            }
+            "EVENT_ADMIN" => permission_role::Role::EventAdmin(EventAdminRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
-            "EVENT_EDITOR" => Role::EventEditor(EventEditorRole {
+            "EVENT_EDITOR" => permission_role::Role::EventEditor(EventEditorRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
-            "EVENT_VIEWER" => Role::EventViewer(EventViewerRole {
+            "EVENT_VIEWER" => permission_role::Role::EventViewer(EventViewerRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
             _ => return Err(Error::ColumnParseError("role")),
@@ -51,7 +55,7 @@ impl TryFrom<PermissionRow> for Permission {
         Ok(Permission {
             id: row.id,
             user_id: row.user,
-            role: Some(role),
+            role: Some(PermissionRole { role: Some(role) }),
         })
     }
 }
@@ -62,7 +66,7 @@ impl super::Field for IdField {
     type Item = String;
 
     fn field() -> &'static str {
-        "id"
+        "p.id"
     }
 }
 
@@ -74,15 +78,143 @@ impl super::Field for UserIdField {
     type Item = String;
 
     fn field() -> &'static str {
-        "user"
+        "p.user"
     }
 }
 
 pub type UserIdQuery = super::LogicalQuery<UserIdField>;
 
+pub enum PermissionRoleQuery {
+    Is(PermissionRole),
+    IsNot(PermissionRole),
+    IsAtLeast(PermissionRole),
+}
+
+impl Queryable for PermissionRoleQuery {
+    fn where_clause(&self) -> String {
+        match self {
+            PermissionRoleQuery::Is(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => "p.role = \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::OrganizationAdmin(_) => {
+                    "p.role = \"ORGANIZATION_ADMIN\" AND p.organization = ?".to_string()
+                }
+                permission_role::Role::OrganizationViewer(_) => {
+                    "p.role = \"ORGANIZATION_VIEWER\" AND p.organization = ?".to_string()
+                }
+                permission_role::Role::EventAdmin(_) => {
+                    "p.role = \"EVENT_ADMIN\" AND p.event = ?".to_string()
+                }
+                permission_role::Role::EventEditor(_) => {
+                    "p.role = \"EVENT_EDITOR\" AND p.event = ?".to_string()
+                }
+                permission_role::Role::EventViewer(_) => {
+                    "p.role = \"EVENT_VIEWER\" AND p.event = ?".to_string()
+                }
+            },
+            PermissionRoleQuery::IsNot(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => "p.role != \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::OrganizationAdmin(_) => {
+                    "p.role != \"ORGANIZATION_ADMIN\" OR p.organization != ?".to_string()
+                }
+                permission_role::Role::OrganizationViewer(_) => {
+                    "p.role != \"ORGANIZATION_VIEWER\" OR p.organization != ?".to_string()
+                }
+                permission_role::Role::EventAdmin(_) => {
+                    "p.role != \"EVENT_ADMIN\" OR p.event != ?".to_string()
+                }
+                permission_role::Role::EventEditor(_) => {
+                    "p.role != \"EVENT_EDITOR\" OR p.event = ?".to_string()
+                }
+                permission_role::Role::EventViewer(_) => {
+                    "p.role != \"EVENT_VIEWER\" OR p.event = ?".to_string()
+                }
+            },
+            PermissionRoleQuery::IsAtLeast(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => "p.role = \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::OrganizationAdmin(_) => {
+                    "p.role = \"SERVER_ADMIN\" OR (p.role = \"ORGANIZATION_ADMIN\" AND p.organization = ?)".to_string()
+                }
+                permission_role::Role::OrganizationViewer(_) => {
+                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"ORGANIZATION_VIEWER\" OR role = \"ORGANIZATION_ADMIN\") AND p.organization = ?)".to_string()
+                }
+                permission_role::Role::EventAdmin(_) => {
+                    "p.role = \"SERVER_ADMIN\" OR (p.role = \"EVENT_ADMIN\" AND p.event = ?) OR (p.role = \"ORGANIZATION_ADMIN\" AND p2.event = ?)".to_string()
+                }
+                permission_role::Role::EventEditor(_) => {
+                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"EVENT_EDITOR\" OR p.role = \"EVENT_ADMIN\") AND p.event = ?) OR (p.role = \"ORGANIZATION_ADMIN\" AND p2.event = ?)".to_string()
+                }
+                permission_role::Role::EventViewer(_) => {
+                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"EVENT_VIEWER\" OR p.role = \"EVENT_EDITOR\" OR p.role = \"EVENT_ADMIN\") AND p.event = ?) OR ((p.role = \"ORGANIZATION_ADMIN\" OR p.role = \"ORGANIZATION_VIEWER\") AND e.id = ?)".to_string()
+                }
+            },
+        }
+    }
+}
+
+impl<'q, DB: sqlx::Database> Bindable<'q, DB> for PermissionRoleQuery
+where
+    String: sqlx::Encode<'q, DB> + sqlx::Type<DB> + Sync,
+{
+    fn bind<O>(
+        &'q self,
+        query_builder: sqlx::query::QueryAs<
+            'q,
+            DB,
+            O,
+            <DB as sqlx::database::HasArguments<'q>>::Arguments,
+        >,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        match self {
+            PermissionRoleQuery::Is(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => query_builder,
+                permission_role::Role::OrganizationAdmin(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::OrganizationViewer(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::EventAdmin(r) => query_builder.bind(&r.event_id),
+                permission_role::Role::EventEditor(r) => query_builder.bind(&r.event_id),
+                permission_role::Role::EventViewer(r) => query_builder.bind(&r.event_id),
+            },
+            PermissionRoleQuery::IsNot(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => query_builder,
+                permission_role::Role::OrganizationAdmin(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::OrganizationViewer(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::EventAdmin(r) => query_builder.bind(&r.event_id),
+                permission_role::Role::EventEditor(r) => query_builder.bind(&r.event_id),
+                permission_role::Role::EventViewer(r) => query_builder.bind(&r.event_id),
+            },
+            PermissionRoleQuery::IsAtLeast(role) => match role.role.as_ref().unwrap() {
+                permission_role::Role::ServerAdmin(_) => query_builder,
+                permission_role::Role::OrganizationAdmin(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::OrganizationViewer(r) => {
+                    query_builder.bind(&r.organization_id)
+                }
+                permission_role::Role::EventAdmin(r) => {
+                    query_builder.bind(&r.event_id).bind(&r.event_id)
+                }
+                permission_role::Role::EventEditor(r) => {
+                    query_builder.bind(&r.event_id).bind(&r.event_id)
+                }
+                permission_role::Role::EventViewer(r) => {
+                    query_builder.bind(&r.event_id).bind(&r.event_id)
+                }
+            },
+        }
+    }
+}
+
 pub enum Query {
     Id(IdQuery),
     UserId(UserIdQuery),
+    Role(PermissionRoleQuery),
     CompoundQuery(super::CompoundQuery<Query>),
 }
 
@@ -91,6 +223,7 @@ impl Queryable for Query {
         match self {
             Query::Id(q) => q.where_clause(),
             Query::UserId(q) => q.where_clause(),
+            Query::Role(q) => q.where_clause(),
             Query::CompoundQuery(compound_query) => compound_query.where_clause(),
         }
     }
@@ -113,6 +246,7 @@ where
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::UserId(q) => q.bind(query_builder),
+            Query::Role(q) => q.bind(query_builder),
             Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),
         }
     }
@@ -130,28 +264,28 @@ fn bind_permission<'q>(
 ) -> QueryBuilder<'q> {
     let query_builder = query_builder.bind(&permission.id).bind(&permission.user_id);
 
-    match permission.role.as_ref().unwrap() {
-        Role::ServerAdmin(_) => query_builder
+    match permission.role.as_ref().unwrap().role.as_ref().unwrap() {
+        permission_role::Role::ServerAdmin(_) => query_builder
             .bind("SERVER_ADMIN")
             .bind(None as Option<&str>)
             .bind(None as Option<&str>),
-        Role::OrganizationAdmin(r) => query_builder
+        permission_role::Role::OrganizationAdmin(r) => query_builder
             .bind("ORGANIZATION_ADMIN")
             .bind(Some(r.organization_id.as_str()))
             .bind(None as Option<&str>),
-        Role::OrganizationViewer(r) => query_builder
+        permission_role::Role::OrganizationViewer(r) => query_builder
             .bind("ORGANIZATION_VIEWER")
             .bind(Some(r.organization_id.as_str()))
             .bind(None as Option<&str>),
-        Role::EventAdmin(r) => query_builder
+        permission_role::Role::EventAdmin(r) => query_builder
             .bind("EVENT_ADMIN")
             .bind(None as Option<&str>)
             .bind(Some(r.event_id.as_str())),
-        Role::EventEditor(r) => query_builder
+        permission_role::Role::EventEditor(r) => query_builder
             .bind("EVENT_EDITOR")
             .bind(None as Option<&str>)
             .bind(Some(r.event_id.as_str())),
-        Role::EventViewer(r) => query_builder
+        permission_role::Role::EventViewer(r) => query_builder
             .bind("EVENT_VIEWER")
             .bind(None as Option<&str>)
             .bind(Some(r.event_id.as_str())),
@@ -181,6 +315,19 @@ impl SqliteStore {
     }
 }
 
+fn query_has_event_at_least(query: &Query) -> bool {
+    match query {
+        Query::Role(PermissionRoleQuery::IsAtLeast(role)) => match role.role.as_ref().unwrap() {
+            permission_role::Role::EventAdmin(_)
+            | permission_role::Role::EventEditor(_)
+            | permission_role::Role::EventViewer(_) => true,
+            _ => false,
+        },
+        Query::CompoundQuery(q) => q.queries.iter().any(query_has_event_at_least),
+        _ => false,
+    }
+}
+
 impl Store for SqliteStore {
     async fn upsert(&self, permissions: Vec<Permission>) -> Result<Vec<Permission>, Error> {
         if permissions.is_empty() {
@@ -189,9 +336,9 @@ impl Store for SqliteStore {
 
         let organization_ids = permissions
             .iter()
-            .filter_map(|p| match p.role.as_ref().unwrap() {
-                Role::OrganizationAdmin(r) => Some(r.organization_id.as_str()),
-                Role::OrganizationViewer(r) => Some(r.organization_id.as_str()),
+            .filter_map(|p| match p.role.as_ref().unwrap().role.as_ref().unwrap() {
+                permission_role::Role::OrganizationAdmin(r) => Some(r.organization_id.as_str()),
+                permission_role::Role::OrganizationViewer(r) => Some(r.organization_id.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -202,10 +349,10 @@ impl Store for SqliteStore {
 
         let event_ids = permissions
             .iter()
-            .filter_map(|p| match p.role.as_ref().unwrap() {
-                Role::EventAdmin(r) => Some(r.event_id.as_str()),
-                Role::EventEditor(r) => Some(r.event_id.as_str()),
-                Role::EventViewer(r) => Some(r.event_id.as_str()),
+            .filter_map(|p| match p.role.as_ref().unwrap().role.as_ref().unwrap() {
+                permission_role::Role::EventAdmin(r) => Some(r.event_id.as_str()),
+                permission_role::Role::EventEditor(r) => Some(r.event_id.as_str()),
+                permission_role::Role::EventViewer(r) => Some(r.event_id.as_str()),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -313,9 +460,22 @@ impl Store for SqliteStore {
     }
 
     async fn query(&self, query: Option<&Query>) -> Result<Vec<Permission>, Error> {
-        let base_query_string = "SELECT id, user, role, organization, event FROM permissions";
+        let base_query_string =
+            "SELECT p.id, p.user, p.role, p.organization, p.event FROM permissions p";
+
         let query_string = match query {
-            Some(q) => format!("{} WHERE {}", base_query_string, q.where_clause()),
+            Some(q) => {
+                let query_string = if query_has_event_at_least(q) {
+                    format!(
+                        "{} LEFT JOIN events e ON p.organization = e.organization",
+                        base_query_string
+                    )
+                } else {
+                    base_query_string.to_string()
+                };
+
+                format!("{} WHERE {}", query_string, q.where_clause())
+            }
             None => base_query_string.to_string(),
         };
 
@@ -366,9 +526,13 @@ impl Store for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{PermissionRow, Query, SqliteStore, Store};
+    use super::{PermissionRoleQuery, PermissionRow, Query, SqliteStore, Store};
     use crate::{
-        proto::Permission,
+        proto::{
+            permission_role, EventAdminRole, EventEditorRole, EventViewerRole,
+            OrganizationAdminRole, OrganizationViewerRole, Permission, PermissionRole,
+            ServerAdminRole,
+        },
         store::{common::new_id, Error, LogicalQuery},
     };
     use sqlx::{
@@ -406,54 +570,58 @@ mod tests {
         let server_admin = Permission {
             id: new_id(),
             user_id: user1_id.clone(),
-            role: Some(crate::proto::permission::Role::ServerAdmin(
-                crate::proto::ServerAdminRole {},
-            )),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+            }),
         };
         let organization_admin = Permission {
             id: new_id(),
             user_id: user1_id.clone(),
-            role: Some(crate::proto::permission::Role::OrganizationAdmin(
-                crate::proto::OrganizationAdminRole {
-                    organization_id: org_id.clone(),
-                },
-            )),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::OrganizationAdmin(
+                    OrganizationAdminRole {
+                        organization_id: org_id.clone(),
+                    },
+                )),
+            }),
         };
         let organization_viewer = Permission {
             id: new_id(),
             user_id: user2_id.clone(),
-            role: Some(crate::proto::permission::Role::OrganizationViewer(
-                crate::proto::OrganizationViewerRole {
-                    organization_id: org_id.clone(),
-                },
-            )),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::OrganizationViewer(
+                    OrganizationViewerRole {
+                        organization_id: org_id.clone(),
+                    },
+                )),
+            }),
         };
         let event_admin = Permission {
             id: new_id(),
             user_id: user2_id.clone(),
-            role: Some(crate::proto::permission::Role::EventAdmin(
-                crate::proto::EventAdminRole {
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventAdmin(EventAdminRole {
                     event_id: event1_id.clone(),
-                },
-            )),
+                })),
+            }),
         };
         let event_editor = Permission {
             id: new_id(),
             user_id: user2_id.clone(),
-            role: Some(crate::proto::permission::Role::EventEditor(
-                crate::proto::EventEditorRole {
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventEditor(EventEditorRole {
                     event_id: event2_id.clone(),
-                },
-            )),
+                })),
+            }),
         };
         let event_viewer = Permission {
             id: new_id(),
             user_id: user2_id.clone(),
-            role: Some(crate::proto::permission::Role::EventViewer(
-                crate::proto::EventViewerRole {
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventViewer(EventViewerRole {
                     event_id: event2_id.clone(),
-                },
-            )),
+                })),
+            }),
         };
 
         sqlx::query("INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?), (?, ?, ?, ?)")
@@ -547,18 +715,20 @@ mod tests {
             Permission {
                 id: "".to_string(),
                 user_id: user_id.clone(),
-                role: Some(crate::proto::permission::Role::ServerAdmin(
-                    crate::proto::ServerAdminRole {},
-                )),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                }),
             },
             Permission {
                 id: "".to_string(),
                 user_id: user_id.clone(),
-                role: Some(crate::proto::permission::Role::OrganizationAdmin(
-                    crate::proto::OrganizationAdminRole {
-                        organization_id: organization_id.clone(),
-                    },
-                )),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::OrganizationAdmin(
+                        OrganizationAdminRole {
+                            organization_id: organization_id.clone(),
+                        },
+                    )),
+                }),
             },
         ];
 
@@ -635,9 +805,9 @@ mod tests {
             .unwrap();
 
         permissions[0].user_id = user_id;
-        permissions[1].role = Some(crate::proto::permission::Role::OrganizationViewer(
-            crate::proto::OrganizationViewerRole { organization_id },
-        ));
+        permissions[1].role.as_mut().unwrap().role = Some(
+            permission_role::Role::OrganizationViewer(OrganizationViewerRole { organization_id }),
+        );
 
         let returned_permissions = store.upsert(permissions.clone()).await.unwrap();
 
@@ -683,9 +853,9 @@ mod tests {
             .upsert(vec![Permission {
                 id: id.clone(),
                 user_id,
-                role: Some(crate::proto::permission::Role::ServerAdmin(
-                    crate::proto::ServerAdminRole {},
-                )),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                }),
             }])
             .await;
 
@@ -700,12 +870,16 @@ mod tests {
         All,
         Id,
         UserId,
+        RoleIs,
+        RoleIsAtLeast,
         NoResults,
     }
 
     #[test_case(QueryTest::All ; "all")]
     #[test_case(QueryTest::Id ; "id")]
     #[test_case(QueryTest::UserId ; "user id")]
+    #[test_case(QueryTest::RoleIs ; "role is")]
+    #[test_case(QueryTest::RoleIsAtLeast ; "role is at least")]
     #[test_case(QueryTest::NoResults ; "no results")]
     #[tokio::test]
     async fn query(test_name: QueryTest) {
@@ -731,6 +905,44 @@ mod tests {
                 ))),
                 expected: vec![permissions.remove(0), permissions.remove(0)],
             },
+            QueryTest::RoleIs => {
+                let organization_id =
+                    match permissions[1].role.as_ref().unwrap().role.as_ref().unwrap() {
+                        permission_role::Role::OrganizationAdmin(r) => r.organization_id.clone(),
+                        _ => panic!("unexpected role"),
+                    };
+                TestCase {
+                    query: Some(Query::Role(PermissionRoleQuery::Is(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(
+                            OrganizationAdminRole { organization_id },
+                        )),
+                    }))),
+                    expected: vec![permissions.remove(1)],
+                }
+            }
+            QueryTest::RoleIsAtLeast => {
+                let event_id = match permissions[5].role.as_ref().unwrap().role.as_ref().unwrap() {
+                    permission_role::Role::EventViewer(r) => r.event_id.clone(),
+                    _ => panic!("unexpected role"),
+                };
+
+                TestCase {
+                    query: Some(Query::Role(PermissionRoleQuery::IsAtLeast(
+                        PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(EventViewerRole {
+                                event_id,
+                            })),
+                        },
+                    ))),
+                    expected: vec![
+                        permissions.remove(0),
+                        permissions.remove(0),
+                        permissions.remove(0),
+                        permissions.remove(1),
+                        permissions.remove(1),
+                    ],
+                }
+            }
             QueryTest::NoResults => TestCase {
                 query: Some(Query::Id(LogicalQuery::Equals(new_id()))),
                 expected: vec![],

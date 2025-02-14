@@ -11,7 +11,7 @@ mod server_only {
     };
     use dioxus::prelude::*;
     use std::sync::Arc;
-    use tonic::{metadata::MetadataMap, Request, Response, Status};
+    use tonic::{Request, Response, Status};
 
     #[derive(Clone)]
     pub enum AnyService {

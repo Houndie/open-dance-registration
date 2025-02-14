@@ -1,13 +1,13 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
     proto::{
-        compound_permission_query, permission::Role, permission_query,
+        compound_permission_query, permission_query, permission_role::Role, permission_role_query,
         permission_service_server::PermissionService, DeletePermissionsRequest,
         DeletePermissionsResponse, Permission, PermissionQuery, QueryPermissionsRequest,
         QueryPermissionsResponse, UpsertPermissionsRequest, UpsertPermissionsResponse,
     },
     store::{
-        permission::{Query, Store},
+        permission::{PermissionRoleQuery, Query, Store},
         CompoundOperator, CompoundQuery,
     },
 };
@@ -32,6 +32,11 @@ fn validate_permission(permission: &Permission) -> Result<(), ValidationError> {
     let role = match &permission.role {
         Some(role) => role,
         None => return Err(ValidationError::new_empty("role")),
+    };
+
+    let role = match &role.role {
+        Some(role) => role,
+        None => return Err(ValidationError::new_empty("role.role")),
     };
 
     match role {
@@ -74,6 +79,32 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
         Some(permission_query::Query::UserId(user_id_query)) => Ok(Query::UserId(
             try_logical_string_query(user_id_query).map_err(|e| e.with_context("query.user_id"))?,
         )),
+        Some(permission_query::Query::Role(role_query)) => {
+            Ok(Query::Role(match role_query.operator {
+                Some(permission_role_query::Operator::Is(is)) => {
+                    if is.role.is_none() {
+                        return Err(ValidationError::new_empty("query.role.operator.role"));
+                    }
+
+                    PermissionRoleQuery::Is(is)
+                }
+                Some(permission_role_query::Operator::IsNot(is_not)) => {
+                    if is_not.role.is_none() {
+                        return Err(ValidationError::new_empty("query.role.operator.role"));
+                    }
+
+                    PermissionRoleQuery::IsNot(is_not)
+                }
+                Some(permission_role_query::Operator::IsAtLeast(is_at_least)) => {
+                    if is_at_least.role.is_none() {
+                        return Err(ValidationError::new_empty("query.role.operator.role"));
+                    }
+
+                    PermissionRoleQuery::IsAtLeast(is_at_least)
+                }
+                None => return Err(ValidationError::new_empty("query.role.operator")),
+            }))
+        }
         Some(permission_query::Query::Compound(compound_query)) => {
             let operator =
                 match compound_permission_query::Operator::try_from(compound_query.operator) {

@@ -156,6 +156,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             event_provider_state,
             organization_provider_state,
             registration_schema_provider_state,
+            permission_provider_state,
         ]))
         .build()?;
 

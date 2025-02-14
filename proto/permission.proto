@@ -35,6 +35,10 @@ message DeletePermissionsResponse {}
 message Permission {
 	string id = 1;
 	string user_id = 2;
+	PermissionRole role = 3;
+}
+
+message PermissionRole {
 	oneof role {
 		ServerAdminRole server_admin = 3;
 		OrganizationAdminRole organization_admin = 4;
@@ -66,7 +70,8 @@ message PermissionQuery {
 	oneof query {
 		StringQuery id = 1;
 		StringQuery user_id = 2;
-		CompoundPermissionQuery compound = 3;
+		PermissionRoleQuery role = 3;
+		CompoundPermissionQuery compound = 4;
 	}
 }
 
@@ -77,4 +82,12 @@ message CompoundPermissionQuery {
 	}
 	Operator operator = 1;
 	repeated PermissionQuery queries = 2;
+}
+
+message PermissionRoleQuery {
+	oneof operator {
+		PermissionRole is = 1;
+		PermissionRole is_not = 2;
+		PermissionRole is_at_least = 3;
+	}
 }

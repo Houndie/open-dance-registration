@@ -1,8 +1,5 @@
 use crate::{
-    proto::{
-        permission_role, EventAdminRole, EventEditorRole, EventViewerRole, OrganizationAdminRole,
-        OrganizationViewerRole, Permission, PermissionRole, ServerAdminRole,
-    },
+    proto::{permission_role, EventRole, OrganizationRole, Permission, PermissionRole},
     store::{
         common::{ids_in_table, new_id},
         Bindable, Error, Queryable,
@@ -25,28 +22,24 @@ impl TryFrom<PermissionRow> for Permission {
 
     fn try_from(row: PermissionRow) -> Result<Self, Error> {
         let role = match row.role.as_str() {
-            "SERVER_ADMIN" => permission_role::Role::ServerAdmin(ServerAdminRole {}),
-            "ORGANIZATION_ADMIN" => {
-                permission_role::Role::OrganizationAdmin(OrganizationAdminRole {
-                    organization_id: row
-                        .organization
-                        .ok_or(Error::ColumnParseError("organization"))?,
-                })
-            }
-            "ORGANIZATION_VIEWER" => {
-                permission_role::Role::OrganizationViewer(OrganizationViewerRole {
-                    organization_id: row
-                        .organization
-                        .ok_or(Error::ColumnParseError("organization"))?,
-                })
-            }
-            "EVENT_ADMIN" => permission_role::Role::EventAdmin(EventAdminRole {
+            "SERVER_ADMIN" => permission_role::Role::ServerAdmin(()),
+            "ORGANIZATION_ADMIN" => permission_role::Role::OrganizationAdmin(OrganizationRole {
+                organization_id: row
+                    .organization
+                    .ok_or(Error::ColumnParseError("organization"))?,
+            }),
+            "ORGANIZATION_VIEWER" => permission_role::Role::OrganizationViewer(OrganizationRole {
+                organization_id: row
+                    .organization
+                    .ok_or(Error::ColumnParseError("organization"))?,
+            }),
+            "EVENT_ADMIN" => permission_role::Role::EventAdmin(EventRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
-            "EVENT_EDITOR" => permission_role::Role::EventEditor(EventEditorRole {
+            "EVENT_EDITOR" => permission_role::Role::EventEditor(EventRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
-            "EVENT_VIEWER" => permission_role::Role::EventViewer(EventViewerRole {
+            "EVENT_VIEWER" => permission_role::Role::EventViewer(EventRole {
                 event_id: row.event.ok_or(Error::ColumnParseError("event"))?,
             }),
             _ => return Err(Error::ColumnParseError("role")),
@@ -528,11 +521,7 @@ impl Store for SqliteStore {
 mod tests {
     use super::{PermissionRoleQuery, PermissionRow, Query, SqliteStore, Store};
     use crate::{
-        proto::{
-            permission_role, EventAdminRole, EventEditorRole, EventViewerRole,
-            OrganizationAdminRole, OrganizationViewerRole, Permission, PermissionRole,
-            ServerAdminRole,
-        },
+        proto::{permission_role, EventRole, OrganizationRole, Permission, PermissionRole},
         store::{common::new_id, Error, LogicalQuery},
     };
     use sqlx::{
@@ -571,18 +560,16 @@ mod tests {
             id: new_id(),
             user_id: user1_id.clone(),
             role: Some(PermissionRole {
-                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                role: Some(permission_role::Role::ServerAdmin(())),
             }),
         };
         let organization_admin = Permission {
             id: new_id(),
             user_id: user1_id.clone(),
             role: Some(PermissionRole {
-                role: Some(permission_role::Role::OrganizationAdmin(
-                    OrganizationAdminRole {
-                        organization_id: org_id.clone(),
-                    },
-                )),
+                role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                    organization_id: org_id.clone(),
+                })),
             }),
         };
         let organization_viewer = Permission {
@@ -590,7 +577,7 @@ mod tests {
             user_id: user2_id.clone(),
             role: Some(PermissionRole {
                 role: Some(permission_role::Role::OrganizationViewer(
-                    OrganizationViewerRole {
+                    OrganizationRole {
                         organization_id: org_id.clone(),
                     },
                 )),
@@ -600,7 +587,7 @@ mod tests {
             id: new_id(),
             user_id: user2_id.clone(),
             role: Some(PermissionRole {
-                role: Some(permission_role::Role::EventAdmin(EventAdminRole {
+                role: Some(permission_role::Role::EventAdmin(EventRole {
                     event_id: event1_id.clone(),
                 })),
             }),
@@ -609,7 +596,7 @@ mod tests {
             id: new_id(),
             user_id: user2_id.clone(),
             role: Some(PermissionRole {
-                role: Some(permission_role::Role::EventEditor(EventEditorRole {
+                role: Some(permission_role::Role::EventEditor(EventRole {
                     event_id: event2_id.clone(),
                 })),
             }),
@@ -618,24 +605,26 @@ mod tests {
             id: new_id(),
             user_id: user2_id.clone(),
             role: Some(PermissionRole {
-                role: Some(permission_role::Role::EventViewer(EventViewerRole {
+                role: Some(permission_role::Role::EventViewer(EventRole {
                     event_id: event2_id.clone(),
                 })),
             }),
         };
 
-        sqlx::query("INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?), (?, ?, ?, ?)")
-            .bind(&user1_id)
-            .bind("user1@example.com")
-            .bind("password")
-            .bind("User 1")
-            .bind(&user2_id)
-            .bind("user2@example.com")
-            .bind("password")
-            .bind("User 2")
-            .execute(&init.db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, email, password, username) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+        )
+        .bind(&user1_id)
+        .bind("user1@example.com")
+        .bind("password")
+        .bind("User 1")
+        .bind(&user2_id)
+        .bind("user2@example.com")
+        .bind("password")
+        .bind("User 2")
+        .execute(&init.db)
+        .await
+        .unwrap();
 
         sqlx::query("INSERT INTO organizations (id, name) VALUES (?, ?)")
             .bind(&org_id)
@@ -716,23 +705,21 @@ mod tests {
                 id: "".to_string(),
                 user_id: user_id.clone(),
                 role: Some(PermissionRole {
-                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                    role: Some(permission_role::Role::ServerAdmin(())),
                 }),
             },
             Permission {
                 id: "".to_string(),
                 user_id: user_id.clone(),
                 role: Some(PermissionRole {
-                    role: Some(permission_role::Role::OrganizationAdmin(
-                        OrganizationAdminRole {
-                            organization_id: organization_id.clone(),
-                        },
-                    )),
+                    role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                        organization_id: organization_id.clone(),
+                    })),
                 }),
             },
         ];
 
-        sqlx::query("INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password, username) VALUES (?, ?, ?, ?)")
             .bind(&user_id)
             .bind("user@example.com")
             .bind("password")
@@ -795,7 +782,7 @@ mod tests {
             .unwrap();
 
         let user_id = new_id();
-        sqlx::query("INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password, username) VALUES (?, ?, ?, ?)")
             .bind(&user_id)
             .bind("user@example.com")
             .bind("password")
@@ -806,7 +793,7 @@ mod tests {
 
         permissions[0].user_id = user_id;
         permissions[1].role.as_mut().unwrap().role = Some(
-            permission_role::Role::OrganizationViewer(OrganizationViewerRole { organization_id }),
+            permission_role::Role::OrganizationViewer(OrganizationRole { organization_id }),
         );
 
         let returned_permissions = store.upsert(permissions.clone()).await.unwrap();
@@ -840,7 +827,7 @@ mod tests {
         let id = new_id();
 
         let user_id = new_id();
-        sqlx::query("INSERT INTO users (id, email, password, display_name) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO users (id, email, password, username) VALUES (?, ?, ?, ?)")
             .bind(&user_id)
             .bind("user@example.com")
             .bind("password")
@@ -854,7 +841,7 @@ mod tests {
                 id: id.clone(),
                 user_id,
                 role: Some(PermissionRole {
-                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                    role: Some(permission_role::Role::ServerAdmin(())),
                 }),
             }])
             .await;
@@ -913,9 +900,9 @@ mod tests {
                     };
                 TestCase {
                     query: Some(Query::Role(PermissionRoleQuery::Is(PermissionRole {
-                        role: Some(permission_role::Role::OrganizationAdmin(
-                            OrganizationAdminRole { organization_id },
-                        )),
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id,
+                        })),
                     }))),
                     expected: vec![permissions.remove(1)],
                 }
@@ -929,9 +916,7 @@ mod tests {
                 TestCase {
                     query: Some(Query::Role(PermissionRoleQuery::IsAtLeast(
                         PermissionRole {
-                            role: Some(permission_role::Role::EventViewer(EventViewerRole {
-                                event_id,
-                            })),
+                            role: Some(permission_role::Role::EventViewer(EventRole { event_id })),
                         },
                     ))),
                     expected: vec![

@@ -3,11 +3,10 @@ use crate::{
     proto::{
         compound_permission_query, compound_user_query, event_query, organization_query,
         permission_query, permission_role, permission_role_query, string_query, user_query,
-        ClaimsRequest, CompoundPermissionQuery, CompoundUserQuery, EventAdminRole, EventEditorRole,
-        EventQuery, EventViewerRole, OrganizationQuery, Permission, PermissionQuery,
-        PermissionRole, PermissionRoleQuery, QueryEventsRequest, QueryOrganizationsRequest,
-        QueryPermissionsRequest, QueryUsersRequest, QueryUsersResponse, StringQuery, User,
-        UserQuery,
+        ClaimsRequest, CompoundPermissionQuery, CompoundUserQuery, EventQuery, EventRole,
+        OrganizationQuery, Permission, PermissionQuery, PermissionRole, PermissionRoleQuery,
+        QueryEventsRequest, QueryOrganizationsRequest, QueryPermissionsRequest, QueryUsersRequest,
+        QueryUsersResponse, StringQuery, User, UserQuery,
     },
     server_functions::{
         authentication::claims, event::query as query_events,
@@ -47,11 +46,9 @@ pub fn Page(event_id: ReadOnlySignal<String>) -> Element {
                             query: Some(permission_query::Query::Role(PermissionRoleQuery {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
-                                        role: Some(permission_role::Role::EventAdmin(
-                                            EventAdminRole {
-                                                event_id: event_id(),
-                                            },
-                                        )),
+                                        role: Some(permission_role::Role::EventAdmin(EventRole {
+                                            event_id: event_id(),
+                                        })),
                                     },
                                 )),
                             })),
@@ -60,11 +57,9 @@ pub fn Page(event_id: ReadOnlySignal<String>) -> Element {
                             query: Some(permission_query::Query::Role(PermissionRoleQuery {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
-                                        role: Some(permission_role::Role::EventEditor(
-                                            EventEditorRole {
-                                                event_id: event_id(),
-                                            },
-                                        )),
+                                        role: Some(permission_role::Role::EventEditor(EventRole {
+                                            event_id: event_id(),
+                                        })),
                                     },
                                 )),
                             })),
@@ -73,11 +68,9 @@ pub fn Page(event_id: ReadOnlySignal<String>) -> Element {
                             query: Some(permission_query::Query::Role(PermissionRoleQuery {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
-                                        role: Some(permission_role::Role::EventViewer(
-                                            EventViewerRole {
-                                                event_id: event_id(),
-                                            },
-                                        )),
+                                        role: Some(permission_role::Role::EventViewer(EventRole {
+                                            event_id: event_id(),
+                                        })),
                                     },
                                 )),
                             })),
@@ -215,21 +208,21 @@ fn PageBody(
             role_options: vec![
                 PermissionRole{
                     role: Some(permission_role::Role::EventAdmin(
-                        EventAdminRole {
+                        EventRole {
                             event_id: event_id(),
                         },
                     )),
                 },
                 PermissionRole{
                     role: Some(permission_role::Role::EventEditor(
-                        EventEditorRole {
+                        EventRole {
                             event_id: event_id(),
                         },
                     )),
                 },
                 PermissionRole{
                     role: Some(permission_role::Role::EventViewer(
-                        EventViewerRole {
+                        EventRole {
                             event_id: event_id(),
                         },
                     )),

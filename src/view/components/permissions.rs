@@ -2,8 +2,7 @@ use crate::{
     hooks::toasts::use_toasts,
     proto::{
         permission_role, string_query, user_query, DeletePermissionsRequest, Permission,
-        PermissionRole, QueryUsersRequest, ServerAdminRole, StringQuery, UpsertPermissionsRequest,
-        User, UserQuery,
+        PermissionRole, QueryUsersRequest, StringQuery, UpsertPermissionsRequest, User, UserQuery,
     },
     server_functions::{
         permission::{delete as delete_permissions, upsert as upsert_permissions},
@@ -80,6 +79,7 @@ pub fn PermissionsTable(
                     let user_map = user_map.read();
                     let user = user_map.get(&permission.user_id).unwrap().clone();
                     let user_name = user.username.clone();
+                    let role = role_to_string(permission.role.as_ref().unwrap());
                     rsx!{
                         tr {
                             key: "{permission.id}",
@@ -90,7 +90,7 @@ pub fn PermissionsTable(
                                 }
                             }
                             td {
-                                "Server Admin",
+                                "{role}",
                             }
                         }
                     }
@@ -121,8 +121,6 @@ fn role_to_string(role: &PermissionRole) -> &'static str {
 struct AddPermissionFormState {
     username: String,
     permission_type: usize,
-    organization_id: String,
-    event_id: String,
 }
 
 #[component]
@@ -144,14 +142,10 @@ fn AddPermissionModal(
                 .iter()
                 .position(|r| r == permission.role.as_ref().unwrap())
                 .unwrap(),
-            organization_id: "".to_string(),
-            event_id: "".to_string(),
         }),
         None => Ok(AddPermissionFormState {
             username: "".to_string(),
             permission_type: default_role,
-            organization_id: "".to_string(),
-            event_id: "".to_string(),
         }),
     });
 
@@ -231,9 +225,7 @@ fn AddPermissionModal(
                         permissions: vec![Permission {
                             id: "".to_owned(),
                             user_id: user.id.clone(),
-                            role: Some(PermissionRole{
-                                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
-                            }),
+                            role: Some(role_options()[form_state.read().permission_type].clone()),
                         }],
                     }).await;
 

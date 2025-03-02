@@ -3,8 +3,8 @@ use crate::{
     proto::{
         compound_permission_query, compound_user_query, organization_query, permission_query,
         permission_role, permission_role_query, string_query, user_query, ClaimsRequest,
-        CompoundPermissionQuery, CompoundUserQuery, OrganizationAdminRole, OrganizationQuery,
-        OrganizationViewerRole, Permission, PermissionQuery, PermissionRole, PermissionRoleQuery,
+        CompoundPermissionQuery, CompoundUserQuery, OrganizationQuery, OrganizationRole,
+        Permission, PermissionQuery, PermissionRole, PermissionRoleQuery,
         QueryOrganizationsRequest, QueryPermissionsRequest, QueryUsersRequest, QueryUsersResponse,
         StringQuery, User, UserQuery,
     },
@@ -46,7 +46,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
                                         role: Some(permission_role::Role::OrganizationAdmin(
-                                            OrganizationAdminRole {
+                                            OrganizationRole {
                                                 organization_id: org_id(),
                                             },
                                         )),
@@ -59,7 +59,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
                                         role: Some(permission_role::Role::OrganizationViewer(
-                                            OrganizationViewerRole {
+                                            OrganizationRole {
                                                 organization_id: org_id(),
                                             },
                                         )),
@@ -182,14 +182,14 @@ fn PageBody(
             role_options: vec![
                 PermissionRole{
                     role: Some(permission_role::Role::OrganizationAdmin(
-                        OrganizationAdminRole {
+                        OrganizationRole {
                             organization_id: organization_id(),
                         },
                     )),
                 },
                 PermissionRole{
                     role: Some(permission_role::Role::OrganizationViewer(
-                        OrganizationViewerRole {
+                        OrganizationRole {
                             organization_id: organization_id(),
                         },
                     )),

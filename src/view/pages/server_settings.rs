@@ -4,7 +4,7 @@ use crate::{
         compound_user_query, permission_query, permission_role, permission_role_query,
         string_query, user_query, ClaimsRequest, CompoundUserQuery, Permission, PermissionQuery,
         PermissionRole, PermissionRoleQuery, QueryPermissionsRequest, QueryUsersRequest,
-        ServerAdminRole, StringQuery, User, UserQuery,
+        StringQuery, User, UserQuery,
     },
     server_functions::{
         authentication::claims, permission::query as query_permissions, user::query as query_users,
@@ -29,7 +29,7 @@ pub fn Page() -> Element {
             query: Some(PermissionQuery {
                 query: Some(permission_query::Query::Role(PermissionRoleQuery {
                     operator: Some(permission_role_query::Operator::Is(PermissionRole {
-                        role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                        role: Some(permission_role::Role::ServerAdmin(())),
                     })),
                 })),
             }),
@@ -121,7 +121,7 @@ fn PageBody(
             permissions: permissions,
             user_map: user_map,
             role_options: vec![PermissionRole{
-                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                role: Some(permission_role::Role::ServerAdmin(())),
             }],
             default_role: 0,
         }

@@ -3,10 +3,7 @@ use std::{env, sync::Arc};
 use clap::{Parser, Subcommand};
 use odr_server::{
     keys::KeyManager,
-    proto::{
-        permission_role, EventAdminRole, EventEditorRole, EventViewerRole, OrganizationAdminRole,
-        OrganizationViewerRole, Permission, PermissionRole, ServerAdminRole,
-    },
+    proto::{permission_role, EventRole, OrganizationRole, Permission, PermissionRole},
     store::{
         keys::{SqliteStore as KeyStore, Store as _},
         permission::{SqliteStore as PermissionStore, Store as _},
@@ -389,34 +386,32 @@ async fn add_permission(
 
     let role = match permission.as_str() {
         "SERVER_ADMIN" => PermissionRole {
-            role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+            role: Some(permission_role::Role::ServerAdmin(())),
         },
         "ORGANIZATION_ADMIN" => PermissionRole {
-            role: Some(permission_role::Role::OrganizationAdmin(
-                OrganizationAdminRole {
-                    organization_id: get_id()?,
-                },
-            )),
+            role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                organization_id: get_id()?,
+            })),
         },
         "ORGANIZATION_VIEWER" => PermissionRole {
             role: Some(permission_role::Role::OrganizationViewer(
-                OrganizationViewerRole {
+                OrganizationRole {
                     organization_id: get_id()?,
                 },
             )),
         },
         "EVENT_ADMIN" => PermissionRole {
-            role: Some(permission_role::Role::EventAdmin(EventAdminRole {
+            role: Some(permission_role::Role::EventAdmin(EventRole {
                 event_id: get_id()?,
             })),
         },
         "EVENT_EDITOR" => PermissionRole {
-            role: Some(permission_role::Role::EventEditor(EventEditorRole {
+            role: Some(permission_role::Role::EventEditor(EventRole {
                 event_id: get_id()?,
             })),
         },
         "EVENT_VIEWER" => PermissionRole {
-            role: Some(permission_role::Role::EventViewer(EventViewerRole {
+            role: Some(permission_role::Role::EventViewer(EventRole {
                 event_id: get_id()?,
             })),
         },
@@ -468,7 +463,7 @@ async fn init(
                 id: "".to_owned(),
                 user_id,
                 role: Some(PermissionRole {
-                    role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+                    role: Some(permission_role::Role::ServerAdmin(())),
                 }),
             }])
             .await?;

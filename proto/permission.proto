@@ -1,6 +1,7 @@
 syntax = "proto3";
 package proto;
 
+import "google/protobuf/empty.proto";
 import "queries.proto";
 
 service PermissionService {
@@ -40,29 +41,20 @@ message Permission {
 
 message PermissionRole {
 	oneof role {
-		ServerAdminRole server_admin = 3;
-		OrganizationAdminRole organization_admin = 4;
-		OrganizationViewerRole organization_viewer = 5;
-		EventAdminRole event_admin = 6;
-		EventEditorRole event_editor = 7;
-		EventViewerRole event_viewer = 8;
+		google.protobuf.Empty server_admin = 3;
+		OrganizationRole organization_admin = 4;
+		OrganizationRole organization_viewer = 5;
+		EventRole event_admin = 6;
+		EventRole event_editor = 7;
+		EventRole event_viewer = 8;
 	}
 }
 
-message ServerAdminRole {}
-message OrganizationAdminRole {
+message OrganizationRole {
 	string organization_id = 1;
 }
-message OrganizationViewerRole {
-	string organization_id = 1;
-}
-message EventAdminRole {
-	string event_id = 1;
-}
-message EventEditorRole {
-	string event_id = 1;
-}
-message EventViewerRole {
+
+message EventRole {
 	string event_id = 1;
 }
 

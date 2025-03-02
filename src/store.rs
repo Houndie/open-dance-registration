@@ -70,13 +70,13 @@ impl<Q: Queryable> Queryable for CompoundQuery<Q> {
             CompoundOperator::Or => " OR ",
         };
 
-        let where_clauses = itertools::Itertools::intersperse(
-            self.queries.iter().map(|query| query.where_clause()),
+        itertools::Itertools::intersperse(
+            self.queries
+                .iter()
+                .map(|query| format!("({})", query.where_clause())),
             operator.to_owned(),
         )
-        .collect::<String>();
-
-        format!("({})", where_clauses)
+        .collect::<String>()
     }
 }
 

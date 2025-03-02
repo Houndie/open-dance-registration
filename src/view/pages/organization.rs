@@ -162,9 +162,10 @@ fn PageBody(org: ReadOnlySignal<Organization>, events: ReadOnlySignal<Vec<Event>
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum MenuItem {
+pub enum MenuItem {
     None,
     OrganizationHome,
+    OrganizationSettings,
 }
 
 impl MenuItem {
@@ -178,7 +179,7 @@ impl MenuItem {
 }
 
 #[component]
-fn Menu(
+pub fn Menu(
     org_name: ReadOnlySignal<String>,
     org_id: ReadOnlySignal<String>,
     highlight: Option<MenuItem>,
@@ -203,6 +204,14 @@ fn Menu(
                             nav.push(Routes::OrganizationPage { org_id: org_id.read().clone() });
                         },
                         "Organization Home"
+                    }
+                    a {
+                        class: highlight.is_active(&MenuItem::OrganizationSettings),
+                        onclick: move |e| {
+                            e.prevent_default();
+                            nav.push(Routes::OrganizationSettings { org_id: org_id.read().clone() });
+                        },
+                        "Organization Settings"
                     }
                 }
             }

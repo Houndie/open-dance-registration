@@ -5,7 +5,8 @@ use crate::{
     view::pages::{
         event::Page as EventPage, landing::Page as LandingPage, login::Page as LoginPage,
         not_found::Page as NotFound, organization::Page as OrganizationPage,
-        profile::Page as ProfilePage, registration::Page as RegistrationPage,
+        organization_settings::Page as OrganizationSettings, profile::Page as ProfilePage,
+        registration::Page as RegistrationPage,
         registration_schema::Page as RegistrationSchemaPage,
         server_settings::Page as ServerSettings,
     },
@@ -70,4 +71,7 @@ pub enum Routes {
 
     #[route("/settings")]
     ServerSettings,
+
+    #[route("/organizations/:org_id/settings")]
+    OrganizationSettings { org_id: String },
 }

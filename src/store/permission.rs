@@ -94,57 +94,57 @@ impl Queryable for PermissionRoleQuery {
     fn where_clause(&self) -> String {
         match self {
             PermissionRoleQuery::Is(role) => match role.role.as_ref().unwrap() {
-                permission_role::Role::ServerAdmin(_) => "p.role = \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::ServerAdmin(_) => "p.role = 'SERVER_ADMIN'".to_string(),
                 permission_role::Role::OrganizationAdmin(_) => {
-                    "p.role = \"ORGANIZATION_ADMIN\" AND p.organization = ?".to_string()
+                    "p.role = 'ORGANIZATION_ADMIN' AND p.organization = ?".to_string()
                 }
                 permission_role::Role::OrganizationViewer(_) => {
-                    "p.role = \"ORGANIZATION_VIEWER\" AND p.organization = ?".to_string()
+                    "p.role = 'ORGANIZATION_VIEWER' AND p.organization = ?".to_string()
                 }
                 permission_role::Role::EventAdmin(_) => {
-                    "p.role = \"EVENT_ADMIN\" AND p.event = ?".to_string()
+                    "p.role = 'EVENT_ADMIN' AND p.event = ?".to_string()
                 }
                 permission_role::Role::EventEditor(_) => {
-                    "p.role = \"EVENT_EDITOR\" AND p.event = ?".to_string()
+                    "p.role = 'EVENT_EDITOR' AND p.event = ?".to_string()
                 }
                 permission_role::Role::EventViewer(_) => {
-                    "p.role = \"EVENT_VIEWER\" AND p.event = ?".to_string()
+                    "p.role = 'EVENT_VIEWER' AND p.event = ?".to_string()
                 }
             },
             PermissionRoleQuery::IsNot(role) => match role.role.as_ref().unwrap() {
-                permission_role::Role::ServerAdmin(_) => "p.role != \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::ServerAdmin(_) => "p.role != 'SERVER_ADMIN'".to_string(),
                 permission_role::Role::OrganizationAdmin(_) => {
-                    "p.role != \"ORGANIZATION_ADMIN\" OR p.organization != ?".to_string()
+                    "p.role != 'ORGANIZATION_ADMIN' OR p.organization != ?".to_string()
                 }
                 permission_role::Role::OrganizationViewer(_) => {
-                    "p.role != \"ORGANIZATION_VIEWER\" OR p.organization != ?".to_string()
+                    "p.role != 'ORGANIZATION_VIEWER' OR p.organization != ?".to_string()
                 }
                 permission_role::Role::EventAdmin(_) => {
-                    "p.role != \"EVENT_ADMIN\" OR p.event != ?".to_string()
+                    "p.role != 'EVENT_ADMIN' OR p.event != ?".to_string()
                 }
                 permission_role::Role::EventEditor(_) => {
-                    "p.role != \"EVENT_EDITOR\" OR p.event = ?".to_string()
+                    "p.role != 'EVENT_EDITOR' OR p.event = ?".to_string()
                 }
                 permission_role::Role::EventViewer(_) => {
-                    "p.role != \"EVENT_VIEWER\" OR p.event = ?".to_string()
+                    "p.role != 'EVENT_VIEWER' OR p.event = ?".to_string()
                 }
             },
             PermissionRoleQuery::IsAtLeast(role) => match role.role.as_ref().unwrap() {
-                permission_role::Role::ServerAdmin(_) => "p.role = \"SERVER_ADMIN\"".to_string(),
+                permission_role::Role::ServerAdmin(_) => "p.role = 'SERVER_ADMIN'".to_string(),
                 permission_role::Role::OrganizationAdmin(_) => {
-                    "p.role = \"SERVER_ADMIN\" OR (p.role = \"ORGANIZATION_ADMIN\" AND p.organization = ?)".to_string()
+                    "p.role = 'SERVER_ADMIN' OR (p.role = 'ORGANIZATION_ADMIN' AND p.organization = ?)".to_string()
                 }
                 permission_role::Role::OrganizationViewer(_) => {
-                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"ORGANIZATION_VIEWER\" OR role = \"ORGANIZATION_ADMIN\") AND p.organization = ?)".to_string()
+                    "p.role = 'SERVER_ADMIN' OR ((p.role = 'ORGANIZATION_VIEWER' OR role = 'ORGANIZATION_ADMIN') AND p.organization = ?)".to_string()
                 }
                 permission_role::Role::EventAdmin(_) => {
-                    "p.role = \"SERVER_ADMIN\" OR (p.role = \"EVENT_ADMIN\" AND p.event = ?) OR (p.role = \"ORGANIZATION_ADMIN\" AND p2.event = ?)".to_string()
+                    "p.role = 'SERVER_ADMIN' OR (p.role = 'EVENT_ADMIN' AND p.event = ?) OR (p.role = 'ORGANIZATION_ADMIN' AND p2.event = ?)".to_string()
                 }
                 permission_role::Role::EventEditor(_) => {
-                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"EVENT_EDITOR\" OR p.role = \"EVENT_ADMIN\") AND p.event = ?) OR (p.role = \"ORGANIZATION_ADMIN\" AND p2.event = ?)".to_string()
+                    "p.role = 'SERVER_ADMIN' OR ((p.role = 'EVENT_EDITOR' OR p.role = 'EVENT_ADMIN') AND p.event = ?) OR (p.role = 'ORGANIZATION_ADMIN' AND p2.event = ?)".to_string()
                 }
                 permission_role::Role::EventViewer(_) => {
-                    "p.role = \"SERVER_ADMIN\" OR ((p.role = \"EVENT_VIEWER\" OR p.role = \"EVENT_EDITOR\" OR p.role = \"EVENT_ADMIN\") AND p.event = ?) OR ((p.role = \"ORGANIZATION_ADMIN\" OR p.role = \"ORGANIZATION_VIEWER\") AND e.id = ?)".to_string()
+                    "p.role = 'SERVER_ADMIN' OR ((p.role = 'EVENT_VIEWER' OR p.role = 'EVENT_EDITOR' OR p.role = 'EVENT_ADMIN') AND p.event = ?) OR ((p.role = 'ORGANIZATION_ADMIN' OR p.role = 'ORGANIZATION_VIEWER') AND e.id = ?)".to_string()
                 }
             },
         }
@@ -474,7 +474,7 @@ impl Store for SqliteStore {
                     base_query_string.to_string()
                 };
 
-                format!("{} WHERE {}", query_string, q.where_clause())
+                format!("{} WHERE {};", query_string, q.where_clause())
             }
             None => base_query_string.to_string(),
         };

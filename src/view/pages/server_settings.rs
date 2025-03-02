@@ -1,27 +1,19 @@
 use crate::{
-    hooks::{handle_error::use_handle_error, toasts::use_toasts},
+    hooks::handle_error::use_handle_error,
     proto::{
         compound_user_query, permission_query, permission_role, permission_role_query,
-        string_query, user_query, ClaimsRequest, CompoundUserQuery, DeletePermissionsRequest,
-        Permission, PermissionQuery, PermissionRole, PermissionRoleQuery, QueryPermissionsRequest,
-        QueryUsersRequest, ServerAdminRole, StringQuery, UpsertPermissionsRequest, User, UserQuery,
+        string_query, user_query, ClaimsRequest, CompoundUserQuery, Permission, PermissionQuery,
+        PermissionRole, PermissionRoleQuery, QueryPermissionsRequest, QueryUsersRequest,
+        ServerAdminRole, StringQuery, User, UserQuery,
     },
     server_functions::{
-        authentication::claims,
-        permission::{
-            delete as delete_permissions, query as query_permissions, upsert as upsert_permissions,
-        },
-        user::query as query_users,
+        authentication::claims, permission::query as query_permissions, user::query as query_users,
         ProtoWrapper,
     },
     view::{
         app::{Error, Routes},
         components::{
-            form::{Button, ButtonFlavor, Field, TextInput, TextInputType},
-            modal::Modal,
-            page::Page as GenericPage,
-            table::Table,
-            with_toasts::WithToasts,
+            page::Page as GenericPage, permissions::PermissionsTable, with_toasts::WithToasts,
         },
         pages::landing::{Menu, MenuItem},
     },
@@ -124,209 +116,14 @@ fn PageBody(
     permissions: ReadOnlySignal<Vec<Permission>>,
     user_map: ReadOnlySignal<HashMap<String, User>>,
 ) -> Element {
-    let mut permissions = use_signal(|| permissions.read().clone());
-    let mut user_map = use_signal(|| user_map.read().clone());
-    let mut show_permission_modal: Signal<Option<Option<(Permission, User)>>> = use_signal(|| None);
-
-    let permission_modal = match show_permission_modal.read().as_ref() {
-        None => rsx! {},
-        Some(permission) => rsx! {
-            AddPermissionModal {
-                onsubmit: move |(permission, user): (Permission, User)| {
-                    show_permission_modal.set(None);
-                    permissions.write().push(permission);
-                    user_map.write().insert(user.id.clone(), user);
-                },
-                onclose: move |_| show_permission_modal.set(None),
-                ondelete: move |id| {
-                    permissions.with_mut(|p| match p.iter().position(|permission| permission.id == id) {
-                        Some(idx) => {
-                            p.remove(idx);
-                        },
-                        None => (),
-                    });
-                    show_permission_modal.set(None);
-                },
-                permission: permission.clone(),
-            },
-        },
-    };
-
     rsx! {
-        h2 {
-            class: "title is-2",
-            "Permissions"
-        }
-
-        Table {
-            is_striped: true,
-            is_fullwidth: true,
-            thead {
-                tr {
-                    th {
-                        "User",
-                    }
-                    th {
-                        "Role",
-                    }
-                }
-            }
-            tbody {
-                { permissions.read().iter().map(|permission| {
-                    let permission = permission.clone();
-                    let user_map = user_map.read();
-                    let user = user_map.get(&permission.user_id).unwrap().clone();
-                    let user_name = user.username.clone();
-                    rsx!{
-                        tr {
-                            key: "{permission.id}",
-                            td {
-                                a {
-                                    onclick: move |_| show_permission_modal.set(Some(Some((permission.clone(), user.clone())))),
-                                    "{user_name}",
-                                }
-                            }
-                            td {
-                                "Server Admin",
-                            }
-                        }
-                    }
-                })}
-            }
-        }
-        Button {
-            flavor: ButtonFlavor::Info,
-            onclick: move |_| show_permission_modal.set(Some(None)),
-            "Add User"
-        }
-        { permission_modal }
-    }
-}
-
-#[derive(Default)]
-struct AddPermissionFormState {
-    username: String,
-}
-
-#[component]
-fn AddPermissionModal(
-    permission: Option<(Permission, User)>,
-    onsubmit: EventHandler<(Permission, User)>,
-    ondelete: EventHandler<String>,
-    onclose: EventHandler<()>,
-) -> Element {
-    let mut form_state = use_signal(|| match &permission {
-        Some((_, user)) => AddPermissionFormState {
-            username: user.username.clone(),
-        },
-        None => AddPermissionFormState::default(),
-    });
-    let mut submitted = use_signal(|| false);
-    let mut toaster = use_toasts();
-
-    let title = match &permission {
-        Some((_, user)) => user.username.clone(),
-        None => "Add User".to_string(),
-    };
-
-    let remove_button = match &permission {
-        Some((permission, _)) => {
-            let id = permission.id.clone();
-            rsx! {
-                Button {
-                    flavor: ButtonFlavor::Danger,
-                    disabled: *submitted.read(),
-                    onclick: move |_| {
-                        let id = id.clone();
-                        submitted.set(true);
-                        spawn(async move {
-                            let response = delete_permissions(DeletePermissionsRequest{
-                                ids: vec![id.clone()],
-                            }).await;
-
-                            if let Err(err) = response {
-                                toaster.write().new_error(format!("Error deleting permission: {}", err));
-                                submitted.set(false);
-                                return;
-                            }
-
-                            ondelete.call(id);
-                        });
-                    },
-                    "Remove"
-                }
-            }
-        }
-        None => rsx! {},
-    };
-
-    rsx! {
-        Modal {
-            onsubmit: move |_| {
-                submitted.set(true);
-                spawn( async move {
-                    let user_response= query_users(QueryUsersRequest {
-                        query: Some(UserQuery {
-                            query: Some(user_query::Query::Username(StringQuery {
-                                operator: Some(string_query::Operator::Equals(form_state.read().username.clone())), })),
-                        }),
-                    }).await;
-
-                    let user = match user_response {
-                        Ok(user_response) => match user_response.users.into_iter().next() {
-                            Some(user) => user,
-                            None => {
-                                toaster.write().new_error("User not found".to_string());
-                                submitted.set(false);
-                                return;
-                            }
-                        },
-                        Err(err) => {
-                            toaster.write().new_error(format!("Error querying users: {}", err));
-                            submitted.set(false);
-                            return
-                        }
-                    };
-
-                    let permission_response = upsert_permissions(UpsertPermissionsRequest {
-                        permissions: vec![Permission {
-                            id: "".to_owned(),
-                            user_id: user.id.clone(),
-                            role: Some(PermissionRole{
-                                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
-                            }),
-                        }],
-                    }).await;
-
-                    let permission = match permission_response {
-                        Ok(permission_response) => permission_response.permissions.into_iter().next().unwrap(),
-                        Err(err) => {
-                            toaster.write().new_error(format!("Error upserting permissions: {}", err));
-                            submitted.set(false);
-                            return
-                        }
-                    };
-
-                    onsubmit.call((permission, user));
-                });
-            },
-            onclose: onclose,
-            title: "{title}",
-            success_text: "Add",
-            disable_submit: *submitted.read(),
-            form {
-                div {
-                    class: "mb-3",
-                    Field {
-                        label: "User Name",
-                        TextInput {
-                            value: TextInputType::Text(form_state.read().username.clone()),
-                            oninput: move |evt: FormEvent| form_state.write().username = evt.value(),
-                        }
-                    }
-                }
-            }
-            { remove_button }
+        PermissionsTable {
+            permissions: permissions,
+            user_map: user_map,
+            role_options: vec![PermissionRole{
+                role: Some(permission_role::Role::ServerAdmin(ServerAdminRole {})),
+            }],
+            default_role: 0,
         }
     }
 }

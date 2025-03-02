@@ -1,4 +1,5 @@
 pub mod event;
+pub mod event_settings;
 pub mod landing;
 pub mod login;
 pub mod not_found;

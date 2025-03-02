@@ -88,6 +88,7 @@ pub enum MenuItem {
     EventHome,
     RegistrationSchema,
     Registrations,
+    Settings,
 }
 
 impl MenuItem {
@@ -146,6 +147,16 @@ pub fn Menu(
                             nav.push(Routes::RegistrationSchemaPage { id: event_id.read().clone() });
                         },
                         "Registration Schema"
+                    }
+                }
+                li {
+                    a {
+                        class: highlight.is_active(&MenuItem::Settings),
+                        onclick: move |e| {
+                            e.prevent_default();
+                            nav.push(Routes::EventSettings { event_id: event_id.read().clone() });
+                        },
+                        "Event Settings"
                     }
                 }
             }

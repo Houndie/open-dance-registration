@@ -1,37 +1,39 @@
 use crate::{
     hooks::handle_error::use_handle_error,
     proto::{
-        compound_permission_query, compound_user_query, organization_query, permission_query,
-        permission_role, permission_role_query, string_query, user_query, ClaimsRequest,
-        CompoundPermissionQuery, CompoundUserQuery, OrganizationAdminRole, OrganizationQuery,
-        OrganizationViewerRole, Permission, PermissionQuery, PermissionRole, PermissionRoleQuery,
-        QueryOrganizationsRequest, QueryPermissionsRequest, QueryUsersRequest, QueryUsersResponse,
-        StringQuery, User, UserQuery,
+        compound_permission_query, compound_user_query, event_query, organization_query,
+        permission_query, permission_role, permission_role_query, string_query, user_query,
+        ClaimsRequest, CompoundPermissionQuery, CompoundUserQuery, EventAdminRole, EventEditorRole,
+        EventQuery, EventViewerRole, OrganizationQuery, Permission, PermissionQuery,
+        PermissionRole, PermissionRoleQuery, QueryEventsRequest, QueryOrganizationsRequest,
+        QueryPermissionsRequest, QueryUsersRequest, QueryUsersResponse, StringQuery, User,
+        UserQuery,
     },
     server_functions::{
-        authentication::claims, organization::query as query_organizations,
-        permission::query as query_permissions, user::query as query_users, ProtoWrapper,
+        authentication::claims, event::query as query_events,
+        organization::query as query_organizations, permission::query as query_permissions,
+        user::query as query_users, ProtoWrapper,
     },
     view::{
         app::{Error, Routes},
         components::{
             page::Page as GenericPage, permissions::PermissionsTable, with_toasts::WithToasts,
         },
-        pages::organization::{Menu, MenuItem},
+        pages::event::{Menu, MenuItem},
     },
 };
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
 #[component]
-pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
+pub fn Page(event_id: ReadOnlySignal<String>) -> Element {
     let results = use_server_future(move || async move {
         let claims_future = claims(ClaimsRequest {});
 
-        let organizations_future = query_organizations(QueryOrganizationsRequest {
-            query: Some(OrganizationQuery {
-                query: Some(organization_query::Query::Id(StringQuery {
-                    operator: Some(string_query::Operator::Equals(org_id())),
+        let event_future = query_events(QueryEventsRequest {
+            query: Some(EventQuery {
+                query: Some(event_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(event_id())),
                 })),
             }),
         });
@@ -45,9 +47,9 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                             query: Some(permission_query::Query::Role(PermissionRoleQuery {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
-                                        role: Some(permission_role::Role::OrganizationAdmin(
-                                            OrganizationAdminRole {
-                                                organization_id: org_id(),
+                                        role: Some(permission_role::Role::EventAdmin(
+                                            EventAdminRole {
+                                                event_id: event_id(),
                                             },
                                         )),
                                     },
@@ -58,9 +60,22 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                             query: Some(permission_query::Query::Role(PermissionRoleQuery {
                                 operator: Some(permission_role_query::Operator::Is(
                                     PermissionRole {
-                                        role: Some(permission_role::Role::OrganizationViewer(
-                                            OrganizationViewerRole {
-                                                organization_id: org_id(),
+                                        role: Some(permission_role::Role::EventEditor(
+                                            EventEditorRole {
+                                                event_id: event_id(),
+                                            },
+                                        )),
+                                    },
+                                )),
+                            })),
+                        },
+                        PermissionQuery {
+                            query: Some(permission_query::Query::Role(PermissionRoleQuery {
+                                operator: Some(permission_role_query::Operator::Is(
+                                    PermissionRole {
+                                        role: Some(permission_role::Role::EventViewer(
+                                            EventViewerRole {
+                                                event_id: event_id(),
                                             },
                                         )),
                                     },
@@ -74,12 +89,27 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
 
         let _ = claims_future.await.map_err(Error::from_server_fn_error)?;
 
-        let organization = organizations_future
+        let event = event_future
             .await
             .map_err(Error::from_server_fn_error)?
-            .organizations
+            .events
             .pop()
             .ok_or(Error::NotFound)?;
+
+        let organization = query_organizations(QueryOrganizationsRequest {
+            query: Some(OrganizationQuery {
+                query: Some(organization_query::Query::Id(StringQuery {
+                    operator: Some(string_query::Operator::Equals(
+                        event.organization_id.clone(),
+                    )),
+                })),
+            }),
+        })
+        .await
+        .map_err(Error::from_server_fn_error)?
+        .organizations
+        .pop()
+        .ok_or(Error::NotFound)?;
 
         let permissions_response = permissions_future
             .await
@@ -111,6 +141,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
         };
 
         Ok((
+            ProtoWrapper(event),
             ProtoWrapper(organization),
             ProtoWrapper(permissions_response),
             ProtoWrapper(users_response),
@@ -120,6 +151,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
     use_handle_error(
         results.suspend()?,
         |(
+            ProtoWrapper(event),
             ProtoWrapper(organization),
             ProtoWrapper(permissions_response),
             ProtoWrapper(users_response),
@@ -143,9 +175,9 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
 
             let menu = rsx! {
                 Menu {
-                    org_id: org_id,
-                    org_name: organization.name.clone(),
-                    highlight: MenuItem::OrganizationSettings,
+                    event_id: event_id,
+                    event_name: event.name.clone(),
+                    highlight: MenuItem::Settings,
                 }
             };
 
@@ -154,12 +186,13 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
                     title: "Server Settings".to_owned(),
                     breadcrumb: vec![
                         ("Home".to_owned(), Some(Routes::LandingPage)),
-                        (organization.name, Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
-                        ("Organization Settings".to_owned(), None)
+                        (organization.name.clone(), Some(Routes::OrganizationPage { org_id: organization.id.clone() })),
+                        (event.name.clone(), Some(Routes::EventPage { id: event.id.clone() })),
+                        ("Event Settings".to_owned(), None)
                     ],
                     menu: menu,
                     PageBody{
-                        organization_id: org_id,
+                        event_id: event.id,
                         permissions: permissions_response.permissions,
                         user_map: user_map,
                     }
@@ -171,7 +204,7 @@ pub fn Page(org_id: ReadOnlySignal<String>) -> Element {
 
 #[component]
 fn PageBody(
-    organization_id: ReadOnlySignal<String>,
+    event_id: ReadOnlySignal<String>,
     permissions: Vec<Permission>,
     user_map: HashMap<String, User>,
 ) -> Element {
@@ -181,21 +214,28 @@ fn PageBody(
             user_map: user_map,
             role_options: vec![
                 PermissionRole{
-                    role: Some(permission_role::Role::OrganizationAdmin(
-                        OrganizationAdminRole {
-                            organization_id: organization_id(),
+                    role: Some(permission_role::Role::EventAdmin(
+                        EventAdminRole {
+                            event_id: event_id(),
                         },
                     )),
                 },
                 PermissionRole{
-                    role: Some(permission_role::Role::OrganizationViewer(
-                        OrganizationViewerRole {
-                            organization_id: organization_id(),
+                    role: Some(permission_role::Role::EventEditor(
+                        EventEditorRole {
+                            event_id: event_id(),
+                        },
+                    )),
+                },
+                PermissionRole{
+                    role: Some(permission_role::Role::EventViewer(
+                        EventViewerRole {
+                            event_id: event_id(),
                         },
                     )),
                 },
             ],
-            default_role: 1,
+            default_role: 2,
         }
     }
 }

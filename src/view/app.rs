@@ -3,8 +3,9 @@ use dioxus::prelude::*;
 use crate::{
     server_functions,
     view::pages::{
-        event::Page as EventPage, landing::Page as LandingPage, login::Page as LoginPage,
-        not_found::Page as NotFound, organization::Page as OrganizationPage,
+        event::Page as EventPage, event_settings::Page as EventSettings,
+        landing::Page as LandingPage, login::Page as LoginPage, not_found::Page as NotFound,
+        organization::Page as OrganizationPage,
         organization_settings::Page as OrganizationSettings, profile::Page as ProfilePage,
         registration::Page as RegistrationPage,
         registration_schema::Page as RegistrationSchemaPage,
@@ -74,4 +75,7 @@ pub enum Routes {
 
     #[route("/organizations/:org_id/settings")]
     OrganizationSettings { org_id: String },
+
+    #[route("/events/:event_id/settings")]
+    EventSettings { event_id: String },
 }

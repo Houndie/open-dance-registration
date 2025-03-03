@@ -1,17 +1,21 @@
 use crate::{
-    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    api::{
+        authorization_state_to_status, common::try_logical_string_query, store_error_to_status,
+        ValidationError,
+    },
     proto::{
-        compound_permission_query, permission_query, permission_role::Role, permission_role_query,
-        permission_service_server::PermissionService, DeletePermissionsRequest,
-        DeletePermissionsResponse, Permission, PermissionQuery, QueryPermissionsRequest,
-        QueryPermissionsResponse, UpsertPermissionsRequest, UpsertPermissionsResponse,
+        compound_permission_query, permission_query, permission_role, permission_role::Role,
+        permission_role_query, permission_service_server::PermissionService,
+        DeletePermissionsRequest, DeletePermissionsResponse, Permission, PermissionQuery,
+        PermissionRole, QueryPermissionsRequest, QueryPermissionsResponse,
+        UpsertPermissionsRequest, UpsertPermissionsResponse,
     },
     store::{
-        permission::{PermissionRoleQuery, Query, Store},
+        permission::{IdQuery, PermissionRoleQuery, Query, Store},
         CompoundOperator, CompoundQuery,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tonic::{Request, Response, Status};
 
 pub struct Service<StoreType: Store> {
@@ -125,6 +129,30 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
     }
 }
 
+fn required_permissions(permissions: &[Permission]) -> Vec<Permission> {
+    permissions
+        .iter()
+        .map(|p| Permission {
+            id: "".to_string(),
+            user_id: p.user_id.clone(),
+            role: Some(PermissionRole {
+                role: Some(match p.role.as_ref().unwrap().role.as_ref().unwrap() {
+                    permission_role::Role::ServerAdmin(_) => Role::ServerAdmin(()),
+                    permission_role::Role::OrganizationAdmin(r)
+                    | permission_role::Role::OrganizationViewer(r) => {
+                        permission_role::Role::OrganizationAdmin(r.clone())
+                    }
+                    permission_role::Role::EventAdmin(r)
+                    | permission_role::Role::EventEditor(r)
+                    | permission_role::Role::EventViewer(r) => {
+                        permission_role::Role::EventViewer(r.clone())
+                    }
+                }),
+            }),
+        })
+        .collect::<Vec<_>>()
+}
+
 #[tonic::async_trait]
 impl<StoreType: Store> PermissionService for Service<StoreType> {
     async fn upsert_permissions(
@@ -137,6 +165,16 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
             validate_permission(permission)
                 .map_err(|e| -> Status { e.with_context(&format!("permissions[{}]", i)).into() })?
         }
+
+        let required_permissions = required_permissions(&request_permissions);
+
+        let failed_permissions = self
+            .store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
 
         let permissions = self
             .store
@@ -163,6 +201,51 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
             .await
             .map_err(store_error_to_status)?;
 
+        let required_permissions = required_permissions(&permissions);
+
+        let failed_permissions = self
+            .store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        let mut hidden_organizations = HashSet::new();
+        let mut hidden_events = HashSet::new();
+        let mut can_see_server_admin = true;
+
+        for permission in failed_permissions.into_iter() {
+            match permission.role.unwrap().role.unwrap() {
+                permission_role::Role::ServerAdmin(_) => {
+                    can_see_server_admin = false;
+                }
+                permission_role::Role::OrganizationAdmin(o)
+                | permission_role::Role::OrganizationViewer(o) => {
+                    hidden_organizations.insert(o.organization_id);
+                }
+                permission_role::Role::EventAdmin(e)
+                | permission_role::Role::EventEditor(e)
+                | permission_role::Role::EventViewer(e) => {
+                    hidden_events.insert(e.event_id);
+                }
+            }
+        }
+
+        let permissions = permissions
+            .into_iter()
+            .filter(
+                |permission| match permission.role.as_ref().unwrap().role.as_ref().unwrap() {
+                    permission_role::Role::ServerAdmin(_) => can_see_server_admin,
+                    permission_role::Role::OrganizationAdmin(o)
+                    | permission_role::Role::OrganizationViewer(o) => {
+                        !hidden_organizations.contains(&o.organization_id)
+                    }
+                    permission_role::Role::EventAdmin(e)
+                    | permission_role::Role::EventEditor(e)
+                    | permission_role::Role::EventViewer(e) => !hidden_events.contains(&e.event_id),
+                },
+            )
+            .collect::<Vec<_>>();
+
         return Ok(Response::new(QueryPermissionsResponse { permissions }));
     }
 
@@ -170,8 +253,32 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
         &self,
         request: Request<DeletePermissionsRequest>,
     ) -> Result<Response<DeletePermissionsResponse>, Status> {
+        let ids = request.into_inner().ids;
+
+        let to_be_deleted = self
+            .store
+            .query(Some(&Query::CompoundQuery(CompoundQuery {
+                operator: CompoundOperator::Or,
+                queries: ids
+                    .iter()
+                    .map(|id| Query::Id(IdQuery::Equals(id.clone())))
+                    .collect(),
+            })))
+            .await
+            .map_err(store_error_to_status)?;
+
+        let required_permissions = required_permissions(&to_be_deleted);
+
+        let failed_permissions = self
+            .store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
+
         self.store
-            .delete(&request.into_inner().ids)
+            .delete(&ids)
             .await
             .map_err(store_error_to_status)?;
 

@@ -5,7 +5,7 @@ use crate::{
         Bindable, Error, Queryable,
     },
 };
-use sqlx::{Row as _, SqlitePool};
+use sqlx::SqlitePool;
 use std::{future::Future, sync::Arc};
 
 #[derive(sqlx::FromRow)]
@@ -258,10 +258,10 @@ pub trait Store: Send + Sync + 'static {
         query: Option<&Query>,
     ) -> impl Future<Output = Result<Vec<Permission>, Error>> + Send;
     fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
-    fn permitted(
+    fn permission_check(
         &self,
         requested: Vec<Permission>,
-    ) -> impl Future<Output = Result<bool, Error>> + Send;
+    ) -> impl Future<Output = Result<Vec<Permission>, Error>> + Send;
 }
 
 #[derive(Debug)]
@@ -461,59 +461,53 @@ impl Store for SqliteStore {
         Ok(())
     }
 
-    async fn permitted(&self, requested: Vec<Permission>) -> Result<bool, Error> {
+    async fn permission_check(&self, requested: Vec<Permission>) -> Result<Vec<Permission>, Error> {
         if requested.is_empty() {
-            return Ok(true);
+            return Ok(Vec::new());
         }
 
         let values = itertools::Itertools::intersperse(
-            std::iter::repeat("(?, ?, ?, ?)").take(requested.len()),
+            std::iter::repeat("('', ?, ?, ?, ?)").take(requested.len()),
             ", ",
         )
         .collect::<String>();
 
         let query = format!(
-            r#"WITH requested(user, role, organization, event) as (VALUES {})
-            SELECT CASE
-                WHEN EXISTS (
-                    SELECT 1 FROM requested WHERE NOT EXISTS (
-                        SELECT 1 FROM permissions p
-                        LEFT JOIN events e ON p.organization = e.organization
-                        WHERE user = requested.user AND (
-                            (requested.role = 'SERVER_ADMIN' AND p.role = 'SERVER_ADMIN')
-                            OR (requested.role = 'ORGANIZATION_ADMIN' AND (
-                                p.role = 'SERVER_ADMIN'
-                                OR (p.role = 'ORGANIZATION_ADMIN' AND p.organization = requested.organization)
-                            ))
-                            OR (requested.role = 'ORGANIZATION_VIEWER' AND (
-                                p.role = 'SERVER_ADMIN'
-                                OR ((p.role = 'ORGANIZATION_ADMIN' OR p.role = 'ORGANIZATION_VIEWER') AND p.organization = requested.organization)
-                            ))
-                            OR (requested.role = 'EVENT_ADMIN' AND (
-                                p.role = 'SERVER_ADMIN'
-                                OR (p.role = 'EVENT_ADMIN' AND p.event = requested.event)
-                                OR (p.role = 'ORGANIZATION_ADMIN' AND e.id = requested.event)
-                            ))
-                            OR (requested.role = 'EVENT_EDITOR' AND (
-                                p.role = 'SERVER_ADMIN'
-                                OR ((p.role = 'EVENT_ADMIN' OR p.role = 'EVENT_EDITOR') AND p.event = requested.event)
-                                OR (p.role = 'ORGANIZATION_ADMIN' AND e.id = requested.event)
-                            ))
-                            OR (requested.role = 'EVENT_VIEWER' AND (
-                                p.role = 'SERVER_ADMIN'
-                                OR ((p.role = 'EVENT_VIEWER' OR p.role = 'EVENT_EDITOR' OR p.role = 'EVENT_ADMIN') AND p.event = requested.event)
-                                OR ((p.role = 'ORGANIZATION_ADMIN' OR p.role = 'ORGANIZATION_VIEWER') AND e.id = requested.event)
-                            ))
-                        )
-                    )
+            r#"WITH requested(id, user, role, organization, event) as (VALUES {})
+            SELECT id, user, role, organization, event FROM requested WHERE NOT EXISTS (
+                SELECT 1 FROM permissions p
+                LEFT JOIN events e ON p.organization = e.organization
+                WHERE user = requested.user AND (
+                    (requested.role = 'SERVER_ADMIN' AND p.role = 'SERVER_ADMIN')
+                    OR (requested.role = 'ORGANIZATION_ADMIN' AND (
+                        p.role = 'SERVER_ADMIN'
+                        OR (p.role = 'ORGANIZATION_ADMIN' AND p.organization = requested.organization)
+                    ))
+                    OR (requested.role = 'ORGANIZATION_VIEWER' AND (
+                        p.role = 'SERVER_ADMIN'
+                        OR ((p.role = 'ORGANIZATION_ADMIN' OR p.role = 'ORGANIZATION_VIEWER') AND p.organization = requested.organization)
+                    ))
+                    OR (requested.role = 'EVENT_ADMIN' AND (
+                        p.role = 'SERVER_ADMIN'
+                        OR (p.role = 'EVENT_ADMIN' AND p.event = requested.event)
+                        OR (p.role = 'ORGANIZATION_ADMIN' AND e.id = requested.event)
+                    ))
+                    OR (requested.role = 'EVENT_EDITOR' AND (
+                        p.role = 'SERVER_ADMIN'
+                        OR ((p.role = 'EVENT_ADMIN' OR p.role = 'EVENT_EDITOR') AND p.event = requested.event)
+                        OR (p.role = 'ORGANIZATION_ADMIN' AND e.id = requested.event)
+                    ))
+                    OR (requested.role = 'EVENT_VIEWER' AND (
+                        p.role = 'SERVER_ADMIN'
+                        OR ((p.role = 'EVENT_VIEWER' OR p.role = 'EVENT_EDITOR' OR p.role = 'EVENT_ADMIN') AND p.event = requested.event)
+                        OR ((p.role = 'ORGANIZATION_ADMIN' OR p.role = 'ORGANIZATION_VIEWER') AND e.id = requested.event)
+                    ))
                 )
-                THEN 0
-                ELSE 1
-            END as result"#,
+            )"#,
             values
         );
 
-        let query_builder = sqlx::query(&query);
+        let query_builder = sqlx::query_as(&query);
         let query_builder = requested.iter().fold(query_builder, |query_builder, p| {
             let query_builder = query_builder.bind(&p.user_id);
 
@@ -545,12 +539,17 @@ impl Store for SqliteStore {
             }
         });
 
-        let result = query_builder.fetch_one(&*self.pool).await;
+        let rows: Vec<PermissionRow> = query_builder
+            .fetch_all(&*self.pool)
+            .await
+            .map_err(Error::FetchError)?;
 
-        match result {
-            Ok(r) => Ok(r.get::<i64, _>(0) == 1),
-            Err(e) => Err(Error::FetchError(e)),
-        }
+        let permissions = rows
+            .into_iter()
+            .map(Permission::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(permissions)
     }
 }
 
@@ -987,7 +986,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn permitted() {
+    async fn permission_check() {
         let init = init().await;
         let permissions = test_data(&init).await;
 
@@ -997,13 +996,13 @@ mod tests {
         let mut event2_viewer_permission = permissions[5].clone();
         event2_viewer_permission.user_id = permissions[0].user_id.clone();
 
-        let permitted = store
-            .permitted(vec![event2_viewer_permission])
+        let failed_permissions = store
+            .permission_check(vec![event2_viewer_permission])
             .await
             .unwrap();
 
         // Allowed, as this user is a server admin
-        assert!(permitted);
+        assert!(failed_permissions.is_empty());
 
         let event1_viewer_permission = Permission {
             id: "".to_string(),
@@ -1018,13 +1017,13 @@ mod tests {
             }),
         };
 
-        let permitted = store
-            .permitted(vec![event1_viewer_permission])
+        let failed_permissions = store
+            .permission_check(vec![event1_viewer_permission])
             .await
             .unwrap();
 
         // Allowed, as this user is an organization viewer
-        assert!(permitted);
+        assert!(failed_permissions.is_empty());
 
         let event2_admin_permission = Permission {
             id: "".to_string(),
@@ -1039,12 +1038,12 @@ mod tests {
             }),
         };
 
-        let permitted = store
-            .permitted(vec![event2_admin_permission])
+        let failed_permissions = store
+            .permission_check(vec![event2_admin_permission])
             .await
             .unwrap();
 
         // Denied, as this user is not any kind of admin
-        assert!(!permitted);
+        assert!(!failed_permissions.is_empty());
     }
 }

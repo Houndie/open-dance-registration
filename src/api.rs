@@ -1,4 +1,7 @@
-use crate::store;
+use crate::{
+    proto::{permission_role, Permission},
+    store,
+};
 use std::fmt::{Display, Formatter};
 use thiserror::Error as ThisError;
 use tonic::{Code, Status};
@@ -26,6 +29,22 @@ fn store_error_to_status(err: store::Error) -> Status {
     };
 
     Status::new(code, format!("{}", err))
+}
+
+fn authorization_state_to_status(mut failed_permissions: Vec<Permission>) -> Result<(), Status> {
+    match failed_permissions.pop() {
+        Some(p) => match p.role.unwrap().role.unwrap() {
+            permission_role::Role::ServerAdmin(_) => Err(Status::permission_denied("")),
+            permission_role::Role::OrganizationAdmin(o)
+            | permission_role::Role::OrganizationViewer(o) => {
+                Err(Status::not_found(o.organization_id))
+            }
+            permission_role::Role::EventAdmin(e)
+            | permission_role::Role::EventEditor(e)
+            | permission_role::Role::EventViewer(e) => Err(Status::not_found(e.event_id)),
+        },
+        None => Err(Status::not_found("")),
+    }
 }
 
 #[derive(Debug)]

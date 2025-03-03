@@ -80,6 +80,5 @@ message PermissionRoleQuery {
 	oneof operator {
 		PermissionRole is = 1;
 		PermissionRole is_not = 2;
-		PermissionRole is_at_least = 3;
 	}
 }

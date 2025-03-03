@@ -95,13 +95,6 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
 
                     PermissionRoleQuery::IsNot(is_not)
                 }
-                Some(permission_role_query::Operator::IsAtLeast(is_at_least)) => {
-                    if is_at_least.role.is_none() {
-                        return Err(ValidationError::new_empty("query.role.operator.role"));
-                    }
-
-                    PermissionRoleQuery::IsAtLeast(is_at_least)
-                }
                 None => return Err(ValidationError::new_empty("query.role.operator")),
             }))
         }

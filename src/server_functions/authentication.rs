@@ -2,11 +2,12 @@
 mod server_only {
     use crate::{
         api::authentication::Service,
+        keys::StoreKeyManager,
         proto::{
             authentication_service_server::AuthenticationService, ClaimsRequest, ClaimsResponse,
             LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
         },
-        server_functions::{tonic_request, tonic_response, Error},
+        server_functions::{tonic_response, tonic_unauthenticated_request, Error},
         store::{keys::SqliteStore as KeySqliteStore, user::SqliteStore as UserSqliteStore},
     };
     use dioxus::prelude::*;
@@ -15,11 +16,13 @@ mod server_only {
 
     #[derive(Clone)]
     pub enum AnyService {
-        Sqlite(Arc<Service<KeySqliteStore, UserSqliteStore>>),
+        Sqlite(Arc<Service<StoreKeyManager<KeySqliteStore>, UserSqliteStore>>),
     }
 
     impl AnyService {
-        pub fn new_sqlite(store: Arc<Service<KeySqliteStore, UserSqliteStore>>) -> Self {
+        pub fn new_sqlite(
+            store: Arc<Service<StoreKeyManager<KeySqliteStore>, UserSqliteStore>>,
+        ) -> Self {
             AnyService::Sqlite(store)
         }
 
@@ -57,8 +60,10 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
+        let tonic_request = tonic_unauthenticated_request(request)?;
+
         let response = service
-            .login(tonic_request(request))
+            .login(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -71,8 +76,10 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
+        let tonic_request = tonic_unauthenticated_request(request)?;
+
         let response = service
-            .logout(tonic_request(request))
+            .logout(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -85,8 +92,10 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
+        let tonic_request = tonic_unauthenticated_request(request)?;
+
         let response = service
-            .claims(tonic_request(request))
+            .claims(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 

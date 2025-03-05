@@ -2,7 +2,7 @@ use std::{env, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use odr_server::{
-    keys::KeyManager,
+    keys::{KeyManager as _, StoreKeyManager},
     proto::{permission_role, EventRole, OrganizationRole, Permission, PermissionRole},
     store::{
         keys::{SqliteStore as KeyStore, Store as _},
@@ -190,7 +190,7 @@ async fn rotate_key(
     interactive: bool,
 ) -> Result<(), anyhow::Error> {
     let key_store = Arc::new(KeyStore::new(db.clone()));
-    let key_manager = KeyManager::new(key_store);
+    let key_manager = StoreKeyManager::new(key_store);
     let clear = match clear {
         ClearKey::Yes => true,
         ClearKey::No => false,

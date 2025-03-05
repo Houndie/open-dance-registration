@@ -8,6 +8,9 @@ pub mod api;
 pub mod keys;
 
 #[cfg(feature = "server")]
+pub mod authentication;
+
+#[cfg(feature = "server")]
 pub mod store;
 
 #[cfg(feature = "server")]

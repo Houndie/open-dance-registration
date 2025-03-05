@@ -1,10 +1,12 @@
 use crate::{
     api::store_error_to_status,
+    authentication::{
+        claims_from_request, Audience, Claims, ValidationError, ACCESS_TOKEN_COOKIE, ISSUER,
+    },
     keys::KeyManager,
     proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse},
     store::{
         self,
-        keys::Store as KeyStore,
         user::{PasswordType, Query, Store as UserStore, UsernameQuery},
         CompoundOperator, CompoundQuery,
     },
@@ -12,22 +14,13 @@ use crate::{
 use argon2::{Argon2, PasswordVerifier};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
 use ed25519_dalek::pkcs8::EncodePrivateKey;
-use http::header::{HeaderMap, COOKIE, SET_COOKIE};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, EncodingKey, Validation};
+use http::header::{HeaderMap, SET_COOKIE};
+use jsonwebtoken::{Algorithm, EncodingKey};
 use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
-
-#[derive(Debug)]
-struct Claims {
-    iss: String,
-    sub: String,
-    aud: Audience,
-    iat: chrono::DateTime<chrono::Utc>,
-    exp: chrono::DateTime<chrono::Utc>,
-}
 
 impl From<Claims> for proto::Claims {
     fn from(claims: Claims) -> Self {
@@ -101,37 +94,22 @@ impl<'de> Deserialize<'de> for Claims {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, strum::Display)]
-enum Audience {
-    Access,
-}
-
-impl From<Audience> for proto::Audience {
-    fn from(aud: Audience) -> Self {
-        match aud {
-            Audience::Access => proto::Audience::Access,
-        }
-    }
-}
-
-const ISSUER: &str = "https://auth.example.com";
 const ACCESS_TOKEN_EXPIRATION_SECONDS: i64 = 60 * 60 * 24 * 30 * 6;
-const ACCESS_TOKEN_COOKIE: &str = "authorization";
 
-pub struct Service<KStore: KeyStore, UStore: UserStore> {
-    km: Arc<KeyManager<KStore>>,
+pub struct Service<KM: KeyManager, UStore: UserStore> {
+    km: Arc<KM>,
     user_store: Arc<UStore>,
 }
 
-impl<KStore: KeyStore, UStore: UserStore> Service<KStore, UStore> {
-    pub fn new(km: Arc<KeyManager<KStore>>, user_store: Arc<UStore>) -> Self {
+impl<KM: KeyManager, UStore: UserStore> Service<KM, UStore> {
+    pub fn new(km: Arc<KM>, user_store: Arc<UStore>) -> Self {
         Self { km, user_store }
     }
 }
 
 #[tonic::async_trait]
-impl<KStore: KeyStore, UStore: UserStore>
-    proto::authentication_service_server::AuthenticationService for Service<KStore, UStore>
+impl<KM: KeyManager, UStore: UserStore> proto::authentication_service_server::AuthenticationService
+    for Service<KM, UStore>
 {
     async fn login(
         &self,
@@ -231,34 +209,12 @@ impl<KStore: KeyStore, UStore: UserStore>
 
     async fn claims(
         &self,
-        mut request: Request<ClaimsRequest>,
+        request: Request<ClaimsRequest>,
     ) -> Result<Response<ClaimsResponse>, Status> {
-        let metadata = std::mem::take(request.metadata_mut());
-        let headers = metadata.into_headers();
-        let cookies = headers.get_all(COOKIE);
-        let auth_cookie = cookies.iter().find_map(|cookie_header_value| {
-            let parsed = Cookie::parse(cookie_header_value.to_str().ok()?).ok()?;
-
-            if parsed.name() != ACCESS_TOKEN_COOKIE {
-                return None;
-            }
-
-            Some(parsed)
-        });
-
-        let auth_cookie = match auth_cookie {
-            Some(cookie) => cookie,
-            None => {
-                return Err(ValidationError::Unauthenticated.into());
-            }
-        };
-
-        let token = validate_token(&self.km, auth_cookie.value())
-            .await
-            .map_err(|e| -> Status { e.into() })?;
+        let claims = claims_from_request(&*self.km, &request).await?;
 
         Ok(Response::new(ClaimsResponse {
-            claims: Some(token.into()),
+            claims: Some(claims.into()),
         }))
     }
 
@@ -284,15 +240,6 @@ fn delete_cookie() -> CookieBuilder<'static> {
         .path("/")
 }
 
-#[derive(thiserror::Error, Debug)]
-enum ValidationError {
-    #[error("unauthenticated")]
-    Unauthenticated,
-
-    #[error(transparent)]
-    StoreError(store::Error),
-}
-
 impl From<ValidationError> for Status {
     fn from(err: ValidationError) -> Self {
         match err {
@@ -302,35 +249,4 @@ impl From<ValidationError> for Status {
             ValidationError::StoreError(e) => store_error_to_status(e),
         }
     }
-}
-
-async fn validate_token<KStore: KeyStore>(
-    km: &KeyManager<KStore>,
-    token: &str,
-) -> Result<Claims, ValidationError> {
-    let header = decode_header(token).map_err(|_| ValidationError::Unauthenticated)?;
-
-    let kid = header.kid.ok_or(ValidationError::Unauthenticated)?;
-
-    let key = match km.get_verifying_key(&kid).await {
-        Ok(key) => key,
-        Err(store::Error::IdDoesNotExist(_)) => {
-            return Err(ValidationError::Unauthenticated);
-        }
-        Err(e) => {
-            return Err(ValidationError::StoreError(e));
-        }
-    };
-
-    let decoding_key = DecodingKey::from_ed_der(key.to_bytes().as_slice());
-
-    let mut validation = Validation::new(Algorithm::EdDSA);
-    validation.set_audience(&[Audience::Access]);
-    validation.set_issuer(&[ISSUER]);
-    validation.validate_exp = true;
-
-    let claims = decode::<Claims>(token, &decoding_key, &validation)
-        .map_err(|_| ValidationError::Unauthenticated)?;
-
-    Ok(claims.claims)
 }

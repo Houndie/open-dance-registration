@@ -1,7 +1,7 @@
 use crate::{
     api::{
-        authorization_state_to_status, common::try_logical_string_query, store_error_to_status,
-        ValidationError,
+        authentication_middleware::ClaimsContext, authorization_state_to_status,
+        common::try_logical_string_query, store_error_to_status, ValidationError,
     },
     proto::{
         compound_permission_query, permission_query, permission_role, permission_role::Role,
@@ -129,12 +129,12 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
     }
 }
 
-fn required_permissions(permissions: &[Permission]) -> Vec<Permission> {
+fn required_permissions(user_id: &str, permissions: &[Permission]) -> Vec<Permission> {
     permissions
         .iter()
         .map(|p| Permission {
             id: "".to_string(),
-            user_id: p.user_id.clone(),
+            user_id: user_id.to_string(),
             role: Some(PermissionRole {
                 role: Some(match p.role.as_ref().unwrap().role.as_ref().unwrap() {
                     permission_role::Role::ServerAdmin(_) => Role::ServerAdmin(()),
@@ -159,14 +159,21 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
         &self,
         request: Request<UpsertPermissionsRequest>,
     ) -> Result<Response<UpsertPermissionsResponse>, Status> {
-        let request_permissions = request.into_inner().permissions;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(|| Status::unauthenticated("Missing claims context"))?;
+
+        let request_permissions = request.permissions;
 
         for (i, permission) in request_permissions.iter().enumerate() {
             validate_permission(permission)
                 .map_err(|e| -> Status { e.with_context(&format!("permissions[{}]", i)).into() })?
         }
 
-        let required_permissions = required_permissions(&request_permissions);
+        let required_permissions =
+            required_permissions(&claims_context.claims.sub, &request_permissions);
 
         let failed_permissions = self
             .store
@@ -189,11 +196,13 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
         &self,
         request: Request<QueryPermissionsRequest>,
     ) -> Result<Response<QueryPermissionsResponse>, Status> {
-        let query = request
-            .into_inner()
-            .query
-            .map(try_parse_query)
-            .transpose()?;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(|| Status::unauthenticated("Missing claims context"))?;
+
+        let query = request.query.map(try_parse_query).transpose()?;
 
         let permissions = self
             .store
@@ -201,7 +210,7 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
             .await
             .map_err(store_error_to_status)?;
 
-        let required_permissions = required_permissions(&permissions);
+        let required_permissions = required_permissions(&claims_context.claims.sub, &permissions);
 
         let failed_permissions = self
             .store
@@ -253,7 +262,13 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
         &self,
         request: Request<DeletePermissionsRequest>,
     ) -> Result<Response<DeletePermissionsResponse>, Status> {
-        let ids = request.into_inner().ids;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(|| Status::unauthenticated("Missing claims context"))?;
+
+        let ids = request.ids;
 
         let to_be_deleted = self
             .store
@@ -267,7 +282,7 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
             .await
             .map_err(store_error_to_status)?;
 
-        let required_permissions = required_permissions(&to_be_deleted);
+        let required_permissions = required_permissions(&claims_context.claims.sub, &to_be_deleted);
 
         let failed_permissions = self
             .store

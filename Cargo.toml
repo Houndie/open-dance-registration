@@ -47,6 +47,8 @@ clap = { version = "4.5.3", features = ["derive"], optional = true }
 anyhow = { version = "1.0.81", optional = true }
 inquire = { version = "0.7.2", optional = true }
 rand = { version = "0.8.5", optional = true }
+tonic-async-interceptor = { version = "0.12.0", optional = true }
+tower = { version = "0.4.13", optional = true }
 
 # Client
 wasm-bindgen = { version = "=0.2.99", optional = true }
@@ -62,7 +64,7 @@ tonic-build = { version = "0.12", default-features = false, features = ["prost"]
 
 [features]
 web = ["dioxus/web", "dep:wasm-bindgen", "dep:web-sys", "dep:tonic-web-wasm-client"]
-server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:clap", "dep:anyhow", "dep:inquire", "dep:rand", "tonic/default", "tonic-build/transport"]
+server = ["dioxus/server", "dep:sqlx", "dep:tokio", "dep:tonic-reflection", "dep:tonic-web", "dep:chrono", "dep:argon2", "dep:ed25519-dalek", "dep:jsonwebtoken", "dep:http", "dep:cookie", "dep:time", "dep:axum", "dep:dioxus-liveview", "dep:dioxus-cli-config", "dep:clap", "dep:anyhow", "dep:inquire", "dep:rand", "dep:tonic-async-interceptor", "dep:tower", "tonic/default", "tonic-build/transport"]
 
 [profile]
 

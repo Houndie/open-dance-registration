@@ -7,6 +7,7 @@ use thiserror::Error as ThisError;
 use tonic::{Code, Status};
 
 pub mod authentication;
+pub mod authentication_middleware;
 mod common;
 pub mod event;
 pub mod organization;

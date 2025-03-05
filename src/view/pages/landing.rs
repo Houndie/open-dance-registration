@@ -28,6 +28,9 @@ pub fn Page() -> Element {
         let (organizations_response, claims_response) =
             futures::join!(organizations_future, claims_future);
 
+        println!("Claims: {:?}", claims_response);
+        println!("Orgs: {:?}", organizations_response);
+
         let _ = claims_response.map_err(Error::from_server_fn_error)?;
 
         let organizations_response = organizations_response.map_err(Error::from_server_fn_error)?;

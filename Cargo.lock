@@ -2298,10 +2298,12 @@ dependencies = [
  "time",
  "tokio",
  "tonic",
+ "tonic-async-interceptor",
  "tonic-build",
  "tonic-reflection",
  "tonic-web",
  "tonic-web-wasm-client",
+ "tower 0.4.13",
  "tracing",
  "uuid",
  "wasm-bindgen",
@@ -3708,6 +3710,22 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tonic-async-interceptor"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86e7b555f9b026568d4713307878c5bf7540cc2f6acd8118b332fbf75d07bb7b"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "pin-project",
+ "tonic",
+ "tower-layer",
+ "tower-service",
 ]
 
 [[package]]

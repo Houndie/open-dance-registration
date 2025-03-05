@@ -2,18 +2,19 @@
 
 use crate::{
     api::{
-        authentication::Service as AuthenticationService, event::Service as EventService,
-        organization::Service as OrganizationService, permission::Service as PermissionService,
-        registration::Service as RegistrationService,
+        authentication::Service as AuthenticationService, authentication_middleware,
+        event::Service as EventService, organization::Service as OrganizationService,
+        permission::Service as PermissionService, registration::Service as RegistrationService,
         registration_schema::Service as SchemaService, user::Service as UserService,
     },
+    keys::{KeyManager, StoreKeyManager},
     proto,
     server_functions::{
         authentication::AnyService as AnyAuthenticationService,
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
         permission::AnyService as AnyPermissionService,
         registration_schema::AnyService as AnyRegistrationSchemaService,
-        user::AnyService as AnyUserService,
+        user::AnyService as AnyUserService, AnyKeyManager,
     },
     store::{
         event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
@@ -27,6 +28,8 @@ use sqlx::SqlitePool;
 use std::{env, future::IntoFuture, sync::Arc};
 use thiserror::Error;
 use tonic::transport::{self, Server};
+use tonic_async_interceptor::async_interceptor;
+use tower::ServiceBuilder;
 
 fn db_url() -> String {
     format!("sqlite://{}/odr-sqlite.db", env::temp_dir().display())
@@ -45,7 +48,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let key_store = Arc::new(KeyStore::new(db.clone()));
     let permission_store = Arc::new(PermissionStore::new(db.clone()));
 
-    let key_manager = Arc::new(crate::keys::KeyManager::new(key_store));
+    let key_manager = Arc::new(StoreKeyManager::new(key_store));
 
     let event_service = Arc::new(EventService::new(event_store));
 
@@ -55,39 +58,67 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let organization_service = Arc::new(OrganizationService::new(organization_store));
 
-    let authentication_service =
-        Arc::new(AuthenticationService::new(key_manager, user_store.clone()));
+    let authentication_service = Arc::new(AuthenticationService::new(
+        key_manager.clone(),
+        user_store.clone(),
+    ));
 
     let user_service = Arc::new(UserService::new(user_store));
 
     let permission_service = Arc::new(PermissionService::new(permission_store));
 
-    let event_grpc =
-        proto::event_service_server::EventServiceServer::from_arc(event_service.clone());
+    let auth_middleware = async_interceptor(authentication_middleware::Interceptor::new(
+        key_manager.clone(),
+    ));
 
-    let registration_schema_grpc =
-        proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
-            schema_service.clone(),
+    let event_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(proto::event_service_server::EventServiceServer::from_arc(
+            event_service.clone(),
+        ));
+
+    let registration_schema_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(
+            proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
+                schema_service.clone(),
+            ),
         );
 
-    let registration_grpc = proto::registration_service_server::RegistrationServiceServer::from_arc(
-        registration_service.clone(),
-    );
+    let registration_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(
+            proto::registration_service_server::RegistrationServiceServer::from_arc(
+                registration_service.clone(),
+            ),
+        );
 
-    let organization_grpc = proto::organization_service_server::OrganizationServiceServer::from_arc(
-        organization_service.clone(),
-    );
+    let organization_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(
+            proto::organization_service_server::OrganizationServiceServer::from_arc(
+                organization_service.clone(),
+            ),
+        );
 
-    let user_grpc = proto::user_service_server::UserServiceServer::from_arc(user_service.clone());
+    let user_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(proto::user_service_server::UserServiceServer::from_arc(
+            user_service.clone(),
+        ));
 
     let authentication_grpc =
         proto::authentication_service_server::AuthenticationServiceServer::from_arc(
             authentication_service.clone(),
         );
 
-    let permission_grpc = proto::permission_service_server::PermissionServiceServer::from_arc(
-        permission_service.clone(),
-    );
+    let permission_grpc = ServiceBuilder::new()
+        .layer(auth_middleware.clone())
+        .service(
+            proto::permission_service_server::PermissionServiceServer::from_arc(
+                permission_service.clone(),
+            ),
+        );
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
@@ -119,42 +150,22 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(tonic_web::enable(permission_grpc))
         .serve(grpc_web_addr);
 
-    let organization_provider_state = Box::new(move || {
-        Box::new(AnyOrganizationService::new_sqlite(
-            organization_service.clone(),
-        )) as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let organization_provider_state =
+        to_state(AnyOrganizationService::new_sqlite(organization_service));
 
-    let event_provider_state = Box::new(move || {
-        Box::new(AnyEventService::new_sqlite(event_service.clone())) as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let event_provider_state = to_state(AnyEventService::new_sqlite(event_service));
 
-    let registration_schema_provider_state = Box::new(move || {
-        Box::new(AnyRegistrationSchemaService::new_sqlite(
-            schema_service.clone(),
-        )) as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let registration_schema_provider_state =
+        to_state(AnyRegistrationSchemaService::new_sqlite(schema_service));
 
-    let authentication_provider_state = Box::new(move || {
-        Box::new(AnyAuthenticationService::new_sqlite(
-            authentication_service.clone(),
-        )) as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let authentication_provider_state =
+        to_state(AnyAuthenticationService::new_sqlite(authentication_service));
 
-    let user_provider_state = Box::new(move || {
-        Box::new(AnyUserService::new_sqlite(user_service.clone())) as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let user_provider_state = to_state(AnyUserService::new_sqlite(user_service));
 
-    let permission_provider_state = Box::new(move || {
-        Box::new(AnyPermissionService::new_sqlite(permission_service.clone()))
-            as Box<dyn std::any::Any>
-    })
-        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>;
+    let permission_provider_state = to_state(AnyPermissionService::new_sqlite(permission_service));
+
+    let key_manager_state = to_state(AnyKeyManager::new_sqlite(key_manager));
 
     let dioxus_config = ServeConfig::builder()
         .context_providers(Arc::new(vec![
@@ -164,6 +175,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
             registration_schema_provider_state,
             user_provider_state,
             permission_provider_state,
+            key_manager_state,
         ]))
         .build()?;
 
@@ -180,6 +192,14 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     axum_err?;
 
     Ok(())
+}
+
+fn to_state<T>(anything: T) -> Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>
+where
+    T: std::any::Any + Send + Sync + 'static + Clone,
+{
+    Box::new(move || Box::new(anything.clone()) as Box<dyn std::any::Any>)
+        as Box<dyn Fn() -> Box<dyn std::any::Any> + Send + Sync + 'static>
 }
 
 #[derive(Error, Debug)]

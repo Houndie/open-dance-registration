@@ -6,7 +6,7 @@ mod server_only {
             user_service_server::UserService, QueryUsersRequest, QueryUsersResponse,
             UpsertUsersRequest, UpsertUsersResponse,
         },
-        server_functions::Error,
+        server_functions::{tonic_request, tonic_response, Error},
         store::user::SqliteStore,
     };
     use dioxus::prelude::*;
@@ -48,26 +48,14 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let server_context = server_context();
+        let tonic_request = tonic_request(request).await?;
 
-        let mut tonic_request = tonic::Request::new(request);
-        *tonic_request.metadata_mut() =
-            MetadataMap::from_headers(server_context.request_parts().headers.clone());
-
-        let mut response = service
+        let response = service
             .upsert(tonic_request)
             .await
-            .map_err(Error::GrpcError);
+            .map_err(Error::GrpcError)?;
 
-        if let Ok(ref mut response) = response {
-            let metadata = std::mem::take(response.metadata_mut());
-            server_context
-                .response_parts_mut()
-                .headers
-                .extend(metadata.into_headers());
-        }
-
-        response.map(|r| r.into_inner())
+        Ok(tonic_response(response))
     }
 
     pub async fn query(request: QueryUsersRequest) -> Result<QueryUsersResponse, Error> {
@@ -76,23 +64,14 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let server_context = server_context();
+        let tonic_request = tonic_request(request).await?;
 
-        let mut tonic_request = tonic::Request::new(request);
-        *tonic_request.metadata_mut() =
-            MetadataMap::from_headers(server_context.request_parts().headers.clone());
+        let response = service
+            .query(tonic_request)
+            .await
+            .map_err(Error::GrpcError)?;
 
-        let mut response = service.query(tonic_request).await.map_err(Error::GrpcError);
-
-        if let Ok(ref mut response) = response {
-            let metadata = std::mem::take(response.metadata_mut());
-            server_context
-                .response_parts_mut()
-                .headers
-                .extend(metadata.into_headers());
-        }
-
-        response.map(|r| r.into_inner())
+        Ok(tonic_response(response))
     }
 }
 

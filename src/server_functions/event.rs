@@ -6,7 +6,7 @@ mod server_only {
             event_service_server::EventService, QueryEventsRequest, QueryEventsResponse,
             UpsertEventsRequest, UpsertEventsResponse,
         },
-        server_functions::Error,
+        server_functions::{tonic_request, tonic_response, Error},
         store::event::SqliteStore,
     };
     use dioxus::prelude::*;
@@ -48,27 +48,30 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        service
-            .upsert(tonic::Request::new(request))
+        let tonic_request = tonic_request(request).await?;
+
+        let response = service
+            .upsert(tonic_request)
             .await
-            .map(|r| r.into_inner())
-            .map_err(Error::GrpcError)
+            .map_err(Error::GrpcError)?;
+
+        Ok(tonic_response(response))
     }
 
     pub async fn query(request: QueryEventsRequest) -> Result<QueryEventsResponse, Error> {
-        println!("in event");
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let x = service
-            .query(tonic::Request::new(request))
+        let tonic_request = tonic_request(request).await?;
+
+        let response = service
+            .query(tonic_request)
             .await
-            .map(|r| r.into_inner())
-            .map_err(Error::GrpcError);
-        println!("out event");
-        x
+            .map_err(Error::GrpcError)?;
+
+        Ok(tonic_response(response))
     }
 }
 

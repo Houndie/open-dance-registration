@@ -7,7 +7,7 @@ mod server_only {
             QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse,
             UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
         },
-        server_functions::Error,
+        server_functions::{tonic_request, tonic_response, Error},
         store::registration_schema::SqliteStore,
     };
     use dioxus::prelude::*;
@@ -50,28 +50,33 @@ mod server_only {
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
-        service
-            .upsert(tonic::Request::new(request))
+
+        let tonic_request = tonic_request(request).await?;
+
+        let response = service
+            .upsert(tonic_request)
             .await
-            .map(|r| r.into_inner())
-            .map_err(Error::GrpcError)
+            .map_err(Error::GrpcError)?;
+
+        Ok(tonic_response(response))
     }
 
     pub async fn query(
         request: QueryRegistrationSchemasRequest,
     ) -> Result<QueryRegistrationSchemasResponse, Error> {
-        println!("in schema");
         let service: AnyService = extract::<FromContext<AnyService>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
-        let x = service
-            .query(tonic::Request::new(request))
+
+        let tonic_request = tonic_request(request).await?;
+
+        let response = service
+            .query(tonic_request)
             .await
-            .map(|r| r.into_inner())
-            .map_err(Error::GrpcError);
-        println!("out schema");
-        x
+            .map_err(Error::GrpcError)?;
+
+        Ok(tonic_response(response))
     }
 }
 

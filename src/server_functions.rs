@@ -51,28 +51,85 @@ pub enum Error {
 }
 
 #[cfg(feature = "server")]
-pub fn tonic_request<T>(request: T) -> tonic::Request<T> {
+mod server_only {
+    use super::Error;
+    use crate::{
+        api::authentication_middleware::verify_authentication_header,
+        keys::{KeyManager, StoreKeyManager},
+        store::{self, keys::SqliteStore as KeySqliteStore},
+    };
     use dioxus::prelude::*;
+    use ed25519_dalek::{SigningKey, VerifyingKey};
+    use std::sync::Arc;
 
-    let server_context = server_context();
+    pub async fn tonic_request<T>(request: T) -> Result<tonic::Request<T>, Error> {
+        let tonic_request = tonic_unauthenticated_request(request)?;
 
-    let mut tonic_request = tonic::Request::new(request);
-    *tonic_request.metadata_mut() =
-        tonic::metadata::MetadataMap::from_headers(server_context.request_parts().headers.clone());
+        let key_manager: AnyKeyManager = extract::<FromContext<AnyKeyManager>, _>()
+            .await
+            .map_err(|_| Error::ServiceNotInContext)?
+            .0;
 
-    tonic_request
+        let tonic_request = verify_authentication_header(&key_manager, tonic_request)
+            .await
+            .map_err(Error::GrpcError)?;
+
+        Ok(tonic_request)
+    }
+
+    pub fn tonic_unauthenticated_request<T>(request: T) -> Result<tonic::Request<T>, Error> {
+        let server_context = server_context();
+
+        let mut tonic_request = tonic::Request::new(request);
+        *tonic_request.metadata_mut() = tonic::metadata::MetadataMap::from_headers(
+            server_context.request_parts().headers.clone(),
+        );
+
+        Ok(tonic_request)
+    }
+
+    pub fn tonic_response<T>(mut response: tonic::Response<T>) -> T {
+        let server_context = server_context();
+        let metadata = std::mem::take(response.metadata_mut());
+        server_context
+            .response_parts_mut()
+            .headers
+            .extend(metadata.into_headers());
+
+        response.into_inner()
+    }
+
+    #[derive(Clone)]
+    pub enum AnyKeyManager {
+        Sqlite(Arc<StoreKeyManager<KeySqliteStore>>),
+    }
+
+    impl AnyKeyManager {
+        pub fn new_sqlite(store: Arc<StoreKeyManager<KeySqliteStore>>) -> Self {
+            AnyKeyManager::Sqlite(store)
+        }
+    }
+
+    impl KeyManager for AnyKeyManager {
+        async fn rotate_key(&self, clear: bool) -> Result<(), store::Error> {
+            match self {
+                AnyKeyManager::Sqlite(store) => store.rotate_key(clear).await,
+            }
+        }
+
+        async fn get_signing_key(&self) -> Result<(String, SigningKey), store::Error> {
+            match self {
+                AnyKeyManager::Sqlite(store) => store.get_signing_key().await,
+            }
+        }
+
+        async fn get_verifying_key(&self, kid: &str) -> Result<VerifyingKey, store::Error> {
+            match self {
+                AnyKeyManager::Sqlite(store) => store.get_verifying_key(kid).await,
+            }
+        }
+    }
 }
 
 #[cfg(feature = "server")]
-pub fn tonic_response<T>(mut response: tonic::Response<T>) -> T {
-    use dioxus::prelude::*;
-
-    let server_context = server_context();
-    let metadata = std::mem::take(response.metadata_mut());
-    server_context
-        .response_parts_mut()
-        .headers
-        .extend(metadata.into_headers());
-
-    response.into_inner()
-}
+pub use server_only::*;

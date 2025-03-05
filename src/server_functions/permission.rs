@@ -61,7 +61,7 @@ mod server_only {
             .0;
 
         let response = service
-            .upsert(tonic_request(request))
+            .upsert(tonic_request(request).await?)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -77,7 +77,7 @@ mod server_only {
             .0;
 
         let response = service
-            .query(tonic_request(request))
+            .query(tonic_request(request).await?)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -93,7 +93,7 @@ mod server_only {
             .0;
 
         let response = service
-            .delete(tonic_request(request))
+            .delete(tonic_request(request).await?)
             .await
             .map_err(Error::GrpcError)?;
 

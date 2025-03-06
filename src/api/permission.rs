@@ -1,7 +1,8 @@
 use crate::{
     api::{
-        authentication_middleware::ClaimsContext, authorization_state_to_status,
-        common::try_logical_string_query, store_error_to_status, ValidationError,
+        authorization_state_to_status, common::try_logical_string_query,
+        err_missing_claims_context, middleware::authentication::ClaimsContext,
+        store_error_to_status, ValidationError,
     },
     proto::{
         compound_permission_query, permission_query, permission_role, permission_role::Role,
@@ -163,7 +164,7 @@ impl<StoreType: Store> PermissionService for Service<StoreType> {
 
         let claims_context = extensions
             .get::<ClaimsContext>()
-            .ok_or_else(|| Status::unauthenticated("Missing claims context"))?;
+            .ok_or_else(err_missing_claims_context)?;
 
         let request_permissions = request.permissions;
 

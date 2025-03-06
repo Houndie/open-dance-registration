@@ -7,9 +7,9 @@ use thiserror::Error as ThisError;
 use tonic::{Code, Status};
 
 pub mod authentication;
-pub mod authentication_middleware;
 mod common;
 pub mod event;
+pub mod middleware;
 pub mod organization;
 pub mod permission;
 pub mod registration;
@@ -46,6 +46,10 @@ fn authorization_state_to_status(mut failed_permissions: Vec<Permission>) -> Res
         },
         None => Err(Status::not_found("")),
     }
+}
+
+fn err_missing_claims_context() -> Status {
+    Status::internal("Missing claims context")
 }
 
 #[derive(Debug)]

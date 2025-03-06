@@ -54,7 +54,7 @@ pub enum Error {
 mod server_only {
     use super::Error;
     use crate::{
-        api::authentication_middleware::verify_authentication_header,
+        api::middleware::authentication::verify_authentication_header,
         keys::{KeyManager, StoreKeyManager},
         store::{self, keys::SqliteStore as KeySqliteStore},
     };

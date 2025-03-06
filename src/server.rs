@@ -2,13 +2,27 @@
 
 use crate::{
     api::{
-        authentication::Service as AuthenticationService, authentication_middleware,
-        event::Service as EventService, organization::Service as OrganizationService,
-        permission::Service as PermissionService, registration::Service as RegistrationService,
-        registration_schema::Service as SchemaService, user::Service as UserService,
+        authentication::Service as AuthenticationService,
+        event::Service as EventService,
+        middleware::{
+            authentication::Interceptor as AuthInterceptor, selective::Layer as SelectiveMiddleware,
+        },
+        organization::Service as OrganizationService,
+        permission::Service as PermissionService,
+        registration::Service as RegistrationService,
+        registration_schema::Service as SchemaService,
+        user::Service as UserService,
     },
-    keys::{KeyManager, StoreKeyManager},
-    proto,
+    keys::StoreKeyManager,
+    proto::{
+        self, authentication_service_server::AuthenticationServiceServer,
+        event_service_server::EventServiceServer,
+        organization_service_server::OrganizationServiceServer,
+        permission_service_server::PermissionServiceServer,
+        registration_schema_service_server::RegistrationSchemaServiceServer,
+        registration_service_server::RegistrationServiceServer,
+        user_service_server::UserServiceServer,
+    },
     server_functions::{
         authentication::AnyService as AnyAuthenticationService,
         event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
@@ -27,9 +41,11 @@ use dioxus::prelude::{DioxusRouterExt, ServeConfig};
 use sqlx::SqlitePool;
 use std::{env, future::IntoFuture, sync::Arc};
 use thiserror::Error;
-use tonic::transport::{self, Server};
+use tonic::{
+    server::NamedService,
+    transport::{self, Server},
+};
 use tonic_async_interceptor::async_interceptor;
-use tower::ServiceBuilder;
 
 fn db_url() -> String {
     format!("sqlite://{}/odr-sqlite.db", env::temp_dir().display())
@@ -67,66 +83,39 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let permission_service = Arc::new(PermissionService::new(permission_store));
 
-    let auth_middleware = async_interceptor(authentication_middleware::Interceptor::new(
-        key_manager.clone(),
-    ));
+    let event_grpc = EventServiceServer::from_arc(event_service.clone());
 
-    let event_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(proto::event_service_server::EventServiceServer::from_arc(
-            event_service.clone(),
-        ));
+    let registration_schema_grpc =
+        RegistrationSchemaServiceServer::from_arc(schema_service.clone());
 
-    let registration_schema_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(
-            proto::registration_schema_service_server::RegistrationSchemaServiceServer::from_arc(
-                schema_service.clone(),
-            ),
-        );
+    let registration_grpc = RegistrationServiceServer::from_arc(registration_service.clone());
 
-    let registration_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(
-            proto::registration_service_server::RegistrationServiceServer::from_arc(
-                registration_service.clone(),
-            ),
-        );
+    let organization_grpc = OrganizationServiceServer::from_arc(organization_service.clone());
 
-    let organization_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(
-            proto::organization_service_server::OrganizationServiceServer::from_arc(
-                organization_service.clone(),
-            ),
-        );
+    let user_grpc = UserServiceServer::from_arc(user_service.clone());
 
-    let user_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(proto::user_service_server::UserServiceServer::from_arc(
-            user_service.clone(),
-        ));
+    let authentication_grpc = AuthenticationServiceServer::from_arc(authentication_service.clone());
 
-    let authentication_grpc =
-        proto::authentication_service_server::AuthenticationServiceServer::from_arc(
-            authentication_service.clone(),
-        );
-
-    let permission_grpc = ServiceBuilder::new()
-        .layer(auth_middleware.clone())
-        .service(
-            proto::permission_service_server::PermissionServiceServer::from_arc(
-                permission_service.clone(),
-            ),
-        );
+    let permission_grpc = PermissionServiceServer::from_arc(permission_service.clone());
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
         .build_v1()?;
 
+    let omit_authentication_paths = [
+        service_name(&authentication_grpc),
+        service_name(&reflection_service),
+    ];
+
+    let auth_middleware = SelectiveMiddleware::new(
+        async_interceptor(AuthInterceptor::new(key_manager.clone())),
+        omit_authentication_paths,
+    );
+
     let grpc_addr = "[::1]:50050".parse()?;
 
     let grpc_server = Server::builder()
+        .layer(auth_middleware.clone())
         .add_service(event_grpc.clone())
         .add_service(registration_schema_grpc.clone())
         .add_service(registration_grpc.clone())
@@ -140,6 +129,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_web_addr = "[::1]:50051".parse()?;
 
     let grpc_web_server = Server::builder()
+        .layer(auth_middleware)
         .accept_http1(true)
         .add_service(tonic_web::enable(event_grpc))
         .add_service(tonic_web::enable(registration_schema_grpc))
@@ -206,4 +196,8 @@ where
 enum ServerError {
     #[error("failed to start grpc server: {0}")]
     GrpcError(transport::Error),
+}
+
+fn service_name<T: NamedService>(_service: &T) -> &'static str {
+    T::NAME
 }

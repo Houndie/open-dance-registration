@@ -64,7 +64,7 @@ pub async fn claims_from_request<KM: KeyManager, R>(
     validate_token(&*key_manager, auth_cookie.value()).await
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Claims {
     pub iss: String,
     pub sub: String,
@@ -73,8 +73,9 @@ pub struct Claims {
     pub exp: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, strum::Display)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, strum::Display)]
 pub enum Audience {
+    #[default]
     Access,
 }
 

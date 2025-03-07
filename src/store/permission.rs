@@ -5,6 +5,7 @@ use crate::{
         Bindable, Error, Queryable,
     },
 };
+use mockall::automock;
 use sqlx::SqlitePool;
 use std::{future::Future, sync::Arc};
 
@@ -248,14 +249,15 @@ fn bind_permission<'q>(
     }
 }
 
+#[automock]
 pub trait Store: Send + Sync + 'static {
     fn upsert(
         &self,
         users: Vec<Permission>,
     ) -> impl Future<Output = Result<Vec<Permission>, Error>> + Send;
-    fn query(
+    fn query<'a>(
         &self,
-        query: Option<&Query>,
+        query: Option<&'a Query>,
     ) -> impl Future<Output = Result<Vec<Permission>, Error>> + Send;
     fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
     fn permission_check(

@@ -36,15 +36,37 @@ fn authorization_state_to_status(mut failed_permissions: Vec<Permission>) -> Res
     match failed_permissions.pop() {
         Some(p) => match p.role.unwrap().role.unwrap() {
             permission_role::Role::ServerAdmin(_) => Err(Status::permission_denied("")),
-            permission_role::Role::OrganizationAdmin(o)
-            | permission_role::Role::OrganizationViewer(o) => {
+            permission_role::Role::OrganizationAdmin(o) => {
+                if failed_permissions.iter().any(|p| {
+                    matches!(
+                        p.role.as_ref().unwrap().role.as_ref().unwrap(),
+                        permission_role::Role::OrganizationViewer(oo) if oo.organization_id == o.organization_id
+                    )
+                }) {
+                    Err(Status::not_found(o.organization_id))
+                } else {
+                    Err(Status::permission_denied(""))
+                }
+            }
+            permission_role::Role::OrganizationViewer(o) => {
                 Err(Status::not_found(o.organization_id))
             }
             permission_role::Role::EventAdmin(e)
-            | permission_role::Role::EventEditor(e)
-            | permission_role::Role::EventViewer(e) => Err(Status::not_found(e.event_id)),
+            | permission_role::Role::EventEditor(e) => {
+                if failed_permissions.iter().any(|p| {
+                    matches!(
+                        p.role.as_ref().unwrap().role.as_ref().unwrap(),
+                        permission_role::Role::EventViewer(ee) if ee.event_id == e.event_id
+                    )
+                }) {
+                    Err(Status::not_found(e.event_id))
+                } else {
+                    Err(Status::permission_denied(""))
+                }
+            }
+            permission_role::Role::EventViewer(e) => Err(Status::not_found(e.event_id)),
         },
-        None => Err(Status::not_found("")),
+        None => Ok(()),
     }
 }
 

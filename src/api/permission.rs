@@ -133,24 +133,55 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
 fn required_permissions(user_id: &str, permissions: &[Permission]) -> Vec<Permission> {
     permissions
         .iter()
-        .map(|p| Permission {
-            id: "".to_string(),
-            user_id: user_id.to_string(),
-            role: Some(PermissionRole {
-                role: Some(match p.role.as_ref().unwrap().role.as_ref().unwrap() {
-                    permission_role::Role::ServerAdmin(_) => Role::ServerAdmin(()),
-                    permission_role::Role::OrganizationAdmin(r)
-                    | permission_role::Role::OrganizationViewer(r) => {
-                        permission_role::Role::OrganizationAdmin(r.clone())
-                    }
-                    permission_role::Role::EventAdmin(r)
-                    | permission_role::Role::EventEditor(r)
-                    | permission_role::Role::EventViewer(r) => {
-                        permission_role::Role::EventViewer(r.clone())
-                    }
+        .map(|p| match p.role.as_ref().unwrap().role.as_ref().unwrap() {
+            permission_role::Role::ServerAdmin(_) => vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::ServerAdmin(())),
                 }),
-            }),
+            }],
+            permission_role::Role::OrganizationAdmin(r)
+            | permission_role::Role::OrganizationViewer(r) => {
+                vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationAdmin(r.clone())),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationViewer(r.clone())),
+                        }),
+                    },
+                ]
+            }
+            permission_role::Role::EventAdmin(r)
+            | permission_role::Role::EventEditor(r)
+            | permission_role::Role::EventViewer(r) => {
+                vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventAdmin(r.clone())),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(r.clone())),
+                        }),
+                    },
+                ]
+            }
         })
+        .flatten()
         .collect::<Vec<_>>()
 }
 

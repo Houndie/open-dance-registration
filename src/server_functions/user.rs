@@ -1,57 +1,26 @@
 #[cfg(feature = "server")]
 mod server_only {
     use crate::{
-        api::user::Service,
         proto::{
-            user_service_server::UserService, QueryUsersRequest, QueryUsersResponse,
+            user_service_client::UserServiceClient, QueryUsersRequest, QueryUsersResponse,
             UpsertUsersRequest, UpsertUsersResponse,
         },
-        server_functions::{tonic_request, tonic_response, Error},
-        store::user::SqliteStore,
+        server_functions::{tonic_request, tonic_response, Error, InternalServer},
     };
     use dioxus::prelude::*;
-    use std::sync::Arc;
-    use tonic::{metadata::MetadataMap, Request, Response, Status};
-
-    #[derive(Clone)]
-    pub enum AnyService {
-        Sqlite(Arc<Service<SqliteStore>>),
-    }
-
-    impl AnyService {
-        pub fn new_sqlite(store: Arc<Service<SqliteStore>>) -> Self {
-            AnyService::Sqlite(store)
-        }
-
-        pub async fn upsert(
-            &self,
-            request: Request<UpsertUsersRequest>,
-        ) -> Result<Response<UpsertUsersResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.upsert_users(request).await,
-            }
-        }
-
-        pub async fn query(
-            &self,
-            request: Request<QueryUsersRequest>,
-        ) -> Result<Response<QueryUsersResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.query_users(request).await,
-            }
-        }
-    }
 
     pub async fn upsert(request: UpsertUsersRequest) -> Result<UpsertUsersResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let tonic_request = tonic_request(request).await?;
+        let mut user_client = UserServiceClient::new(server);
 
-        let response = service
-            .upsert(tonic_request)
+        let tonic_request = tonic_request(request)?;
+
+        let response = user_client
+            .upsert_users(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -59,15 +28,17 @@ mod server_only {
     }
 
     pub async fn query(request: QueryUsersRequest) -> Result<QueryUsersResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let tonic_request = tonic_request(request).await?;
+        let mut user_client = UserServiceClient::new(server);
 
-        let response = service
-            .query(tonic_request)
+        let tonic_request = tonic_request(request)?;
+
+        let response = user_client
+            .query_users(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -76,7 +47,7 @@ mod server_only {
 }
 
 #[cfg(feature = "server")]
-pub use server_only::{query, upsert, AnyService};
+pub use server_only::{query, upsert};
 
 #[cfg(feature = "web")]
 mod web_only {

@@ -53,31 +53,12 @@ pub enum Error {
 #[cfg(feature = "server")]
 mod server_only {
     use super::Error;
-    use crate::{
-        api::middleware::authentication::verify_authentication_header,
-        keys::{KeyManager, StoreKeyManager},
-        store::{self, keys::SqliteStore as KeySqliteStore},
-    };
     use dioxus::prelude::*;
-    use ed25519_dalek::{SigningKey, VerifyingKey};
-    use std::sync::Arc;
+    use std::{future::Future, pin::Pin};
+    use tonic::body::BoxBody;
+    use tower::Service;
 
-    pub async fn tonic_request<T>(request: T) -> Result<tonic::Request<T>, Error> {
-        let tonic_request = tonic_unauthenticated_request(request)?;
-
-        let key_manager: AnyKeyManager = extract::<FromContext<AnyKeyManager>, _>()
-            .await
-            .map_err(|_| Error::ServiceNotInContext)?
-            .0;
-
-        let tonic_request = verify_authentication_header(&key_manager, tonic_request)
-            .await
-            .map_err(Error::GrpcError)?;
-
-        Ok(tonic_request)
-    }
-
-    pub fn tonic_unauthenticated_request<T>(request: T) -> Result<tonic::Request<T>, Error> {
+    pub fn tonic_request<T>(request: T) -> Result<tonic::Request<T>, Error> {
         let server_context = server_context();
 
         let mut tonic_request = tonic::Request::new(request);
@@ -99,35 +80,175 @@ mod server_only {
         response.into_inner()
     }
 
+    trait WrappedService<S>: Service<S> + ClonedBoxService<S> {}
+
+    trait ClonedBoxService<S>
+    where
+        Self: Service<S>,
+    {
+        fn clone_box(
+            &self,
+        ) -> Box<
+            dyn WrappedService<
+                    S,
+                    Error = <Self as Service<S>>::Error,
+                    Future = <Self as Service<S>>::Future,
+                    Response = <Self as Service<S>>::Response,
+                > + Send
+                + Sync,
+        >;
+    }
+
+    impl<T, S> ClonedBoxService<S> for T
+    where
+        T: WrappedService<S> + Clone + Send + Sync + 'static,
+    {
+        fn clone_box(
+            &self,
+        ) -> Box<
+            dyn WrappedService<
+                    S,
+                    Error = <Self as Service<S>>::Error,
+                    Future = <Self as Service<S>>::Future,
+                    Response = <Self as Service<S>>::Response,
+                > + Send
+                + Sync,
+        > {
+            Box::new(self.clone())
+        }
+    }
+
+    impl<S, E, F, R> Clone
+        for Box<dyn WrappedService<S, Error = E, Future = F, Response = R> + Send + Sync>
+    where
+        F: Future<Output = Result<R, E>> + Send,
+    {
+        fn clone(&self) -> Self {
+            self.clone_box()
+        }
+    }
+
     #[derive(Clone)]
-    pub enum AnyKeyManager {
-        Sqlite(Arc<StoreKeyManager<KeySqliteStore>>),
+    pub struct InternalServer {
+        service: Box<
+            dyn WrappedService<
+                    http::request::Request<BoxBody>,
+                    Response = http::response::Response<BoxBody>,
+                    Error = Box<dyn std::error::Error + Sync + Send>,
+                    Future = Pin<
+                        Box<
+                            dyn Future<
+                                    Output = Result<
+                                        http::response::Response<BoxBody>,
+                                        Box<dyn std::error::Error + Sync + Send>,
+                                    >,
+                                > + Send,
+                        >,
+                    >,
+                > + Send
+                + Sync,
+        >,
     }
 
-    impl AnyKeyManager {
-        pub fn new_sqlite(store: Arc<StoreKeyManager<KeySqliteStore>>) -> Self {
-            AnyKeyManager::Sqlite(store)
+    impl InternalServer {
+        pub fn new<S>(service: S) -> Self
+        where
+            S: Service<
+                    http::request::Request<BoxBody>,
+                    Error = Box<dyn std::error::Error + Sync + Send>,
+                    Response = http::response::Response<BoxBody>,
+                > + Send
+                + Sync
+                + Clone
+                + 'static,
+            <S as Service<http::request::Request<BoxBody>>>::Future: Send,
+        {
+            Self {
+                service: Box::new(InternalServerInner { service }),
+            }
         }
     }
 
-    impl KeyManager for AnyKeyManager {
-        async fn rotate_key(&self, clear: bool) -> Result<(), store::Error> {
-            match self {
-                AnyKeyManager::Sqlite(store) => store.rotate_key(clear).await,
-            }
+    impl Service<http::request::Request<BoxBody>> for InternalServer {
+        type Response = http::response::Response<BoxBody>;
+        type Error = Box<dyn std::error::Error + Sync + Send>;
+        type Future =
+            Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+        fn poll_ready(
+            &mut self,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.service.poll_ready(cx)
         }
 
-        async fn get_signing_key(&self) -> Result<(String, SigningKey), store::Error> {
-            match self {
-                AnyKeyManager::Sqlite(store) => store.get_signing_key().await,
-            }
+        fn call(&mut self, req: http::request::Request<BoxBody>) -> Self::Future {
+            self.service.call(req)
+        }
+    }
+
+    #[derive(Clone)]
+    struct InternalServerInner<S>
+    where
+        S: Service<
+                http::request::Request<BoxBody>,
+                Error = Box<dyn std::error::Error + Sync + Send>,
+                Response = http::response::Response<BoxBody>,
+            > + Send
+            + Sync
+            + Clone,
+    {
+        service: S,
+    }
+
+    impl<S> Service<http::request::Request<BoxBody>> for InternalServerInner<S>
+    where
+        S: Service<
+                http::request::Request<BoxBody>,
+                Error = Box<dyn std::error::Error + Sync + Send>,
+                Response = http::response::Response<BoxBody>,
+            > + Send
+            + Sync
+            + Clone
+            + 'static,
+        <S as Service<http::request::Request<BoxBody>>>::Future: Send,
+    {
+        type Response = http::response::Response<BoxBody>;
+        type Error = Box<dyn std::error::Error + Sync + Send>;
+        type Future =
+            Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+        fn poll_ready(
+            &mut self,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Result<(), Self::Error>> {
+            self.service
+                .poll_ready(cx)
+                .map(|result| result.map_err(|e| -> Self::Error { e }))
         }
 
-        async fn get_verifying_key(&self, kid: &str) -> Result<VerifyingKey, store::Error> {
-            match self {
-                AnyKeyManager::Sqlite(store) => store.get_verifying_key(kid).await,
-            }
+        fn call(&mut self, req: http::request::Request<BoxBody>) -> Self::Future {
+            let mut service = self.service.clone();
+            Box::pin(async move {
+                let response = service.call(req).await.map_err(|e| -> Self::Error { e })?;
+
+                Ok(response)
+            })
         }
+    }
+
+    impl<S> WrappedService<http::request::Request<BoxBody>> for InternalServerInner<S>
+    where
+        S: Service<
+                http::request::Request<BoxBody>,
+                Error = Box<dyn std::error::Error + Sync + Send>,
+                Response = http::response::Response<BoxBody>,
+            > + Send
+            + Sync
+            + Clone
+            + 'static,
+        <S as Service<http::request::Request<BoxBody>>>::Future: Send,
+    {
     }
 }
 

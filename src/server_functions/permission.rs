@@ -1,67 +1,29 @@
 #[cfg(feature = "server")]
 mod server_only {
     use crate::{
-        api::permission::Service,
         proto::{
-            permission_service_server::PermissionService, DeletePermissionsRequest,
+            permission_service_client::PermissionServiceClient, DeletePermissionsRequest,
             DeletePermissionsResponse, QueryPermissionsRequest, QueryPermissionsResponse,
             UpsertPermissionsRequest, UpsertPermissionsResponse,
         },
-        server_functions::{tonic_request, tonic_response, Error},
-        store::permission::SqliteStore,
+        server_functions::{tonic_request, tonic_response, Error, InternalServer},
     };
     use dioxus::prelude::*;
-    use std::sync::Arc;
-    use tonic::{Request, Response, Status};
-
-    #[derive(Clone)]
-    pub enum AnyService {
-        Sqlite(Arc<Service<SqliteStore>>),
-    }
-
-    impl AnyService {
-        pub fn new_sqlite(store: Arc<Service<SqliteStore>>) -> Self {
-            AnyService::Sqlite(store)
-        }
-
-        pub async fn upsert(
-            &self,
-            request: Request<UpsertPermissionsRequest>,
-        ) -> Result<Response<UpsertPermissionsResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.upsert_permissions(request).await,
-            }
-        }
-
-        pub async fn query(
-            &self,
-            request: Request<QueryPermissionsRequest>,
-        ) -> Result<Response<QueryPermissionsResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.query_permissions(request).await,
-            }
-        }
-
-        pub async fn delete(
-            &self,
-            request: Request<DeletePermissionsRequest>,
-        ) -> Result<Response<DeletePermissionsResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.delete_permissions(request).await,
-            }
-        }
-    }
 
     pub async fn upsert(
         request: UpsertPermissionsRequest,
     ) -> Result<UpsertPermissionsResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let response = service
-            .upsert(tonic_request(request).await?)
+        let mut client = PermissionServiceClient::new(server.clone());
+
+        let tonic_request = tonic_request(request)?;
+
+        let response = client
+            .upsert_permissions(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -71,13 +33,17 @@ mod server_only {
     pub async fn query(
         request: QueryPermissionsRequest,
     ) -> Result<QueryPermissionsResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let response = service
-            .query(tonic_request(request).await?)
+        let mut client = PermissionServiceClient::new(server.clone());
+
+        let tonic_request = tonic_request(request)?;
+
+        let response = client
+            .query_permissions(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -87,13 +53,17 @@ mod server_only {
     pub async fn delete(
         request: DeletePermissionsRequest,
     ) -> Result<DeletePermissionsResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let response = service
-            .delete(tonic_request(request).await?)
+        let mut client = PermissionServiceClient::new(server.clone());
+
+        let tonic_request = tonic_request(request)?;
+
+        let response = client
+            .delete_permissions(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -102,7 +72,7 @@ mod server_only {
 }
 
 #[cfg(feature = "server")]
-pub use server_only::{delete, query, upsert, AnyService};
+pub use server_only::{delete, query, upsert};
 
 #[cfg(feature = "web")]
 mod web_only {

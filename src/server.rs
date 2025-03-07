@@ -23,13 +23,7 @@ use crate::{
         registration_service_server::RegistrationServiceServer,
         user_service_server::UserServiceServer,
     },
-    server_functions::{
-        authentication::AnyService as AnyAuthenticationService,
-        event::AnyService as AnyEventService, organization::AnyService as AnyOrganizationService,
-        permission::AnyService as AnyPermissionService,
-        registration_schema::AnyService as AnyRegistrationSchemaService,
-        user::AnyService as AnyUserService, AnyKeyManager,
-    },
+    server_functions::InternalServer,
     store::{
         event::SqliteStore as EventStore, keys::SqliteStore as KeyStore,
         organization::SqliteStore as OrganizationStore, permission::SqliteStore as PermissionStore,
@@ -126,6 +120,26 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(reflection_service)
         .serve(grpc_addr);
 
+    let internal_server: crate::api::middleware::selective::Middleware<
+        tonic_async_interceptor::AsyncInterceptedService<
+            tonic::service::Routes,
+            crate::api::middleware::authentication::Interceptor<
+                StoreKeyManager<crate::store::keys::SqliteStore>,
+            >,
+        >,
+        tonic::service::Routes,
+        2,
+    > = Server::builder()
+        .layer(auth_middleware.clone())
+        .add_service(event_grpc.clone())
+        .add_service(registration_schema_grpc.clone())
+        .add_service(registration_grpc.clone())
+        .add_service(organization_grpc.clone())
+        .add_service(user_grpc.clone())
+        .add_service(authentication_grpc.clone())
+        .add_service(permission_grpc.clone())
+        .into_service();
+
     let grpc_web_addr = "[::1]:50051".parse()?;
 
     let grpc_web_server = Server::builder()
@@ -140,33 +154,10 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(tonic_web::enable(permission_grpc))
         .serve(grpc_web_addr);
 
-    let organization_provider_state =
-        to_state(AnyOrganizationService::new_sqlite(organization_service));
-
-    let event_provider_state = to_state(AnyEventService::new_sqlite(event_service));
-
-    let registration_schema_provider_state =
-        to_state(AnyRegistrationSchemaService::new_sqlite(schema_service));
-
-    let authentication_provider_state =
-        to_state(AnyAuthenticationService::new_sqlite(authentication_service));
-
-    let user_provider_state = to_state(AnyUserService::new_sqlite(user_service));
-
-    let permission_provider_state = to_state(AnyPermissionService::new_sqlite(permission_service));
-
-    let key_manager_state = to_state(AnyKeyManager::new_sqlite(key_manager));
+    let server_state = to_state(InternalServer::new(internal_server));
 
     let dioxus_config = ServeConfig::builder()
-        .context_providers(Arc::new(vec![
-            authentication_provider_state,
-            event_provider_state,
-            organization_provider_state,
-            registration_schema_provider_state,
-            user_provider_state,
-            permission_provider_state,
-            key_manager_state,
-        ]))
+        .context_providers(Arc::new(vec![server_state]))
         .build()?;
 
     let webserver =

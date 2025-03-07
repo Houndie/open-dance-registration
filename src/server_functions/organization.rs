@@ -1,59 +1,28 @@
 #[cfg(feature = "server")]
 mod server_only {
     use crate::{
-        api::organization::Service,
         proto::{
-            organization_service_server::OrganizationService, QueryOrganizationsRequest,
+            organization_service_client::OrganizationServiceClient, QueryOrganizationsRequest,
             QueryOrganizationsResponse, UpsertOrganizationsRequest, UpsertOrganizationsResponse,
         },
-        server_functions::{tonic_request, tonic_response, Error},
-        store::organization::SqliteStore,
+        server_functions::{tonic_request, tonic_response, Error, InternalServer},
     };
     use dioxus::prelude::*;
-    use std::sync::Arc;
-    use tonic::{Request, Response, Status};
-
-    #[derive(Clone)]
-    pub enum AnyService {
-        Sqlite(Arc<Service<SqliteStore>>),
-    }
-
-    impl AnyService {
-        pub fn new_sqlite(store: Arc<Service<SqliteStore>>) -> Self {
-            AnyService::Sqlite(store)
-        }
-
-        pub async fn upsert(
-            &self,
-            request: Request<UpsertOrganizationsRequest>,
-        ) -> Result<Response<UpsertOrganizationsResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.upsert_organizations(request).await,
-            }
-        }
-
-        pub async fn query(
-            &self,
-            request: Request<QueryOrganizationsRequest>,
-        ) -> Result<Response<QueryOrganizationsResponse>, Status> {
-            match self {
-                AnyService::Sqlite(service) => service.query_organizations(request).await,
-            }
-        }
-    }
 
     pub async fn upsert(
         request: UpsertOrganizationsRequest,
     ) -> Result<UpsertOrganizationsResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let tonic_request = tonic_request(request).await?;
+        let mut organization_client = OrganizationServiceClient::new(server);
 
-        let response = service
-            .upsert(tonic_request)
+        let tonic_request = tonic_request(request)?;
+
+        let response = organization_client
+            .upsert_organizations(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -63,15 +32,17 @@ mod server_only {
     pub async fn query(
         request: QueryOrganizationsRequest,
     ) -> Result<QueryOrganizationsResponse, Error> {
-        let service: AnyService = extract::<FromContext<AnyService>, _>()
+        let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let tonic_request = tonic_request(request).await?;
+        let mut organization_client = OrganizationServiceClient::new(server);
 
-        let response = service
-            .query(tonic_request)
+        let tonic_request = tonic_request(request)?;
+
+        let response = organization_client
+            .query_organizations(tonic_request)
             .await
             .map_err(Error::GrpcError)?;
 
@@ -80,7 +51,7 @@ mod server_only {
 }
 
 #[cfg(feature = "server")]
-pub use server_only::{query, upsert, AnyService};
+pub use server_only::{query, upsert};
 
 #[cfg(feature = "web")]
 mod web_only {

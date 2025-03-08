@@ -2,7 +2,7 @@
   description = "A very basic flake";
 
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-23.11";
+    nixpkgs.url = "nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
@@ -15,7 +15,11 @@
     };
     myrust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-    grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" "${pkgs.grpcui}/bin/grpcui -plaintext localhost:50051");
+    grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" ''
+      TOKEN=$(${myrust}/bin/cargo run --bin odr-cli --features server -- login);
+      echo $TOKEN
+      ${pkgs.grpcui}/bin/grpcui -plaintext -rpc-header "Authorization: Bearer $TOKEN" localhost:50050
+    '');
 
     dioxus-cli = pkgs.rustPlatform.buildRustPackage {
       pname = "dioxus-cli";

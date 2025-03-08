@@ -2,10 +2,16 @@
 
 use crate::{
     api::{
-        authentication::Service as AuthenticationService,
+        authentication::{
+            HeaderService as AuthenticationGRPCService, WebService as AuthenticationWebService,
+        },
         event::Service as EventService,
         middleware::{
-            authentication::Interceptor as AuthInterceptor, selective::Layer as SelectiveMiddleware,
+            authentication::{
+                CookieInterceptor as AuthCookieInterceptor,
+                HeaderInterceptor as AuthHeaderInterceptor,
+            },
+            selective::Layer as SelectiveMiddleware,
         },
         organization::Service as OrganizationService,
         permission::Service as PermissionService,
@@ -22,6 +28,7 @@ use crate::{
         registration_schema_service_server::RegistrationSchemaServiceServer,
         registration_service_server::RegistrationServiceServer,
         user_service_server::UserServiceServer,
+        web_authentication_service_server::WebAuthenticationServiceServer,
     },
     server_functions::InternalServer,
     store::{
@@ -68,7 +75,12 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let organization_service = Arc::new(OrganizationService::new(organization_store));
 
-    let authentication_service = Arc::new(AuthenticationService::new(
+    let authentication_web_service = Arc::new(AuthenticationWebService::new(
+        key_manager.clone(),
+        user_store.clone(),
+    ));
+
+    let authentication_grpc_service = Arc::new(AuthenticationGRPCService::new(
         key_manager.clone(),
         user_store.clone(),
     ));
@@ -88,69 +100,67 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let user_grpc = UserServiceServer::from_arc(user_service.clone());
 
-    let authentication_grpc = AuthenticationServiceServer::from_arc(authentication_service.clone());
+    let authentication_web_grpc =
+        WebAuthenticationServiceServer::from_arc(authentication_web_service.clone());
+
+    let authentication_grpc_grpc =
+        AuthenticationServiceServer::from_arc(authentication_grpc_service.clone());
 
     let permission_grpc = PermissionServiceServer::from_arc(permission_service.clone());
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
-        .build_v1()?;
+        .build_v1alpha()?;
 
-    let omit_authentication_paths = [
-        service_name(&authentication_grpc),
-        service_name(&reflection_service),
-    ];
+    let omit_authentication_paths = [service_name(&authentication_web_grpc), "grpc.reflection"];
 
-    let auth_middleware = SelectiveMiddleware::new(
-        async_interceptor(AuthInterceptor::new(key_manager.clone())),
+    let auth_cookie_middleware = SelectiveMiddleware::new(
+        async_interceptor(AuthCookieInterceptor::new(key_manager.clone())),
+        omit_authentication_paths,
+    );
+
+    let auth_header_middleware = SelectiveMiddleware::new(
+        async_interceptor(AuthHeaderInterceptor::new(key_manager.clone())),
         omit_authentication_paths,
     );
 
     let grpc_addr = "[::1]:50050".parse()?;
 
     let grpc_server = Server::builder()
-        .layer(auth_middleware.clone())
+        .layer(tower_http::trace::TraceLayer::new_for_grpc())
+        .layer(auth_header_middleware.clone())
         .add_service(event_grpc.clone())
         .add_service(registration_schema_grpc.clone())
         .add_service(registration_grpc.clone())
         .add_service(organization_grpc.clone())
         .add_service(user_grpc.clone())
-        .add_service(authentication_grpc.clone())
+        .add_service(authentication_grpc_grpc.clone())
         .add_service(permission_grpc.clone())
         .add_service(reflection_service)
         .serve(grpc_addr);
 
-    let internal_server: crate::api::middleware::selective::Middleware<
-        tonic_async_interceptor::AsyncInterceptedService<
-            tonic::service::Routes,
-            crate::api::middleware::authentication::Interceptor<
-                StoreKeyManager<crate::store::keys::SqliteStore>,
-            >,
-        >,
-        tonic::service::Routes,
-        2,
-    > = Server::builder()
-        .layer(auth_middleware.clone())
+    let internal_server = Server::builder()
+        .layer(auth_cookie_middleware.clone())
         .add_service(event_grpc.clone())
         .add_service(registration_schema_grpc.clone())
         .add_service(registration_grpc.clone())
         .add_service(organization_grpc.clone())
         .add_service(user_grpc.clone())
-        .add_service(authentication_grpc.clone())
+        .add_service(authentication_web_grpc.clone())
         .add_service(permission_grpc.clone())
         .into_service();
 
     let grpc_web_addr = "[::1]:50051".parse()?;
 
     let grpc_web_server = Server::builder()
-        .layer(auth_middleware)
+        .layer(auth_cookie_middleware)
         .accept_http1(true)
         .add_service(tonic_web::enable(event_grpc))
         .add_service(tonic_web::enable(registration_schema_grpc))
         .add_service(tonic_web::enable(registration_grpc))
         .add_service(tonic_web::enable(organization_grpc))
         .add_service(tonic_web::enable(user_grpc))
-        .add_service(tonic_web::enable(authentication_grpc))
+        .add_service(tonic_web::enable(authentication_web_grpc))
         .add_service(tonic_web::enable(permission_grpc))
         .serve(grpc_web_addr);
 

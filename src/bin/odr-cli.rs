@@ -1,7 +1,6 @@
-use std::{env, sync::Arc};
-
 use clap::{Parser, Subcommand};
 use odr_server::{
+    authentication::create_token,
     keys::{KeyManager as _, StoreKeyManager},
     proto::{permission_role, EventRole, OrganizationRole, Permission, PermissionRole},
     store::{
@@ -12,6 +11,7 @@ use odr_server::{
     user::hash_password,
 };
 use sqlx::{migrate::MigrateDatabase as _, Sqlite, SqlitePool};
+use std::{env, sync::Arc};
 
 #[derive(Parser)]
 enum Commands {
@@ -49,6 +49,17 @@ enum Commands {
 
         #[clap(long)]
         email: Option<String>,
+    },
+
+    Login {
+        #[clap(long)]
+        username: Option<String>,
+
+        #[clap(long)]
+        password: Option<String>,
+
+        #[clap(long)]
+        nointeractive: bool,
     },
 }
 
@@ -160,6 +171,13 @@ async fn main() -> Result<(), anyhow::Error> {
                 add_permission(username, permission, id, !nointeractive).await?;
             }
         },
+        Commands::Login {
+            username,
+            password,
+            nointeractive,
+        } => {
+            login(username, password, !nointeractive).await?;
+        }
         Commands::Init {
             email,
             password,
@@ -468,6 +486,51 @@ async fn init(
             }])
             .await?;
     }
+
+    Ok(())
+}
+
+async fn login(
+    username: Option<String>,
+    password: Option<String>,
+    interactive: bool,
+) -> Result<(), anyhow::Error> {
+    let db_url = db_url();
+    let db = Arc::new(SqlitePool::connect(&db_url).await?);
+    let user_store = UserStore::new(db.clone());
+    let key_store = KeyStore::new(db.clone());
+    let key_manager = StoreKeyManager::new(Arc::new(key_store));
+
+    let username = match username {
+        Some(username) => username,
+        None => {
+            if interactive {
+                inquire::Text::new("Username").prompt()?
+            } else {
+                return Err(anyhow::anyhow!(
+                    "--nointeractive set, --username must be set"
+                ));
+            }
+        }
+    };
+
+    let password = match password {
+        Some(password) => password,
+        None => {
+            if interactive {
+                inquire::Password::new("Password")
+                    .without_confirmation()
+                    .prompt()?
+            } else {
+                return Err(anyhow::anyhow!(
+                    "--nointeractive set, --password must be set"
+                ));
+            }
+        }
+    };
+
+    let (_, token) = create_token(&key_manager, &user_store, username, password.as_str()).await?;
+    println!("{}", token);
 
     Ok(())
 }

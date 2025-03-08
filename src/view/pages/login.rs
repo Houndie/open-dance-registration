@@ -1,6 +1,6 @@
 use crate::{
     hooks::toasts::use_toasts,
-    proto::{ClaimsRequest, LoginRequest},
+    proto::{ClaimsRequest, WebLoginRequest},
     server_functions::authentication::{claims, login},
     view::{
         app::{Error, Routes},
@@ -93,8 +93,8 @@ fn PageBody() -> Element {
                         spawn({
                             async move {
                                 let server_claims = match login(login_form.with(|login_form| {
-                                    LoginRequest {
-                                        email: login_form.username.clone(),
+                                    WebLoginRequest {
+                                        username: login_form.username.clone(),
                                         password: login_form.password.clone(),
                                     }
                                 })).await {

@@ -2,20 +2,20 @@
 mod server_only {
     use crate::{
         proto::{
-            authentication_service_client::AuthenticationServiceClient, ClaimsRequest,
-            ClaimsResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
+            web_authentication_service_client::WebAuthenticationServiceClient, ClaimsRequest,
+            ClaimsResponse, LogoutRequest, LogoutResponse, WebLoginRequest, WebLoginResponse,
         },
         server_functions::{tonic_request, tonic_response, Error, InternalServer},
     };
     use dioxus::prelude::*;
 
-    pub async fn login(request: LoginRequest) -> Result<LoginResponse, Error> {
+    pub async fn login(request: WebLoginRequest) -> Result<WebLoginResponse, Error> {
         let server: InternalServer = extract::<FromContext<InternalServer>, _>()
             .await
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let mut client = AuthenticationServiceClient::new(server);
+        let mut client = WebAuthenticationServiceClient::new(server);
 
         let tonic_request = tonic_request(request)?;
 
@@ -33,7 +33,7 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let mut client = AuthenticationServiceClient::new(server);
+        let mut client = WebAuthenticationServiceClient::new(server);
 
         let tonic_request = tonic_request(request)?;
 
@@ -51,7 +51,7 @@ mod server_only {
             .map_err(|_| Error::ServiceNotInContext)?
             .0;
 
-        let mut client = AuthenticationServiceClient::new(server);
+        let mut client = WebAuthenticationServiceClient::new(server);
 
         let tonic_request = tonic_request(request)?;
 
@@ -71,14 +71,14 @@ pub use server_only::{claims, login, logout};
 mod web_only {
     use crate::{
         proto::{
-            authentication_service_client::AuthenticationServiceClient, ClaimsRequest,
-            ClaimsResponse, LoginRequest, LoginResponse, LogoutRequest, LogoutResponse,
+            web_authentication_service_client::WebAuthenticationServiceClient, ClaimsRequest,
+            ClaimsResponse, LogoutRequest, LogoutResponse, WebLoginRequest, WebLoginResponse,
         },
         server_functions::{wasm_client, Error},
     };
 
-    pub async fn login(request: LoginRequest) -> Result<LoginResponse, Error> {
-        let mut client = AuthenticationServiceClient::new(wasm_client());
+    pub async fn login(request: WebLoginRequest) -> Result<WebLoginResponse, Error> {
+        let mut client = WebAuthenticationServiceClient::new(wasm_client());
 
         client
             .login(tonic::Request::new(request))
@@ -88,7 +88,7 @@ mod web_only {
     }
 
     pub async fn logout(request: LogoutRequest) -> Result<LogoutResponse, Error> {
-        let mut client = AuthenticationServiceClient::new(wasm_client());
+        let mut client = WebAuthenticationServiceClient::new(wasm_client());
 
         client
             .logout(tonic::Request::new(request))
@@ -98,7 +98,7 @@ mod web_only {
     }
 
     pub async fn claims(request: ClaimsRequest) -> Result<ClaimsResponse, Error> {
-        let mut client = AuthenticationServiceClient::new(wasm_client());
+        let mut client = WebAuthenticationServiceClient::new(wasm_client());
 
         client
             .claims(tonic::Request::new(request))

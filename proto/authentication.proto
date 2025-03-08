@@ -3,18 +3,18 @@ package proto;
 
 import "google/protobuf/timestamp.proto";
 
-service AuthenticationService {
-	rpc Login(LoginRequest) returns (LoginResponse) {}
+service WebAuthenticationService {
+	rpc Login(WebLoginRequest) returns (WebLoginResponse) {}
 	rpc Claims(ClaimsRequest) returns (ClaimsResponse) {}
 	rpc Logout(LogoutRequest) returns (LogoutResponse) {}
 }
 
-message LoginRequest {
-	string email = 1;
+message WebLoginRequest {
+	string username = 1;
 	string password = 2;
 }
 
-message LoginResponse {
+message WebLoginResponse {
 	Claims claims = 1;
 }
 
@@ -38,4 +38,17 @@ message Claims {
 	Audience aud = 3;
 	google.protobuf.Timestamp iat = 4;
 	google.protobuf.Timestamp exp = 5;
+}
+
+service AuthenticationService {
+	rpc Login(LoginRequest) returns (LoginResponse) {}
+}
+
+message LoginRequest {
+	string username = 1;
+	string password = 2;
+}
+
+message LoginResponse {
+	string token = 1;
 }

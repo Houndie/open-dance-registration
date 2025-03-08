@@ -1,23 +1,19 @@
 use crate::{
     api::store_error_to_status,
     authentication::{
-        claims_from_request, Audience, Claims, ValidationError, ACCESS_TOKEN_COOKIE, ISSUER,
+        claims_from_request_cookie, create_token, Claims, ValidationError, ACCESS_TOKEN_COOKIE,
     },
     keys::KeyManager,
-    proto::{self, ClaimsRequest, ClaimsResponse, LoginRequest, LoginResponse},
-    store::{
-        self,
-        user::{PasswordType, Query, Store as UserStore, UsernameQuery},
-        CompoundOperator, CompoundQuery,
+    proto::{
+        self, authentication_service_server::AuthenticationService,
+        web_authentication_service_server::WebAuthenticationService, ClaimsRequest, ClaimsResponse,
+        LoginRequest, LoginResponse, WebLoginRequest, WebLoginResponse,
     },
+    store::user::Store as UserStore,
 };
-use argon2::{Argon2, PasswordVerifier};
 use cookie::{Cookie, CookieBuilder, Expiration, SameSite};
-use ed25519_dalek::pkcs8::EncodePrivateKey;
 use http::header::{HeaderMap, SET_COOKIE};
-use jsonwebtoken::{Algorithm, EncodingKey};
 use prost_types::Timestamp;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tonic::{metadata::MetadataMap, Code, Request, Response, Status};
@@ -40,155 +36,34 @@ impl From<Claims> for proto::Claims {
     }
 }
 
-impl Serialize for Claims {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(Serialize)]
-        struct SerializeClaims<'a> {
-            iss: &'a str,
-            sub: &'a str,
-            aud: &'a Audience,
-            iat: i64,
-            exp: i64,
-        }
-
-        let claims = SerializeClaims {
-            iss: &self.iss,
-            sub: &self.sub,
-            aud: &self.aud,
-            iat: self.iat.timestamp(),
-            exp: self.exp.timestamp(),
-        };
-
-        claims.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for Claims {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct DeserializeClaims {
-            iss: String,
-            sub: String,
-            aud: Audience,
-            iat: i64,
-            exp: i64,
-        }
-
-        let claims = DeserializeClaims::deserialize(deserializer)?;
-
-        Ok(Claims {
-            iss: claims.iss,
-            sub: claims.sub,
-            aud: claims.aud,
-            iat: chrono::DateTime::<chrono::Utc>::from_timestamp(claims.iat, 0)
-                .ok_or_else(|| serde::de::Error::custom("invalid timestamp"))?,
-            exp: chrono::DateTime::<chrono::Utc>::from_timestamp(claims.exp, 0)
-                .ok_or_else(|| serde::de::Error::custom("invalid timestamp"))?,
-        })
-    }
-}
-
-const ACCESS_TOKEN_EXPIRATION_SECONDS: i64 = 60 * 60 * 24 * 30 * 6;
-
-pub struct Service<KM: KeyManager, UStore: UserStore> {
+pub struct WebService<KM: KeyManager, UStore: UserStore> {
     km: Arc<KM>,
     user_store: Arc<UStore>,
 }
 
-impl<KM: KeyManager, UStore: UserStore> Service<KM, UStore> {
+impl<KM: KeyManager, UStore: UserStore> WebService<KM, UStore> {
     pub fn new(km: Arc<KM>, user_store: Arc<UStore>) -> Self {
         Self { km, user_store }
     }
 }
 
 #[tonic::async_trait]
-impl<KM: KeyManager, UStore: UserStore> proto::authentication_service_server::AuthenticationService
-    for Service<KM, UStore>
-{
+impl<KM: KeyManager, UStore: UserStore> WebAuthenticationService for WebService<KM, UStore> {
     async fn login(
         &self,
-        request: Request<LoginRequest>,
-    ) -> Result<Response<LoginResponse>, Status> {
+        request: Request<WebLoginRequest>,
+    ) -> Result<Response<WebLoginResponse>, Status> {
         let credentials = request.into_inner();
 
-        let invalid_email_or_password =
-            || Status::new(Code::Unauthenticated, "Invalid email or password");
+        let (access_claims, access_jwt) = create_token(
+            &*self.km,
+            &*self.user_store,
+            credentials.username,
+            credentials.password.as_str(),
+        )
+        .await?;
 
-        let mut users = self
-            .user_store
-            .query(
-                Some(Query::CompoundQuery(CompoundQuery {
-                    operator: CompoundOperator::And,
-                    queries: vec![
-                        Query::Username(UsernameQuery::Equals(credentials.email)),
-                        Query::PasswordIsSet(true),
-                    ],
-                }))
-                .as_ref(),
-            )
-            .await
-            .map_err(|e| match e {
-                store::Error::IdDoesNotExist(_) => invalid_email_or_password(),
-                _ => store_error_to_status(e),
-            })?;
-
-        if users.is_empty() {
-            return Err(invalid_email_or_password());
-        }
-
-        let user = users.remove(0);
-        let user_password = match &user.password {
-            PasswordType::Set(password) => password,
-            _ => {
-                return Err(invalid_email_or_password());
-            }
-        };
-
-        Argon2::default()
-            .verify_password(
-                credentials.password.as_bytes(),
-                &user_password.password_hash(),
-            )
-            .map_err(|_| invalid_email_or_password())?;
-
-        let (kid, key) = self
-            .km
-            .get_signing_key()
-            .await
-            .map_err(|e| -> Status { store_error_to_status(e) })?;
-
-        let encoding_key = EncodingKey::from_ed_der(
-            key.to_pkcs8_der()
-                .map_err(|e| {
-                    Status::new(
-                        Code::Internal,
-                        format!("error generating signing key {}", e),
-                    )
-                })?
-                .as_bytes(),
-        );
-
-        let mut header = jsonwebtoken::Header::new(Algorithm::EdDSA);
-        header.kid = Some(kid);
-
-        let access_claims = Claims {
-            iss: ISSUER.to_string(),
-            sub: user.id,
-            aud: Audience::Access,
-            iat: chrono::Utc::now(),
-            exp: chrono::Utc::now() + chrono::Duration::seconds(ACCESS_TOKEN_EXPIRATION_SECONDS),
-        };
-
-        let access_jwt = jsonwebtoken::encode(&header, &access_claims, &encoding_key)
-            .map_err(|e| Status::new(Code::Internal, format!("error signing token: {}", e)))?;
-
-        let claims_cookie = Cookie::build((ACCESS_TOKEN_COOKIE, access_jwt.clone()))
+        let claims_cookie = Cookie::build((ACCESS_TOKEN_COOKIE, access_jwt))
             .expires(Expiration::DateTime(
                 time::OffsetDateTime::from_unix_timestamp(access_claims.exp.timestamp()).unwrap(),
             ))
@@ -197,7 +72,7 @@ impl<KM: KeyManager, UStore: UserStore> proto::authentication_service_server::Au
             .same_site(SameSite::Strict)
             .path("/");
 
-        let mut response = Response::new(LoginResponse {
+        let mut response = Response::new(WebLoginResponse {
             claims: Some(access_claims.into()),
         });
         let mut metadata = HeaderMap::new();
@@ -211,7 +86,7 @@ impl<KM: KeyManager, UStore: UserStore> proto::authentication_service_server::Au
         &self,
         request: Request<ClaimsRequest>,
     ) -> Result<Response<ClaimsResponse>, Status> {
-        let claims = claims_from_request(&*self.km, &request).await?;
+        let claims = claims_from_request_cookie(&*self.km, &request).await?;
 
         Ok(Response::new(ClaimsResponse {
             claims: Some(claims.into()),
@@ -240,6 +115,39 @@ fn delete_cookie() -> CookieBuilder<'static> {
         .path("/")
 }
 
+pub struct HeaderService<KM: KeyManager, UStore: UserStore> {
+    km: Arc<KM>,
+    user_store: Arc<UStore>,
+}
+
+impl<KM: KeyManager, UStore: UserStore> HeaderService<KM, UStore> {
+    pub fn new(km: Arc<KM>, user_store: Arc<UStore>) -> Self {
+        Self { km, user_store }
+    }
+}
+
+#[tonic::async_trait]
+impl<KM: KeyManager, UStore: UserStore> AuthenticationService for HeaderService<KM, UStore> {
+    async fn login(
+        &self,
+        request: Request<LoginRequest>,
+    ) -> Result<Response<LoginResponse>, Status> {
+        let credentials = request.into_inner();
+
+        let (_, access_jwt) = create_token(
+            &*self.km,
+            &*self.user_store,
+            credentials.username,
+            credentials.password.as_str(),
+        )
+        .await?;
+
+        let response = Response::new(LoginResponse { token: access_jwt });
+
+        Ok(response)
+    }
+}
+
 impl From<ValidationError> for Status {
     fn from(err: ValidationError) -> Self {
         match err {
@@ -247,6 +155,9 @@ impl From<ValidationError> for Status {
                 Status::new(Code::Unauthenticated, "unauthenticated")
             }
             ValidationError::StoreError(e) => store_error_to_status(e),
+            ValidationError::EncodingKeyError(_) | ValidationError::SigningError(_) => {
+                Status::new(Code::Internal, format!("internal error: {}", err))
+            }
         }
     }
 }

@@ -13,7 +13,10 @@
       inherit system;
       overlays = [ rust-overlay.overlays.default ];
     };
-    myrust = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+    myrust = pkgs.rust-bin.stable."1.85.0".default.override {
+      extensions = [ "rust-src" ];
+      targets = [ "wasm32-unknown-unknown" ];
+    };
 
     grpcuiScript = (pkgs.writeShellScriptBin ",grpcui" ''
       TOKEN=$(${myrust}/bin/cargo run --bin odr-cli --features server -- login);
@@ -57,7 +60,7 @@
       # Wart:  rustup will install it's own binaries but they match our versions and we can ignore them:-)
       PATH=${pkgs.rustup}/bin:$PATH
     
-      rustup show
+      #rustup show
     
       cd $ROOT; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
     '');

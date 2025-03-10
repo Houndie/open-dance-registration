@@ -40,19 +40,23 @@ use crate::{
 };
 use dioxus::prelude::{DioxusRouterExt, ServeConfig};
 use sqlx::SqlitePool;
-use std::{env, future::IntoFuture, sync::Arc};
+use std::{env, sync::Arc};
 use thiserror::Error;
 use tonic::{
     server::NamedService,
     transport::{self, Server},
 };
 use tonic_async_interceptor::async_interceptor;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, TraceLayer};
+use tracing::Level;
 
 fn db_url() -> String {
     format!("sqlite://{}/odr-sqlite.db", env::temp_dir().display())
 }
 
 pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+    dioxus::logger::init(Level::INFO).expect("Failed to initialize logger");
+
     let db_url = db_url();
 
     let db = Arc::new(SqlitePool::connect(&db_url).await?);
@@ -124,10 +128,14 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         omit_authentication_paths,
     );
 
+    let trace_middleware = TraceLayer::new_for_grpc()
+        .make_span_with(DefaultMakeSpan::default().level(Level::INFO))
+        .on_request(DefaultOnRequest::default().level(Level::INFO));
+
     let grpc_addr = "[::1]:50050".parse()?;
 
     let grpc_server = Server::builder()
-        .layer(tower_http::trace::TraceLayer::new_for_grpc())
+        .layer(trace_middleware.clone())
         .layer(auth_header_middleware.clone())
         .add_service(event_grpc.clone())
         .add_service(registration_schema_grpc.clone())
@@ -153,6 +161,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let grpc_web_addr = "[::1]:50051".parse()?;
 
     let grpc_web_server = Server::builder()
+        .layer(trace_middleware)
         .layer(auth_cookie_middleware)
         .accept_http1(true)
         .add_service(tonic_web::enable(event_grpc))
@@ -174,13 +183,11 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         axum::Router::new().serve_dioxus_application(dioxus_config, crate::view::app::App);
     let addr = dioxus_cli_config::fullstack_address_or_localhost();
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    let server = axum::serve(listener, webserver);
+    let axum_server = axum::serve(listener, webserver);
 
-    let (grpc_err, grpc_web_err, axum_err) =
-        futures::join!(grpc_server, grpc_web_server, server.into_future());
-    grpc_err.map_err(ServerError::GrpcError)?;
-    grpc_web_err.map_err(ServerError::GrpcError)?;
-    axum_err?;
+    grpc_server.await.map_err(ServerError::GrpcError)?;
+    grpc_web_server.await.map_err(ServerError::GrpcError)?;
+    axum_server.await?;
 
     Ok(())
 }

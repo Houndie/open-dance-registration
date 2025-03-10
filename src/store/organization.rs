@@ -55,13 +55,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::CompoundQuery(compound_query) => compound_query.bind(query_builder),

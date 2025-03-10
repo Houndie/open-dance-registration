@@ -44,13 +44,8 @@ pub trait Queryable {
 pub trait Bindable<'q, DB: sqlx::Database> {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments>;
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>;
 }
 
 pub enum CompoundOperator {
@@ -85,13 +80,8 @@ impl<'q, DB: sqlx::Database, Q: Queryable + Bindable<'q, DB>> Bindable<'q, DB>
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         self.queries
             .iter()
             .fold(query_builder, |query_builder, query| {
@@ -125,13 +115,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             LogicalQuery::Equals(value) => query_builder.bind(value),
             LogicalQuery::NotEquals(value) => query_builder.bind(value),

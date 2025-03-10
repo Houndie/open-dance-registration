@@ -27,6 +27,7 @@
     dioxus-cli = pkgs.rustPlatform.buildRustPackage {
       pname = "dioxus-cli";
       version = "0.6.1-git";
+      useFetchCargoVendor = true;
 
       /*src = pkgs.fetchCrate {
         inherit pname version;
@@ -42,7 +43,7 @@
       buildAndTestSubdir = "packages/cli";
 
       #cargoHash = "sha256-RMo6q/GSAV1bCMWtR+wu9xGKCgz/Ie6t/8oirBly/LQ="; # 0.6.0
-      cargoHash = "sha256-kE595bHDPmy9HOPZXqcYR4lxe7r6d+UA3yikKB/37Y8="; # git
+      cargoHash = "sha256-2MTaqsCPkrVYxz50OApCXb2YQYDVR7aIS1blXaJwF3s="; # git
 
       checkFlags = [ "--skip=wasm_bindgen::test::test_cargo_install" "--skip=wasm_bindgen::test::test_github_install" ];
 
@@ -57,12 +58,7 @@
     
       ROOT=$(${pkgs.git}/bin/git rev-parse --show-toplevel)
     
-      # Wart:  rustup will install it's own binaries but they match our versions and we can ignore them:-)
-      PATH=${pkgs.rustup}/bin:$PATH
-    
-      #rustup show
-    
-      cd $ROOT; cargo run --bin odr-cli --features server -- init; RUST_LOG=tower_http=trace ${dioxus-cli}/bin/dx serve
+      cd $ROOT; cargo run --bin odr-cli --features server -- init; ${dioxus-cli}/bin/dx serve
     '');
 
     testscript = (pkgs.writeShellScriptBin ",test" ''

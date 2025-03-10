@@ -140,11 +140,8 @@ impl SqliteStore {
     }
 }
 
-type QueryBuilder<'q> = sqlx::query::Query<
-    'q,
-    sqlx::Sqlite,
-    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
->;
+type QueryBuilder<'q> =
+    sqlx::query::Query<'q, sqlx::Sqlite, <sqlx::Sqlite as sqlx::Database>::Arguments<'q>>;
 
 pub trait Store: Send + Sync + 'static {
     fn upsert(
@@ -190,13 +187,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             Query::EventId(query) => query.bind(query_builder),
             Query::Compound(query) => query.bind(query_builder),

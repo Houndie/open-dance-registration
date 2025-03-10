@@ -132,13 +132,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             PermissionRoleQuery::Is(role) => match role.role.as_ref().unwrap() {
                 permission_role::Role::ServerAdmin(_) => query_builder,
@@ -193,13 +188,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::UserId(q) => q.bind(query_builder),
@@ -209,11 +199,8 @@ where
     }
 }
 
-type QueryBuilder<'q> = sqlx::query::Query<
-    'q,
-    sqlx::Sqlite,
-    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
->;
+type QueryBuilder<'q> =
+    sqlx::query::Query<'q, sqlx::Sqlite, <sqlx::Sqlite as sqlx::Database>::Arguments<'q>>;
 
 fn bind_permission<'q>(
     query_builder: QueryBuilder<'q>,

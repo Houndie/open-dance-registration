@@ -121,13 +121,8 @@ where
 {
     fn bind<O>(
         &'q self,
-        query_builder: sqlx::query::QueryAs<
-            'q,
-            DB,
-            O,
-            <DB as sqlx::database::HasArguments<'q>>::Arguments,
-        >,
-    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::database::HasArguments<'q>>::Arguments> {
+        query_builder: sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>>,
+    ) -> sqlx::query::QueryAs<'q, DB, O, <DB as sqlx::Database>::Arguments<'q>> {
         match self {
             Query::Id(q) => q.bind(query_builder),
             Query::Email(q) => q.bind(query_builder),
@@ -138,11 +133,8 @@ where
     }
 }
 
-type QueryBuilder<'q> = sqlx::query::Query<
-    'q,
-    sqlx::Sqlite,
-    <sqlx::Sqlite as sqlx::database::HasArguments<'q>>::Arguments,
->;
+type QueryBuilder<'q> =
+    sqlx::query::Query<'q, sqlx::Sqlite, <sqlx::Sqlite as sqlx::Database>::Arguments<'q>>;
 
 fn bind_user<'q>(query_builder: QueryBuilder<'q>, user: &'q User) -> QueryBuilder<'q> {
     let query_builder = query_builder.bind(&user.id).bind(&user.email);

@@ -32,7 +32,7 @@ pin-project = "1.1.10"
 mockall = "0.13.1"
 
 # Server
-sqlx = { version = "0.7.3", features = ["sqlite", "runtime-tokio"], optional = true }
+sqlx = { version = "0.8.3", features = ["sqlite", "runtime-tokio"], optional = true }
 tokio = { version = "1.35.1", features = ["macros", "rt-multi-thread"], optional = true }
 tonic-reflection = { version = "0.12", optional = true }
 tonic-web = { version = "0.12", optional = true }

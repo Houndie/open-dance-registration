@@ -1,29 +1,24 @@
 use crate::{
-    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    api::{
+        authorization_state_to_status, common::try_logical_string_query,
+        err_missing_claims_context, middleware::authentication::ClaimsContext,
+        store_error_to_status, ValidationError,
+    },
     password,
     proto::{
-        self, compound_user_query, user::Password, user_query, DeleteUsersRequest,
-        DeleteUsersResponse, QueryUsersRequest, QueryUsersResponse, UpsertUsersRequest,
-        UpsertUsersResponse, UserQuery,
+        self, compound_user_query, permission_role, user::Password, user_query, DeleteUsersRequest,
+        DeleteUsersResponse, PermissionRole, QueryUsersRequest, QueryUsersResponse,
+        UpsertUsersRequest, UpsertUsersResponse, UserQuery,
     },
     store::{
-        user::{self, PasswordType, Query, Store},
+        permission::{self, Store as PermissionStore},
+        user::{self, PasswordType, Query, Store as UserStore},
         CompoundOperator, CompoundQuery,
     },
     user::hash_password,
 };
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-
-pub struct Service<StoreType: Store> {
-    store: Arc<StoreType>,
-}
-
-impl<StoreType: Store> Service<StoreType> {
-    pub fn new(store: Arc<StoreType>) -> Self {
-        Service { store }
-    }
-}
 
 fn proto_to_user(proto_user: proto::User) -> Result<user::User, Status> {
     let password = match proto_user.password.unwrap() {
@@ -123,17 +118,102 @@ fn try_parse_user_query(query: UserQuery) -> Result<Query, ValidationError> {
     }
 }
 
+pub struct Service<UStore: UserStore, PStore: PermissionStore> {
+    user_store: Arc<UStore>,
+    permission_store: Arc<PStore>,
+}
+
+impl<UStore: UserStore, PStore: PermissionStore> Service<UStore, PStore> {
+    pub fn new(user_store: Arc<UStore>, permission_store: Arc<PStore>) -> Self {
+        Service {
+            user_store,
+            permission_store,
+        }
+    }
+}
+
+fn required_permissions(user_id: &str) -> Vec<proto::Permission> {
+    vec![proto::Permission {
+        id: "".to_string(),
+        user_id: user_id.to_string(),
+        role: Some(PermissionRole {
+            role: Some(permission_role::Role::ServerAdmin(())),
+        }),
+    }]
+}
+
+async fn strip_users<PStore: PermissionStore>(
+    permission_store: &PStore,
+    users: Vec<proto::User>,
+    this_user_id: &str,
+) -> Result<Vec<proto::User>, Status> {
+    if !users.iter().any(|user| user.id == this_user_id) {
+        return Ok(users);
+    }
+
+    let required_permissions = required_permissions(this_user_id);
+
+    let failed_permissions = permission_store
+        .permission_check(required_permissions)
+        .await
+        .map_err(store_error_to_status)?;
+
+    if failed_permissions.is_empty() {
+        return Ok(users);
+    }
+
+    let stripped_users = users
+        .into_iter()
+        .map(|user| {
+            if user.id == this_user_id {
+                return user;
+            };
+
+            let mut stripped_user = proto::User::default();
+            stripped_user.id = user.id;
+            stripped_user.username = user.username;
+
+            stripped_user
+        })
+        .collect();
+
+    return Ok(stripped_users);
+}
+
 #[tonic::async_trait]
-impl<StoreType: Store> proto::user_service_server::UserService for Service<StoreType> {
+impl<UStore: UserStore, PStore: PermissionStore> proto::user_service_server::UserService
+    for Service<UStore, PStore>
+{
     async fn upsert_users(
         &self,
         request: Request<UpsertUsersRequest>,
     ) -> Result<Response<UpsertUsersResponse>, Status> {
-        let request_users = request.into_inner().users;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let request_users = request.users;
 
         for (i, user) in request_users.iter().enumerate() {
             validate_user(user)
                 .map_err(|e| -> Status { e.with_context(&format!("users[{}]", i)).into() })?
+        }
+
+        if request_users
+            .iter()
+            .any(|user| user.id != claims_context.claims.sub)
+        {
+            let required_permissions = required_permissions(&claims_context.claims.sub);
+
+            let failed_permissions = self
+                .permission_store
+                .permission_check(required_permissions)
+                .await
+                .map_err(store_error_to_status)?;
+
+            authorization_state_to_status(failed_permissions)?;
         }
 
         let store_users = request_users
@@ -142,7 +222,7 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
             .collect::<Result<Vec<_>, _>>()?;
 
         let users = self
-            .store
+            .user_store
             .upsert(store_users)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
@@ -156,17 +236,32 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
         &self,
         request: Request<QueryUsersRequest>,
     ) -> Result<Response<QueryUsersResponse>, Status> {
-        let query = request.into_inner().query;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let query = request.query;
         let query = query.map(|query| try_parse_user_query(query)).transpose()?;
 
         let users = self
-            .store
+            .user_store
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 
+        let proto_users = users.into_iter().map(user_to_proto).collect::<Vec<_>>();
+
+        let stripped_users = strip_users(
+            &*self.permission_store,
+            proto_users,
+            &claims_context.claims.sub,
+        )
+        .await?;
+
         Ok(Response::new(QueryUsersResponse {
-            users: users.into_iter().map(user_to_proto).collect(),
+            users: stripped_users,
         }))
     }
 
@@ -174,8 +269,42 @@ impl<StoreType: Store> proto::user_service_server::UserService for Service<Store
         &self,
         request: Request<DeleteUsersRequest>,
     ) -> Result<Response<DeleteUsersResponse>, Status> {
-        self.store
-            .delete(&request.into_inner().ids)
+        let (_, extensions, request) = request.into_parts();
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let ids = request.ids;
+
+        let to_be_deleted = self
+            .permission_store
+            .query(Some(&permission::Query::CompoundQuery(CompoundQuery {
+                operator: CompoundOperator::Or,
+                queries: ids
+                    .iter()
+                    .map(|id| permission::Query::Id(permission::IdQuery::Equals(id.clone())))
+                    .collect(),
+            })))
+            .await
+            .map_err(store_error_to_status)?;
+
+        if to_be_deleted
+            .iter()
+            .any(|user| user.id != claims_context.claims.sub)
+        {
+            let required_permissions = required_permissions(&claims_context.claims.sub);
+
+            let failed_permissions = self
+                .permission_store
+                .permission_check(required_permissions)
+                .await
+                .map_err(store_error_to_status)?;
+
+            authorization_state_to_status(failed_permissions)?;
+        }
+
+        self.user_store
+            .delete(&ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 

@@ -89,7 +89,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
         user_store.clone(),
     ));
 
-    let user_service = Arc::new(UserService::new(user_store));
+    let user_service = Arc::new(UserService::new(user_store, permission_store.clone()));
 
     let permission_service = Arc::new(PermissionService::new(permission_store));
 

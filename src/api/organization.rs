@@ -209,3 +209,229 @@ impl<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionSt
         Ok(Response::new(DeleteOrganizationsResponse {}))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Service;
+    use crate::{
+        api::middleware::authentication::ClaimsContext,
+        authentication::Claims,
+        proto::{
+            organization_service_server::OrganizationService as _, permission_role,
+            DeleteOrganizationsRequest, DeleteOrganizationsResponse, Organization,
+            OrganizationRole, Permission, PermissionRole, QueryOrganizationsRequest,
+            UpsertOrganizationsRequest, UpsertOrganizationsResponse,
+        },
+        store::{
+            organization::MockStore as MockOrganizationStore,
+            permission::MockStore as MockPermissionStore,
+        },
+    };
+    use mockall::predicate::eq;
+    use std::sync::Arc;
+    use test_case::test_case;
+    use tonic::{Request, Status};
+
+    enum UpsertTest {
+        Success,
+        PermissionDenied,
+    }
+
+    #[test_case(UpsertTest::Success; "success")]
+    #[test_case(UpsertTest::PermissionDenied; "permission_denied")]
+    #[tokio::test]
+    async fn upsert(test_name: UpsertTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<UpsertOrganizationsResponse, Status>,
+        }
+
+        let new_id = "id";
+        let user_id = "user_id";
+
+        let organization = Organization {
+            id: "".to_string(),
+            name: "Test Organization".to_string(),
+        };
+
+        let mut returned_organization = organization.clone();
+        returned_organization.id = new_id.to_string();
+
+        let tc = match test_name {
+            UpsertTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(UpsertOrganizationsResponse {
+                    organizations: vec![returned_organization.clone()],
+                }),
+            },
+            UpsertTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::ServerAdmin(())),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+        };
+
+        let mut permission_store = MockPermissionStore::new();
+        let mut organization_store = MockOrganizationStore::new();
+
+        organization_store
+            .expect_upsert()
+            .with(eq(vec![organization.clone()]))
+            .returning(move |_| {
+                let returned_organization = returned_organization.clone();
+                Box::pin(async move { Ok(vec![returned_organization]) })
+            });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::ServerAdmin(())),
+                }),
+            }]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(organization_store), Arc::new(permission_store));
+
+        let mut request = Request::new(UpsertOrganizationsRequest {
+            organizations: vec![organization],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.upsert_organizations(request).await;
+        let response = response.map(|r| r.into_inner()).map_err(|e| e.to_string());
+
+        assert_eq!(response, tc.result.map_err(|e| e.to_string()));
+    }
+
+    enum QueryTest {
+        Success,
+        Filtered,
+    }
+
+    #[test_case(QueryTest::Success; "success")]
+    #[test_case(QueryTest::Filtered; "filtered")]
+    #[tokio::test]
+    async fn query(test_name: QueryTest) {
+        let id = "org_id";
+        let user_id = "user_id";
+
+        let organization = Organization {
+            id: id.to_string(),
+            name: "Test Organization".to_string(),
+        };
+
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Vec<Organization>,
+        }
+
+        let tc = match test_name {
+            QueryTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: vec![organization.clone()],
+            },
+            QueryTest::Filtered => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: id.to_string(),
+                        })),
+                    }),
+                }],
+                result: vec![],
+            },
+        };
+
+        let mut permission_store = MockPermissionStore::new();
+        let mut organization_store = MockOrganizationStore::new();
+
+        organization_store.expect_query().returning(move |_| {
+            let organization = organization.clone();
+            Box::pin(async move { Ok(vec![organization]) })
+        });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: id.to_string(),
+                            },
+                        )),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(organization_store), Arc::new(permission_store));
+
+        let mut request = Request::new(QueryOrganizationsRequest { query: None });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.query_organizations(request).await.unwrap();
+
+        assert_eq!(response.into_inner().organizations, tc.result);
+    }
+
+    #[tokio::test]
+    async fn delete() {
+        let ids = vec!["org_id".to_string()];
+
+        let mut organization_store = MockOrganizationStore::new();
+        let permission_store = MockPermissionStore::new();
+
+        organization_store
+            .expect_delete()
+            .with(eq(ids.clone()))
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        let service = Service::new(Arc::new(organization_store), Arc::new(permission_store));
+
+        let request = Request::new(DeleteOrganizationsRequest { ids });
+
+        let response = service.delete_organizations(request).await.unwrap();
+
+        assert_eq!(response.into_inner(), DeleteOrganizationsResponse {});
+    }
+}

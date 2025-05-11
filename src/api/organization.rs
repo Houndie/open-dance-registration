@@ -1,25 +1,40 @@
 use crate::{
-    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    api::{
+        authorization_state_to_status, common::try_logical_string_query,
+        err_missing_claims_context, middleware::authentication::ClaimsContext,
+        store_error_to_status, ValidationError,
+    },
     proto::{
-        self, compound_organization_query, organization_query, DeleteOrganizationsRequest,
-        DeleteOrganizationsResponse, OrganizationQuery, QueryOrganizationsRequest,
+        self, compound_organization_query, organization_query, permission_role,
+        DeleteOrganizationsRequest, DeleteOrganizationsResponse, OrganizationQuery,
+        OrganizationRole, Permission, PermissionRole, QueryOrganizationsRequest,
         QueryOrganizationsResponse, UpsertOrganizationsRequest, UpsertOrganizationsResponse,
     },
     store::{
-        organization::{Query, Store},
+        organization::{Query, Store as OrganizationStore},
+        permission::Store as PermissionStore,
         CompoundOperator, CompoundQuery,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tonic::{Request, Response, Status};
 
-pub struct Service<StoreType: Store> {
-    store: Arc<StoreType>,
+pub struct Service<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionStore> {
+    organization_store: Arc<OrganizationStoreType>,
+    permission_store: Arc<PermissionStoreType>,
 }
 
-impl<StoreType: Store> Service<StoreType> {
-    pub fn new(store: Arc<StoreType>) -> Self {
-        Service { store }
+impl<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionStore>
+    Service<OrganizationStoreType, PermissionStoreType>
+{
+    pub fn new(
+        organization_store: Arc<OrganizationStoreType>,
+        permission_store: Arc<PermissionStoreType>,
+    ) -> Self {
+        Service {
+            organization_store,
+            permission_store,
+        }
     }
 }
 
@@ -56,18 +71,75 @@ fn try_parse_organization_query(query: OrganizationQuery) -> Result<Query, Valid
     }
 }
 
+fn admin_or_viewer_permissions<OrgIter: IntoIterator<Item = String>>(
+    user_id: &str,
+    org_ids: OrgIter,
+) -> Vec<Permission> {
+    org_ids
+        .into_iter()
+        .map(|org_id| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: org_id,
+                            },
+                        )),
+                    }),
+                },
+            ]
+        })
+        .flatten()
+        .collect()
+}
+
 #[tonic::async_trait]
-impl<StoreType: Store> proto::organization_service_server::OrganizationService
-    for Service<StoreType>
+impl<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionStore>
+    proto::organization_service_server::OrganizationService
+    for Service<OrganizationStoreType, PermissionStoreType>
 {
     async fn upsert_organizations(
         &self,
         request: Request<UpsertOrganizationsRequest>,
     ) -> Result<Response<UpsertOrganizationsResponse>, Status> {
-        let request_organizations = request.into_inner().organizations;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let request_organizations = request.organizations;
+
+        let required_permissions = vec![Permission {
+            id: "".to_string(),
+            user_id: claims_context.claims.sub.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::ServerAdmin(())),
+            }),
+        }];
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
 
         let organizations = self
-            .store
+            .organization_store
             .upsert(request_organizations)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
@@ -79,16 +151,48 @@ impl<StoreType: Store> proto::organization_service_server::OrganizationService
         &self,
         request: Request<QueryOrganizationsRequest>,
     ) -> Result<Response<QueryOrganizationsResponse>, Status> {
-        let query = request.into_inner().query;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let query = request.query;
+
         let query = query
             .map(|query| try_parse_organization_query(query))
             .transpose()?;
 
         let organizations = self
-            .store
+            .organization_store
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
+
+        let required_permissions = admin_or_viewer_permissions(
+            &claims_context.claims.sub,
+            organizations.iter().map(|org| org.id.clone()),
+        );
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        let mut failed_organizations = HashSet::new();
+        for permission in failed_permissions {
+            if let permission_role::Role::OrganizationAdmin(organization_role) =
+                permission.role.unwrap().role.unwrap()
+            {
+                failed_organizations.insert(organization_role.organization_id);
+            }
+        }
+
+        let organizations = organizations
+            .into_iter()
+            .filter(|org| !failed_organizations.contains(&org.id))
+            .collect::<Vec<_>>();
 
         Ok(Response::new(QueryOrganizationsResponse { organizations }))
     }
@@ -97,7 +201,7 @@ impl<StoreType: Store> proto::organization_service_server::OrganizationService
         &self,
         request: Request<DeleteOrganizationsRequest>,
     ) -> Result<Response<DeleteOrganizationsResponse>, Status> {
-        self.store
+        self.organization_store
             .delete(&request.into_inner().ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;

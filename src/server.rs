@@ -77,7 +77,10 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let registration_service = Arc::new(RegistrationService::new(registration_store));
 
-    let organization_service = Arc::new(OrganizationService::new(organization_store));
+    let organization_service = Arc::new(OrganizationService::new(
+        organization_store,
+        permission_store.clone(),
+    ));
 
     let authentication_web_service = Arc::new(AuthenticationWebService::new(
         key_manager.clone(),

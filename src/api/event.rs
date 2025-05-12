@@ -3,6 +3,7 @@ use crate::{
     proto::{
         self, compound_event_query, event_query, DeleteEventsResponse, EventQuery,
         QueryEventsRequest, QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
+        permission_role, Permission, PermissionRole, OrganizationRole, EventRole,
     },
     store::{
         event::{Query, Store},
@@ -55,6 +56,68 @@ fn try_parse_event_query(query: EventQuery) -> Result<Query, ValidationError> {
         }
         None => Err(ValidationError::new_empty("query")),
     }
+}
+
+fn upsert_permissions(user_id: &str, events: &[proto::Event]) -> Vec<Permission> {
+    events
+        .iter()
+        .map(|event| {
+            if event.id.is_empty() {
+                // New event - needs organization-level permissions
+                vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationAdmin(
+                                OrganizationRole {
+                                    organization_id: event.organization_id.clone(),
+                                },
+                            )),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationViewer(
+                                OrganizationRole {
+                                    organization_id: event.organization_id.clone(),
+                                },
+                            )),
+                        }),
+                    },
+                ]
+            } else {
+                // Existing event - event-level permissions are sufficient
+                vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventEditor(
+                                EventRole {
+                                    event_id: event.id.clone(),
+                                },
+                            )),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(
+                                EventRole {
+                                    event_id: event.id.clone(),
+                                },
+                            )),
+                        }),
+                    },
+                ]
+            }
+        })
+        .flatten()
+        .collect::<Vec<_>>()
 }
 
 #[tonic::async_trait]

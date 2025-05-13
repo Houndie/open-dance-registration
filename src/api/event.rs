@@ -15,7 +15,7 @@ use crate::{
         CompoundOperator, CompoundQuery,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
@@ -130,6 +130,21 @@ fn upsert_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
         .collect::<Vec<_>>()
 }
 
+fn query_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
+    events
+        .iter()
+        .map(|event| Permission {
+            id: "".to_string(),
+            user_id: user_id.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventViewer(EventRole {
+                    event_id: event.id.clone(),
+                })),
+            }),
+        })
+        .collect::<Vec<_>>()
+}
+
 #[tonic::async_trait]
 impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
     proto::event_service_server::EventService for Service<EventStoreType, PermissionStoreType>
@@ -177,17 +192,51 @@ impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
         &self,
         request: Request<QueryEventsRequest>,
     ) -> Result<Response<QueryEventsResponse>, Status> {
-        let query = request.into_inner().query;
-        let query = query
-            .map(|query| try_parse_event_query(query))
-            .transpose()?;
+        let (_, extensions, query_request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let query = query_request.query.map(try_parse_event_query).transpose()?;
 
         let events = self
             .event_store
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
-        Ok(Response::new(QueryEventsResponse { events }))
+
+        // Check permissions for all events returned by the query
+        let required_permissions = query_permissions(&claims_context.claims.sub, &events);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        // Create a set of event IDs that the user doesn't have permission to view
+        let hidden_events = failed_permissions
+            .into_iter()
+            .filter_map(|permission| {
+                if let Some(role) = &permission.role {
+                    if let Some(permission_role::Role::EventViewer(event_role)) = &role.role {
+                        return Some(event_role.event_id.clone());
+                    }
+                }
+                None
+            })
+            .collect::<HashSet<_>>();
+
+        // Filter events to only include those the user has permission to view
+        let filtered_events = events
+            .into_iter()
+            .filter(|event| !hidden_events.contains(&event.id))
+            .collect::<Vec<_>>();
+
+        Ok(Response::new(QueryEventsResponse {
+            events: filtered_events,
+        }))
     }
 
     async fn delete_events(

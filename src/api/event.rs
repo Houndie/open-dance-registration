@@ -1,8 +1,8 @@
 use crate::{
     api::{
         authorization_state_to_status, common::try_logical_string_query,
-        err_missing_claims_context, middleware::authentication::ClaimsContext, store_error_to_status,
-        ValidationError,
+        err_missing_claims_context, middleware::authentication::ClaimsContext,
+        store_error_to_status, ValidationError,
     },
     proto::{
         self, compound_event_query, event_query, permission_role, DeleteEventsResponse, Event,
@@ -10,7 +10,8 @@ use crate::{
         QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
     },
     store::{
-        event::{Query, Store},
+        event::{Query, Store as EventStore},
+        permission::Store as PermissionStore,
         CompoundOperator, CompoundQuery,
     },
 };
@@ -18,13 +19,22 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
-pub struct Service<StoreType: Store> {
-    store: Arc<StoreType>,
+pub struct Service<EventStoreType: EventStore, PermissionStoreType: PermissionStore> {
+    event_store: Arc<EventStoreType>,
+    permission_store: Arc<PermissionStoreType>,
 }
 
-impl<StoreType: Store> Service<StoreType> {
-    pub fn new(store: Arc<StoreType>) -> Self {
-        Service { store }
+impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
+    Service<EventStoreType, PermissionStoreType>
+{
+    pub fn new(
+        event_store: Arc<EventStoreType>,
+        permission_store: Arc<PermissionStoreType>,
+    ) -> Self {
+        Service {
+            event_store,
+            permission_store,
+        }
     }
 }
 
@@ -121,7 +131,9 @@ fn upsert_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
 }
 
 #[tonic::async_trait]
-impl<StoreType: Store> proto::event_service_server::EventService for Service<StoreType> {
+impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
+    proto::event_service_server::EventService for Service<EventStoreType, PermissionStoreType>
+{
     async fn upsert_events(
         &self,
         request: Request<UpsertEventsRequest>,
@@ -146,7 +158,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         let required_permissions = upsert_permissions(&claims_context.claims.sub, &events);
 
         let failed_permissions = self
-            .store
+            .permission_store
             .permission_check(required_permissions)
             .await
             .map_err(store_error_to_status)?;
@@ -154,7 +166,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         authorization_state_to_status(failed_permissions)?;
 
         let events = self
-            .store
+            .event_store
             .upsert(events)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
@@ -171,7 +183,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
             .transpose()?;
 
         let events = self
-            .store
+            .event_store
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
@@ -182,7 +194,7 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         &self,
         request: Request<proto::DeleteEventsRequest>,
     ) -> Result<Response<DeleteEventsResponse>, Status> {
-        self.store
+        self.event_store
             .delete(&request.into_inner().ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;

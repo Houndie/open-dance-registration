@@ -71,7 +71,7 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let key_manager = Arc::new(StoreKeyManager::new(key_store));
 
-    let event_service = Arc::new(EventService::new(event_store));
+    let event_service = Arc::new(EventService::new(event_store, permission_store.clone()));
 
     let schema_service = Arc::new(SchemaService::new(schema_store));
 

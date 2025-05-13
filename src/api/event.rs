@@ -1,5 +1,9 @@
 use crate::{
-    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    api::{
+        authorization_state_to_status, common::try_logical_string_query,
+        err_missing_claims_context, middleware::authentication::ClaimsContext, store_error_to_status,
+        ValidationError,
+    },
     proto::{
         self, compound_event_query, event_query, permission_role, DeleteEventsResponse, Event,
         EventQuery, EventRole, OrganizationRole, Permission, PermissionRole, QueryEventsRequest,
@@ -122,7 +126,13 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
         &self,
         request: Request<UpsertEventsRequest>,
     ) -> Result<Response<UpsertEventsResponse>, Status> {
-        let events = request.into_inner().events;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let events = request.events;
         for (idx, event) in events.iter().enumerate() {
             if event.organization_id == "" {
                 return Err(ValidationError::new_empty(&format!(
@@ -132,6 +142,16 @@ impl<StoreType: Store> proto::event_service_server::EventService for Service<Sto
                 .into());
             }
         }
+
+        let required_permissions = upsert_permissions(&claims_context.claims.sub, &events);
+
+        let failed_permissions = self
+            .store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
 
         let events = self
             .store

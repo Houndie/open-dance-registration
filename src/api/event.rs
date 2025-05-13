@@ -145,6 +145,21 @@ fn query_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
         .collect::<Vec<_>>()
 }
 
+fn delete_permissions(user_id: &str, event_ids: &[String]) -> Vec<Permission> {
+    event_ids
+        .iter()
+        .map(|event_id| Permission {
+            id: "".to_string(),
+            user_id: user_id.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventAdmin(EventRole {
+                    event_id: event_id.clone(),
+                })),
+            }),
+        })
+        .collect::<Vec<_>>()
+}
+
 #[tonic::async_trait]
 impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
     proto::event_service_server::EventService for Service<EventStoreType, PermissionStoreType>
@@ -243,8 +258,27 @@ impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
         &self,
         request: Request<proto::DeleteEventsRequest>,
     ) -> Result<Response<DeleteEventsResponse>, Status> {
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let event_ids = request.ids;
+
+        // Check if user has EventAdmin permission for all events to be deleted
+        let required_permissions = delete_permissions(&claims_context.claims.sub, &event_ids);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
+
         self.event_store
-            .delete(&request.into_inner().ids)
+            .delete(&event_ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 

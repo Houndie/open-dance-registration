@@ -1,9 +1,9 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
     proto::{
-        self, compound_event_query, event_query, DeleteEventsResponse, EventQuery,
-        QueryEventsRequest, QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
-        permission_role, Permission, PermissionRole, OrganizationRole, EventRole,
+        self, compound_event_query, event_query, permission_role, DeleteEventsResponse, Event,
+        EventQuery, EventRole, OrganizationRole, Permission, PermissionRole, QueryEventsRequest,
+        QueryEventsResponse, UpsertEventsRequest, UpsertEventsResponse,
     },
     store::{
         event::{Query, Store},
@@ -58,7 +58,7 @@ fn try_parse_event_query(query: EventQuery) -> Result<Query, ValidationError> {
     }
 }
 
-fn upsert_permissions(user_id: &str, events: &[proto::Event]) -> Vec<Permission> {
+fn upsert_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
     events
         .iter()
         .map(|event| {
@@ -95,22 +95,18 @@ fn upsert_permissions(user_id: &str, events: &[proto::Event]) -> Vec<Permission>
                         id: "".to_string(),
                         user_id: user_id.to_string(),
                         role: Some(PermissionRole {
-                            role: Some(permission_role::Role::EventEditor(
-                                EventRole {
-                                    event_id: event.id.clone(),
-                                },
-                            )),
+                            role: Some(permission_role::Role::EventEditor(EventRole {
+                                event_id: event.id.clone(),
+                            })),
                         }),
                     },
                     Permission {
                         id: "".to_string(),
                         user_id: user_id.to_string(),
                         role: Some(PermissionRole {
-                            role: Some(permission_role::Role::EventViewer(
-                                EventRole {
-                                    event_id: event.id.clone(),
-                                },
-                            )),
+                            role: Some(permission_role::Role::EventViewer(EventRole {
+                                event_id: event.id.clone(),
+                            })),
                         }),
                     },
                 ]

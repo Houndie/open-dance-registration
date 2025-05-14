@@ -285,3 +285,160 @@ impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
         Ok(Response::new(DeleteEventsResponse {}))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        api::middleware::authentication::ClaimsContext,
+        authentication::Claims,
+        proto::{
+            self, permission_role, Event, OrganizationRole, Permission, PermissionRole,
+            UpsertEventsRequest, UpsertEventsResponse,
+        },
+        store::{
+            event::MockStore as MockEventStore,
+            permission::MockStore as MockPermissionStore,
+        },
+    };
+    use mockall::predicate::eq;
+    use std::sync::Arc;
+    use test_case::test_case;
+    use tonic::{Request, Status};
+    use super::Service;
+
+    enum InsertTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(InsertTest::Success; "success")]
+    #[test_case(InsertTest::PermissionDenied; "permission_denied")]
+    #[test_case(InsertTest::NotFound; "not_found")]
+    #[tokio::test]
+    async fn insert(test_name: InsertTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<UpsertEventsResponse, Status>,
+        }
+
+        let new_id = "id";
+        let user_id = "user_id";
+        let org_id = "org_id";
+
+        let event = Event {
+            id: "".to_string(),
+            organization_id: org_id.to_string(),
+            name: "Test Event".to_string(),
+        };
+
+        let mut returned_event = event.clone();
+        returned_event.id = new_id.to_string();
+
+        let tc = match test_name {
+            InsertTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(UpsertEventsResponse {
+                    events: vec![returned_event.clone()],
+                }),
+            },
+            InsertTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            InsertTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationAdmin(
+                                OrganizationRole {
+                                    organization_id: org_id.to_string(),
+                                },
+                            )),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationViewer(
+                                OrganizationRole {
+                                    organization_id: org_id.to_string(),
+                                },
+                            )),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(org_id.to_string())),
+            },
+        };
+
+        let mut event_store = MockEventStore::new();
+        let mut permission_store = MockPermissionStore::new();
+
+        event_store
+            .expect_upsert()
+            .with(eq(vec![event.clone()]))
+            .returning(move |_| {
+                let returned_event = returned_event.clone();
+                Box::pin(async move { Ok(vec![returned_event]) })
+            });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: org_id.to_string(),
+                            },
+                        )),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(event_store), Arc::new(permission_store));
+
+        let mut request = Request::new(UpsertEventsRequest {
+            events: vec![event],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.upsert_events(request).await;
+        let response = response.map(|r| r.into_inner()).map_err(|e| e.to_string());
+
+        assert_eq!(response, tc.result.map_err(|e| e.to_string()));
+    }
+}

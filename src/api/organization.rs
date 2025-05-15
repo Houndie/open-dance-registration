@@ -123,9 +123,11 @@ fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
-                        role: Some(permission_role::Role::OrganizationViewer(OrganizationRole {
-                            organization_id: org_id.clone(),
-                        })),
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: org_id.clone(),
+                            },
+                        )),
                     }),
                 },
             ]

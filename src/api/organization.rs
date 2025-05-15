@@ -105,6 +105,35 @@ fn admin_or_viewer_permissions<OrgIter: IntoIterator<Item = String>>(
         .collect()
 }
 
+fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
+    org_ids
+        .iter()
+        .map(|org_id| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationViewer(OrganizationRole {
+                            organization_id: org_id.clone(),
+                        })),
+                    }),
+                },
+            ]
+        })
+        .flatten()
+        .collect()
+}
+
 #[tonic::async_trait]
 impl<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionStore>
     proto::organization_service_server::OrganizationService

@@ -123,9 +123,11 @@ fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
-                        role: Some(permission_role::Role::OrganizationViewer(OrganizationRole {
-                            organization_id: org_id.clone(),
-                        })),
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: org_id.clone(),
+                            },
+                        )),
                     }),
                 },
             ]
@@ -471,6 +473,7 @@ mod tests {
     #[tokio::test]
     async fn delete() {
         let ids = vec!["org_id".to_string()];
+        let user_id = "user_id";
 
         let mut organization_store = MockOrganizationStore::new();
         let permission_store = MockPermissionStore::new();
@@ -482,7 +485,14 @@ mod tests {
 
         let service = Service::new(Arc::new(organization_store), Arc::new(permission_store));
 
-        let request = Request::new(DeleteOrganizationsRequest { ids });
+        let mut request = Request::new(DeleteOrganizationsRequest { ids });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
 
         let response = service.delete_organizations(request).await.unwrap();
 

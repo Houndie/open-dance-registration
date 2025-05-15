@@ -123,11 +123,9 @@ fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
-                        role: Some(permission_role::Role::OrganizationViewer(
-                            OrganizationRole {
-                                organization_id: org_id.clone(),
-                            },
-                        )),
+                        role: Some(permission_role::Role::OrganizationViewer(OrganizationRole {
+                            organization_id: org_id.clone(),
+                        })),
                     }),
                 },
             ]
@@ -470,22 +468,113 @@ mod tests {
         assert_eq!(response.into_inner().organizations, tc.result);
     }
 
+    enum DeleteTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(DeleteTest::Success; "success")]
+    #[test_case(DeleteTest::PermissionDenied; "permission_denied")]
+    #[test_case(DeleteTest::NotFound; "not_found")]
     #[tokio::test]
-    async fn delete() {
-        let ids = vec!["org_id".to_string()];
+    async fn delete(test_name: DeleteTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<DeleteOrganizationsResponse, Status>,
+        }
+
+        let org_id = "org_id";
         let user_id = "user_id";
 
+        let tc = match test_name {
+            DeleteTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(DeleteOrganizationsResponse::default()),
+            },
+            DeleteTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            DeleteTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationAdmin(
+                                OrganizationRole {
+                                    organization_id: org_id.to_string(),
+                                },
+                            )),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::OrganizationViewer(
+                                OrganizationRole {
+                                    organization_id: org_id.to_string(),
+                                },
+                            )),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(org_id.to_string())),
+            },
+        };
+
         let mut organization_store = MockOrganizationStore::new();
-        let permission_store = MockPermissionStore::new();
+        let mut permission_store = MockPermissionStore::new();
 
         organization_store
             .expect_delete()
-            .with(eq(ids.clone()))
+            .with(eq(vec![org_id.to_string()]))
             .returning(|_| Box::pin(async { Ok(()) }));
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationAdmin(OrganizationRole {
+                            organization_id: org_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::OrganizationViewer(
+                            OrganizationRole {
+                                organization_id: org_id.to_string(),
+                            },
+                        )),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
 
         let service = Service::new(Arc::new(organization_store), Arc::new(permission_store));
 
-        let mut request = Request::new(DeleteOrganizationsRequest { ids });
+        let mut request = Request::new(DeleteOrganizationsRequest {
+            ids: vec![org_id.to_string()],
+        });
 
         request.extensions_mut().insert(ClaimsContext {
             claims: Claims {
@@ -494,8 +583,14 @@ mod tests {
             },
         });
 
-        let response = service.delete_organizations(request).await.unwrap();
+        let response = service
+            .delete_organizations(request)
+            .await
+            .map(|r| r.into_inner());
 
-        assert_eq!(response.into_inner(), DeleteOrganizationsResponse {});
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

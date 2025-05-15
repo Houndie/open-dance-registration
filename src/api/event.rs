@@ -293,9 +293,9 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            event_service_server::EventService as _, permission_role, Event, EventRole,
-            OrganizationRole, Permission, PermissionRole, QueryEventsRequest, QueryEventsResponse,
-            UpsertEventsRequest, UpsertEventsResponse,
+            event_service_server::EventService as _, permission_role, DeleteEventsRequest,
+            DeleteEventsResponse, Event, EventRole, OrganizationRole, Permission, PermissionRole,
+            QueryEventsRequest, UpsertEventsRequest, UpsertEventsResponse,
         },
         store::{event::MockStore as MockEventStore, permission::MockStore as MockPermissionStore},
         test_helpers::StatusCompare,
@@ -523,5 +523,111 @@ mod tests {
         let response = service.query_events(request).await.unwrap();
 
         assert_eq!(response.into_inner().events, tc.result);
+    }
+
+    enum DeleteTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(DeleteTest::Success; "success")]
+    #[test_case(DeleteTest::PermissionDenied; "permission_denied")]
+    #[test_case(DeleteTest::NotFound; "not_found")]
+    #[tokio::test]
+    async fn delete(test_name: DeleteTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<DeleteEventsResponse, Status>,
+        }
+
+        let event_id = "event_id";
+        let user_id = "user_id";
+
+        let tc = match test_name {
+            DeleteTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(DeleteEventsResponse::default()),
+            },
+            DeleteTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventAdmin(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            DeleteTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventAdmin(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(event_id.to_string())),
+            },
+        };
+
+        let mut event_store = MockEventStore::new();
+        let mut permission_store = MockPermissionStore::new();
+
+        event_store
+            .expect_delete()
+            .with(eq(vec![event_id.to_string()]))
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::EventAdmin(EventRole {
+                        event_id: event_id.to_string(),
+                    })),
+                }),
+            }]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(event_store), Arc::new(permission_store));
+
+        let mut request = Request::new(DeleteEventsRequest {
+            ids: vec![event_id.to_string()],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.delete_events(request).await.map(|r| r.into_inner());
+
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

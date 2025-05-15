@@ -293,8 +293,9 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            event_service_server::EventService as _, permission_role, Event, OrganizationRole,
-            Permission, PermissionRole, UpsertEventsRequest, UpsertEventsResponse,
+            event_service_server::EventService as _, permission_role, Event, EventRole,
+            OrganizationRole, Permission, PermissionRole, QueryEventsRequest, QueryEventsResponse,
+            UpsertEventsRequest, UpsertEventsResponse,
         },
         store::{event::MockStore as MockEventStore, permission::MockStore as MockPermissionStore},
         test_helpers::StatusCompare,
@@ -440,5 +441,87 @@ mod tests {
             response.map_err(StatusCompare::new),
             tc.result.map_err(StatusCompare::new)
         );
+    }
+
+    enum QueryTest {
+        Success,
+        Filtered,
+    }
+
+    #[test_case(QueryTest::Success; "success")]
+    #[test_case(QueryTest::Filtered; "filtered")]
+    #[tokio::test]
+    async fn query(test_name: QueryTest) {
+        let id = "event_id";
+        let user_id = "user_id";
+
+        let event = Event {
+            id: id.to_string(),
+            organization_id: "org_id".to_string(),
+            name: "Test Event".to_string(),
+        };
+
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Vec<Event>,
+        }
+
+        let tc = match test_name {
+            QueryTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: vec![event.clone()],
+            },
+            QueryTest::Filtered => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: id.to_string(),
+                        })),
+                    }),
+                }],
+                result: vec![],
+            },
+        };
+
+        let mut permission_store = MockPermissionStore::new();
+        let mut event_store = MockEventStore::new();
+
+        event_store.expect_query().returning(move |_| {
+            let event = event.clone();
+            Box::pin(async move { Ok(vec![event]) })
+        });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::EventViewer(EventRole {
+                        event_id: id.to_string(),
+                    })),
+                }),
+            }]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(event_store), Arc::new(permission_store));
+
+        let mut request = Request::new(QueryEventsRequest { query: None });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.query_events(request).await.unwrap();
+
+        assert_eq!(response.into_inner().events, tc.result);
     }
 }

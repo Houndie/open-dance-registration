@@ -230,8 +230,27 @@ impl<OrganizationStoreType: OrganizationStore, PermissionStoreType: PermissionSt
         &self,
         request: Request<DeleteOrganizationsRequest>,
     ) -> Result<Response<DeleteOrganizationsResponse>, Status> {
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let org_ids = request.ids;
+
+        // Check permissions
+        let required_permissions = delete_permissions(&claims_context.claims.sub, &org_ids);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
+
         self.organization_store
-            .delete(&request.into_inner().ids)
+            .delete(&org_ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 

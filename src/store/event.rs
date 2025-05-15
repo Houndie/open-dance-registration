@@ -5,6 +5,7 @@ use crate::{
         Bindable as _, Error, Queryable as _,
     },
 };
+use mockall::automock;
 use sqlx::SqlitePool;
 use std::{future::Future, sync::Arc};
 
@@ -82,11 +83,12 @@ where
     }
 }
 
+#[automock]
 pub trait Store: Send + Sync + 'static {
     fn upsert(&self, events: Vec<Event>) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
-    fn query(
+    fn query<'a>(
         &self,
-        query: Option<&Query>,
+        query: Option<&'a Query>,
     ) -> impl Future<Output = Result<Vec<Event>, Error>> + Send;
     fn delete(&self, event_ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }

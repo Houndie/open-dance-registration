@@ -346,6 +346,7 @@ mod tests {
             UpsertPermissionsResponse,
         },
         store::permission::MockStore,
+        test_helpers::StatusCompare,
     };
     use mockall::predicate::eq;
     use std::sync::Arc;
@@ -487,10 +488,15 @@ mod tests {
             },
         });
 
-        let response = service.upsert_permissions(request).await;
-        let response = response.map(|r| r.into_inner()).map_err(|e| e.to_string());
+        let response = service
+            .upsert_permissions(request)
+            .await
+            .map(|r| r.into_inner());
 
-        assert_eq!(response, tc.result.map_err(|e| e.to_string()));
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 
     enum QueryTest {
@@ -724,9 +730,14 @@ mod tests {
             },
         });
 
-        let response = service.delete_permissions(request).await;
-        let response = response.map(|r| r.into_inner()).map_err(|e| e.to_string());
+        let response = service
+            .delete_permissions(request)
+            .await
+            .map(|r| r.into_inner());
 
-        assert_eq!(response, tc.result.map_err(|e| e.to_string()));
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

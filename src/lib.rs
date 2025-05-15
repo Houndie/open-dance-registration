@@ -20,4 +20,5 @@ pub mod hooks;
 pub mod password;
 pub mod proto;
 pub mod server_functions;
+pub mod test_helpers;
 pub mod view;

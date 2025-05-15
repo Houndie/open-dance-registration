@@ -288,23 +288,21 @@ impl<EventStoreType: EventStore, PermissionStoreType: PermissionStore>
 
 #[cfg(test)]
 mod tests {
+    use super::Service;
     use crate::{
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            self, permission_role, Event, OrganizationRole, Permission, PermissionRole,
-            UpsertEventsRequest, UpsertEventsResponse,
+            event_service_server::EventService as _, permission_role, Event, OrganizationRole,
+            Permission, PermissionRole, UpsertEventsRequest, UpsertEventsResponse,
         },
-        store::{
-            event::MockStore as MockEventStore,
-            permission::MockStore as MockPermissionStore,
-        },
+        store::{event::MockStore as MockEventStore, permission::MockStore as MockPermissionStore},
+        test_helpers::StatusCompare,
     };
     use mockall::predicate::eq;
     use std::sync::Arc;
     use test_case::test_case;
     use tonic::{Request, Status};
-    use super::Service;
 
     enum InsertTest {
         Success,
@@ -436,9 +434,11 @@ mod tests {
             },
         });
 
-        let response = service.upsert_events(request).await;
-        let response = response.map(|r| r.into_inner()).map_err(|e| e.to_string());
+        let response = service.upsert_events(request).await.map(|r| r.into_inner());
 
-        assert_eq!(response, tc.result.map_err(|e| e.to_string()));
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

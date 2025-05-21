@@ -291,8 +291,8 @@ mod tests {
         authentication::Claims,
         proto::{
             permission_role, registration_service_server::RegistrationService, EventRole,
-            Permission, PermissionRole, Registration, RegistrationItem, UpsertRegistrationsRequest,
-            UpsertRegistrationsResponse,
+            Permission, PermissionRole, QueryRegistrationsRequest, Registration, RegistrationItem,
+            UpsertRegistrationsRequest, UpsertRegistrationsResponse,
         },
         store::{
             permission::MockStore as MockPermissionStore,
@@ -443,5 +443,93 @@ mod tests {
             response.map_err(StatusCompare::new),
             tc.result.map_err(StatusCompare::new)
         );
+    }
+    
+    enum QueryTest {
+        Success,
+        Filtered,
+    }
+
+    #[test_case(QueryTest::Success; "success")]
+    #[test_case(QueryTest::Filtered; "filtered")]
+    #[tokio::test]
+    async fn query(test_name: QueryTest) {
+        let registration_id = "registration_id";
+        let user_id = "user_id";
+        let event_id = "event_id";
+
+        let registration_item = RegistrationItem {
+            schema_item_id: "schema_item_id".to_string(),
+            value: "value".to_string(),
+        };
+
+        let registration = Registration {
+            id: registration_id.to_string(),
+            event_id: event_id.to_string(),
+            items: vec![registration_item],
+        };
+
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Vec<Registration>,
+        }
+
+        let tc = match test_name {
+            QueryTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: vec![registration.clone()],
+            },
+            QueryTest::Filtered => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: vec![],
+            },
+        };
+
+        let mut permission_store = MockPermissionStore::new();
+        let mut registration_store = MockRegistrationStore::new();
+
+        registration_store.expect_query().returning(move |_| {
+            let registration = registration.clone();
+            Box::pin(async move { Ok(vec![registration]) })
+        });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::EventViewer(EventRole {
+                        event_id: event_id.to_string(),
+                    })),
+                }),
+            }]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(registration_store), Arc::new(permission_store));
+
+        let mut request = Request::new(QueryRegistrationsRequest { query: None });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.query_registrations(request).await.unwrap();
+
+        assert_eq!(response.into_inner().registrations, tc.result);
     }
 }

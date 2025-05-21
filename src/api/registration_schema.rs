@@ -18,7 +18,7 @@ use crate::{
         CompoundOperator, CompoundQuery,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
@@ -170,6 +170,21 @@ fn upsert_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Perm
             ]
         })
         .flatten()
+        .collect::<Vec<_>>()
+}
+
+fn query_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Permission> {
+    schemas
+        .iter()
+        .map(|schema| Permission {
+            id: "".to_string(),
+            user_id: user_id.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventViewer(EventRole {
+                    event_id: schema.event_id.clone(),
+                })),
+            }),
+        })
         .collect::<Vec<_>>()
 }
 

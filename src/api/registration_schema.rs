@@ -188,6 +188,21 @@ fn query_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Permi
         .collect::<Vec<_>>()
 }
 
+fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
+    schema_ids
+        .iter()
+        .map(|schema_id| Permission {
+            id: "".to_string(),
+            user_id: user_id.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventEditor(EventRole {
+                    event_id: schema_id.clone(),
+                })),
+            }),
+        })
+        .collect::<Vec<_>>()
+}
+
 #[tonic::async_trait]
 impl<StoreType: Store, PermissionStoreType: PermissionStore>
     proto::registration_schema_service_server::RegistrationSchemaService

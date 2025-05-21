@@ -1,13 +1,13 @@
 use crate::{
     api::{
-        authorization_state_to_status, common::try_logical_string_query, 
+        authorization_state_to_status, common::try_logical_string_query,
         err_missing_claims_context, middleware::authentication::ClaimsContext,
         store_error_to_status, ValidationError,
     },
     proto::{
-        self, compound_registration_schema_query, multi_select_type, permission_role, 
-        registration_schema_item_type, registration_schema_query, select_type, text_type, 
-        DeleteRegistrationSchemasResponse, EventRole, Permission, PermissionRole, 
+        self, compound_registration_schema_query, multi_select_type, permission_role,
+        registration_schema_item_type, registration_schema_query, select_type, text_type,
+        DeleteRegistrationSchemasResponse, EventRole, Permission, PermissionRole,
         QueryRegistrationSchemasRequest, QueryRegistrationSchemasResponse, RegistrationSchema,
         RegistrationSchemaItem, RegistrationSchemaQuery, UpsertRegistrationSchemasRequest,
         UpsertRegistrationSchemasResponse,
@@ -27,9 +27,11 @@ pub struct Service<StoreType: Store, PermissionStoreType: PermissionStore> {
     permission_store: Arc<PermissionStoreType>,
 }
 
-impl<StoreType: Store, PermissionStoreType: PermissionStore> Service<StoreType, PermissionStoreType> {
+impl<StoreType: Store, PermissionStoreType: PermissionStore>
+    Service<StoreType, PermissionStoreType>
+{
     pub fn new(store: Arc<StoreType>, permission_store: Arc<PermissionStoreType>) -> Self {
-        Service { 
+        Service {
             store,
             permission_store,
         }
@@ -172,7 +174,8 @@ fn upsert_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Perm
 }
 
 #[tonic::async_trait]
-impl<StoreType: Store, PermissionStoreType: PermissionStore> proto::registration_schema_service_server::RegistrationSchemaService
+impl<StoreType: Store, PermissionStoreType: PermissionStore>
+    proto::registration_schema_service_server::RegistrationSchemaService
     for Service<StoreType, PermissionStoreType>
 {
     async fn upsert_registration_schemas(
@@ -245,5 +248,177 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore> proto::registration
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 
         Ok(Response::new(DeleteRegistrationSchemasResponse {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Service;
+    use crate::{
+        api::middleware::authentication::ClaimsContext,
+        authentication::Claims,
+        proto::{
+            permission_role, registration_schema_item_type,
+            registration_schema_service_server::RegistrationSchemaService as _, text_type,
+            EventRole, Permission, PermissionRole, RegistrationSchema, RegistrationSchemaItem,
+            RegistrationSchemaItemType, TextType, UpsertRegistrationSchemasRequest,
+            UpsertRegistrationSchemasResponse,
+        },
+        store::{
+            permission::MockStore as MockPermissionStore,
+            registration_schema::MockStore as MockRegistrationSchemaStore,
+        },
+        test_helpers::StatusCompare,
+    };
+    use mockall::predicate::eq;
+    use std::sync::Arc;
+    use test_case::test_case;
+    use tonic::{Request, Status};
+
+    enum UpsertTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(UpsertTest::Success; "success")]
+    #[test_case(UpsertTest::PermissionDenied; "permission_denied")]
+    #[test_case(UpsertTest::NotFound; "not_found")]
+    #[tokio::test]
+    async fn upsert(test_name: UpsertTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<UpsertRegistrationSchemasResponse, Status>,
+        }
+
+        let item_id = "item_id";
+        let user_id = "user_id";
+        let event_id = "event_id";
+
+        let text_type = TextType {
+            default: "".to_string(),
+            display: text_type::Display::Small as i32,
+        };
+
+        let schema_item = RegistrationSchemaItem {
+            id: item_id.to_string(),
+            name: "Test field".to_string(),
+            r#type: Some(RegistrationSchemaItemType {
+                r#type: Some(registration_schema_item_type::Type::Text(text_type)),
+            }),
+        };
+
+        let schema = RegistrationSchema {
+            event_id: event_id.to_string(),
+            items: vec![schema_item],
+        };
+
+        let tc = match test_name {
+            UpsertTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(UpsertRegistrationSchemasResponse {
+                    registration_schemas: vec![schema.clone()],
+                }),
+            },
+            UpsertTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            UpsertTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventEditor(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(event_id.to_string())),
+            },
+        };
+
+        let mut schema_store = MockRegistrationSchemaStore::new();
+        let mut permission_store = MockPermissionStore::new();
+
+        {
+            let schema = schema.clone();
+            schema_store
+                .expect_upsert()
+                .with(eq(vec![schema.clone()]))
+                .returning(move |_| {
+                    let schema = schema.clone();
+                    Box::pin(async move { Ok(vec![schema]) })
+                });
+        }
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(schema_store), Arc::new(permission_store));
+
+        let mut request = Request::new(UpsertRegistrationSchemasRequest {
+            registration_schemas: vec![schema],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service
+            .upsert_registration_schemas(request)
+            .await
+            .map(|r| r.into_inner());
+
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

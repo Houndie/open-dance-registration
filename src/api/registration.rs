@@ -24,9 +24,14 @@ pub struct Service<StoreType: Store, PermissionStoreType: PermissionStore> {
     permission_store: Arc<PermissionStoreType>,
 }
 
-impl<StoreType: Store, PermissionStoreType: PermissionStore> Service<StoreType, PermissionStoreType> {
+impl<StoreType: Store, PermissionStoreType: PermissionStore>
+    Service<StoreType, PermissionStoreType>
+{
     pub fn new(store: Arc<StoreType>, permission_store: Arc<PermissionStoreType>) -> Self {
-        Service { store, permission_store }
+        Service {
+            store,
+            permission_store,
+        }
     }
 }
 
@@ -171,7 +176,8 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
         }
 
         // Check if user has EventEditor permission for all registrations
-        let required_permissions = upsert_permissions(&claims_context.claims.sub, &request_registrations);
+        let required_permissions =
+            upsert_permissions(&claims_context.claims.sub, &request_registrations);
 
         let failed_permissions = self
             .permission_store
@@ -210,7 +216,7 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
-            
+
         // Check permissions for all registrations returned by the query
         let required_permissions = query_permissions(&claims_context.claims.sub, &registrations);
 
@@ -257,7 +263,8 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
         let registration_ids = request.ids;
 
         // Check if user has EventEditor permission for all registrations to be deleted
-        let required_permissions = delete_permissions(&claims_context.claims.sub, &registration_ids);
+        let required_permissions =
+            delete_permissions(&claims_context.claims.sub, &registration_ids);
 
         let failed_permissions = self
             .permission_store
@@ -283,10 +290,9 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            permission_role, registration_service_server::RegistrationService,
-            DeleteRegistrationsRequest, DeleteRegistrationsResponse, EventRole, Permission, 
-            PermissionRole, QueryRegistrationsRequest, QueryRegistrationsResponse, Registration,
-            UpsertRegistrationsRequest, UpsertRegistrationsResponse,
+            permission_role, registration_service_server::RegistrationService, EventRole,
+            Permission, PermissionRole, Registration, RegistrationItem, UpsertRegistrationsRequest,
+            UpsertRegistrationsResponse,
         },
         store::{
             permission::MockStore as MockPermissionStore,
@@ -319,11 +325,15 @@ mod tests {
         let user_id = "user_id";
         let event_id = "event_id";
 
+        let registration_item = RegistrationItem {
+            schema_item_id: "schema_item_id".to_string(),
+            value: "value".to_string(),
+        };
+
         let registration = Registration {
             id: "".to_string(),
             event_id: event_id.to_string(),
-            registrant_id: "registrant_id".to_string(),
-            responses: vec![],
+            items: vec![registration_item],
         };
 
         let mut returned_registration = registration.clone();

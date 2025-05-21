@@ -5,6 +5,7 @@ use crate::{
         Bindable as _, Error, Queryable as _,
     },
 };
+use mockall::automock;
 use sqlx::SqlitePool;
 use std::{collections::HashMap, future::Future, iter, sync::Arc};
 
@@ -132,14 +133,15 @@ impl SqliteStore {
 type QueryBuilder<'q> =
     sqlx::query::Query<'q, sqlx::Sqlite, <sqlx::Sqlite as sqlx::Database>::Arguments<'q>>;
 
+#[automock]
 pub trait Store: Send + Sync + 'static {
     fn upsert(
         &self,
         registrations: Vec<Registration>,
     ) -> impl Future<Output = Result<Vec<Registration>, Error>> + Send;
-    fn query(
+    fn query<'a>(
         &self,
-        query: Option<&Query>,
+        query: Option<&'a Query>,
     ) -> impl Future<Output = Result<Vec<Registration>, Error>> + Send;
     fn delete(&self, ids: &[String]) -> impl Future<Output = Result<(), Error>> + Send;
 }

@@ -237,8 +237,13 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
         &self,
         request: Request<QueryRegistrationSchemasRequest>,
     ) -> Result<Response<QueryRegistrationSchemasResponse>, Status> {
-        let query = request
-            .into_inner()
+        let (_, extensions, query_request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let query = query_request
             .query
             .map(|q| -> Result<_, ValidationError> { try_parse_registration_schema_query(q) })
             .transpose()?;
@@ -248,8 +253,37 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
+            
+        // Check permissions for all schemas returned by the query
+        let required_permissions = query_permissions(&claims_context.claims.sub, &registration_schemas);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        // Create a set of event IDs that the user doesn't have permission to view
+        let hidden_events = failed_permissions
+            .into_iter()
+            .filter_map(|permission| {
+                if let Some(role) = &permission.role {
+                    if let Some(permission_role::Role::EventViewer(event_role)) = &role.role {
+                        return Some(event_role.event_id.clone());
+                    }
+                }
+                None
+            })
+            .collect::<HashSet<_>>();
+
+        // Filter schemas to only include those the user has permission to view
+        let filtered_schemas = registration_schemas
+            .into_iter()
+            .filter(|schema| !hidden_events.contains(&schema.event_id))
+            .collect::<Vec<_>>();
+
         Ok(Response::new(QueryRegistrationSchemasResponse {
-            registration_schemas,
+            registration_schemas: filtered_schemas,
         }))
     }
 

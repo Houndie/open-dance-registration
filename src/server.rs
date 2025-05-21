@@ -75,7 +75,10 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 
     let schema_service = Arc::new(SchemaService::new(schema_store, permission_store.clone()));
 
-    let registration_service = Arc::new(RegistrationService::new(registration_store));
+    let registration_service = Arc::new(RegistrationService::new(
+        registration_store,
+        permission_store.clone(),
+    ));
 
     let organization_service = Arc::new(OrganizationService::new(
         organization_store,

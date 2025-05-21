@@ -1,5 +1,9 @@
 use crate::{
-    api::{common::try_logical_string_query, store_error_to_status, ValidationError},
+    api::{
+        authorization_state_to_status, common::try_logical_string_query,
+        err_missing_claims_context, middleware::authentication::ClaimsContext,
+        store_error_to_status, ValidationError,
+    },
     proto::{
         self, compound_registration_query, permission_role, registration_query,
         DeleteRegistrationsRequest, DeleteRegistrationsResponse, EventRole, Permission,
@@ -7,20 +11,22 @@ use crate::{
         RegistrationQuery, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
     },
     store::{
+        permission::Store as PermissionStore,
         registration::{Query, Store},
         CompoundOperator, CompoundQuery,
     },
 };
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use tonic::{Request, Response, Status};
 
-pub struct Service<StoreType: Store> {
+pub struct Service<StoreType: Store, PermissionStoreType: PermissionStore> {
     store: Arc<StoreType>,
+    permission_store: Arc<PermissionStoreType>,
 }
 
-impl<StoreType: Store> Service<StoreType> {
-    pub fn new(store: Arc<StoreType>) -> Self {
-        Service { store }
+impl<StoreType: Store, PermissionStoreType: PermissionStore> Service<StoreType, PermissionStoreType> {
+    pub fn new(store: Arc<StoreType>, permission_store: Arc<PermissionStoreType>) -> Self {
+        Service { store, permission_store }
     }
 }
 
@@ -70,17 +76,17 @@ fn try_parse_registration_query(query: RegistrationQuery) -> Result<Query, Valid
     }
 }
 
-fn upsert_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission> {
-    schemas
+fn upsert_permissions(user_id: &str, registrations: &[Registration]) -> Vec<Permission> {
+    registrations
         .iter()
-        .flat_map(|schema| {
+        .flat_map(|registration| {
             vec![
                 Permission {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
                         role: Some(permission_role::Role::EventEditor(EventRole {
-                            event_id: schema.event_id.clone(),
+                            event_id: registration.event_id.clone(),
                         })),
                     }),
                 },
@@ -89,7 +95,7 @@ fn upsert_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
                         role: Some(permission_role::Role::EventViewer(EventRole {
-                            event_id: schema.event_id.clone(),
+                            event_id: registration.event_id.clone(),
                         })),
                     }),
                 },
@@ -98,32 +104,32 @@ fn upsert_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission
         .collect::<Vec<_>>()
 }
 
-fn query_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission> {
-    schemas
+fn query_permissions(user_id: &str, registrations: &[Registration]) -> Vec<Permission> {
+    registrations
         .iter()
-        .map(|schema| Permission {
+        .map(|registration| Permission {
             id: "".to_string(),
             user_id: user_id.to_string(),
             role: Some(PermissionRole {
                 role: Some(permission_role::Role::EventViewer(EventRole {
-                    event_id: schema.event_id.clone(),
+                    event_id: registration.event_id.clone(),
                 })),
             }),
         })
         .collect::<Vec<_>>()
 }
 
-fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
-    schema_ids
+fn delete_permissions(user_id: &str, registration_ids: &[String]) -> Vec<Permission> {
+    registration_ids
         .iter()
-        .flat_map(|schema_id| {
+        .flat_map(|registration_id| {
             vec![
                 Permission {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
                         role: Some(permission_role::Role::EventEditor(EventRole {
-                            event_id: schema_id.clone(),
+                            event_id: registration_id.clone(),
                         })),
                     }),
                 },
@@ -132,7 +138,7 @@ fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
                         role: Some(permission_role::Role::EventViewer(EventRole {
-                            event_id: schema_id.clone(),
+                            event_id: registration_id.clone(),
                         })),
                     }),
                 },
@@ -142,20 +148,38 @@ fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
 }
 
 #[tonic::async_trait]
-impl<StoreType: Store> proto::registration_service_server::RegistrationService
-    for Service<StoreType>
+impl<StoreType: Store, PermissionStoreType: PermissionStore>
+    proto::registration_service_server::RegistrationService
+    for Service<StoreType, PermissionStoreType>
 {
     async fn upsert_registrations(
         &self,
         request: Request<UpsertRegistrationsRequest>,
     ) -> Result<Response<UpsertRegistrationsResponse>, Status> {
-        let request_registrations = request.into_inner().registrations;
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let request_registrations = request.registrations;
 
         for (idx, registration) in request_registrations.iter().enumerate() {
             validate_registration(registration).map_err(|e| -> Status {
                 e.with_context(&format!("registrations[{}]", idx)).into()
             })?;
         }
+
+        // Check if user has EventEditor permission for all registrations
+        let required_permissions = upsert_permissions(&claims_context.claims.sub, &request_registrations);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
 
         let registrations = self
             .store
@@ -170,9 +194,14 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
         &self,
         request: Request<QueryRegistrationsRequest>,
     ) -> Result<Response<QueryRegistrationsResponse>, Status> {
-        let query = request.into_inner().query;
+        let (_, extensions, query_request) = request.into_parts();
 
-        let query = query
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let query = query_request
+            .query
             .map(|query| try_parse_registration_query(query))
             .transpose()?;
 
@@ -181,16 +210,65 @@ impl<StoreType: Store> proto::registration_service_server::RegistrationService
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
+            
+        // Check permissions for all registrations returned by the query
+        let required_permissions = query_permissions(&claims_context.claims.sub, &registrations);
 
-        Ok(Response::new(QueryRegistrationsResponse { registrations }))
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        // Create a set of event IDs that the user doesn't have permission to view
+        let hidden_events = failed_permissions
+            .into_iter()
+            .filter_map(|permission| {
+                if let Some(role) = &permission.role {
+                    if let Some(permission_role::Role::EventViewer(event_role)) = &role.role {
+                        return Some(event_role.event_id.clone());
+                    }
+                }
+                None
+            })
+            .collect::<HashSet<_>>();
+
+        // Filter registrations to only include those the user has permission to view
+        let filtered_registrations = registrations
+            .into_iter()
+            .filter(|registration| !hidden_events.contains(&registration.event_id))
+            .collect::<Vec<_>>();
+
+        Ok(Response::new(QueryRegistrationsResponse {
+            registrations: filtered_registrations,
+        }))
     }
 
     async fn delete_registrations(
         &self,
         request: Request<DeleteRegistrationsRequest>,
     ) -> Result<Response<DeleteRegistrationsResponse>, Status> {
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let registration_ids = request.ids;
+
+        // Check if user has EventEditor permission for all registrations to be deleted
+        let required_permissions = delete_permissions(&claims_context.claims.sub, &registration_ids);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
+
         self.store
-            .delete(&request.into_inner().ids)
+            .delete(&registration_ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 

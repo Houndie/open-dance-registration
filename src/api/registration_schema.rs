@@ -355,7 +355,8 @@ mod tests {
         authentication::Claims,
         proto::{
             permission_role, registration_schema_item_type,
-            registration_schema_service_server::RegistrationSchemaService, text_type, EventRole,
+            registration_schema_service_server::RegistrationSchemaService, text_type,
+            DeleteRegistrationSchemasRequest, DeleteRegistrationSchemasResponse, EventRole,
             Permission, PermissionRole, QueryRegistrationSchemasRequest, RegistrationSchema,
             RegistrationSchemaItem, RegistrationSchemaItemType, TextType,
             UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
@@ -611,5 +612,125 @@ mod tests {
         let response = service.query_registration_schemas(request).await.unwrap();
 
         assert_eq!(response.into_inner().registration_schemas, tc.result);
+    }
+    
+    enum DeleteTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(DeleteTest::Success; "success")]
+    #[test_case(DeleteTest::PermissionDenied; "permission_denied")]
+    #[test_case(DeleteTest::NotFound; "not_found")]
+    #[tokio::test]
+    async fn delete(test_name: DeleteTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<DeleteRegistrationSchemasResponse, Status>,
+        }
+
+        let schema_id = "schema_id";
+        let user_id = "user_id";
+
+        let tc = match test_name {
+            DeleteTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(DeleteRegistrationSchemasResponse::default()),
+            },
+            DeleteTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: schema_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            DeleteTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventEditor(EventRole {
+                                event_id: schema_id.to_string(),
+                            })),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(EventRole {
+                                event_id: schema_id.to_string(),
+                            })),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(schema_id.to_string())),
+            },
+        };
+
+        let mut schema_store = MockRegistrationSchemaStore::new();
+        let mut permission_store = MockPermissionStore::new();
+
+        schema_store
+            .expect_delete()
+            .with(eq(vec![schema_id.to_string()]))
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: schema_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: schema_id.to_string(),
+                        })),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(schema_store), Arc::new(permission_store));
+
+        let mut request = Request::new(DeleteRegistrationSchemasRequest {
+            ids: vec![schema_id.to_string()],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service
+            .delete_registration_schemas(request)
+            .await
+            .map(|r| r.into_inner());
+
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

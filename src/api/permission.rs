@@ -133,7 +133,7 @@ fn try_parse_query(query: PermissionQuery) -> Result<Query, ValidationError> {
 fn required_permissions(user_id: &str, permissions: &[Permission]) -> Vec<Permission> {
     permissions
         .iter()
-        .map(|p| match p.role.as_ref().unwrap().role.as_ref().unwrap() {
+        .flat_map(|p| match p.role.as_ref().unwrap().role.as_ref().unwrap() {
             permission_role::Role::ServerAdmin(_) => vec![Permission {
                 id: "".to_string(),
                 user_id: user_id.to_string(),
@@ -181,7 +181,6 @@ fn required_permissions(user_id: &str, permissions: &[Permission]) -> Vec<Permis
                 ]
             }
         })
-        .flatten()
         .collect::<Vec<_>>()
 }
 

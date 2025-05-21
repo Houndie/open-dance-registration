@@ -613,7 +613,7 @@ mod tests {
 
         assert_eq!(response.into_inner().registration_schemas, tc.result);
     }
-    
+
     enum DeleteTest {
         Success,
         PermissionDenied,
@@ -643,7 +643,7 @@ mod tests {
                     id: "".to_string(),
                     user_id: user_id.to_string(),
                     role: Some(PermissionRole {
-                        role: Some(permission_role::Role::EventViewer(EventRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
                             event_id: schema_id.to_string(),
                         })),
                     }),

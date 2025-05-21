@@ -75,7 +75,7 @@ fn try_parse_event_query(query: EventQuery) -> Result<Query, ValidationError> {
 fn upsert_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
     events
         .iter()
-        .map(|event| {
+        .flat_map(|event| {
             if event.id.is_empty() {
                 // New event - needs organization-level permissions
                 vec![
@@ -126,7 +126,6 @@ fn upsert_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
                 ]
             }
         })
-        .flatten()
         .collect::<Vec<_>>()
 }
 
@@ -148,14 +147,27 @@ fn query_permissions(user_id: &str, events: &[Event]) -> Vec<Permission> {
 fn delete_permissions(user_id: &str, event_ids: &[String]) -> Vec<Permission> {
     event_ids
         .iter()
-        .map(|event_id| Permission {
-            id: "".to_string(),
-            user_id: user_id.to_string(),
-            role: Some(PermissionRole {
-                role: Some(permission_role::Role::EventAdmin(EventRole {
-                    event_id: event_id.clone(),
-                })),
-            }),
+        .flat_map(|event_id| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventAdmin(EventRole {
+                            event_id: event_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.clone(),
+                        })),
+                    }),
+                },
+            ]
         })
         .collect::<Vec<_>>()
 }
@@ -596,15 +608,26 @@ mod tests {
 
         permission_store
             .expect_permission_check()
-            .with(eq(vec![Permission {
-                id: "".to_string(),
-                user_id: user_id.to_string(),
-                role: Some(PermissionRole {
-                    role: Some(permission_role::Role::EventAdmin(EventRole {
-                        event_id: event_id.to_string(),
-                    })),
-                }),
-            }]))
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventAdmin(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+            ]))
             .returning(move |_| {
                 let missing_permissions = tc.missing_permissions.clone();
                 Box::pin(async move { Ok(missing_permissions) })

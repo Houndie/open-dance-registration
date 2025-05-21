@@ -77,7 +77,7 @@ fn admin_or_viewer_permissions<OrgIter: IntoIterator<Item = String>>(
 ) -> Vec<Permission> {
     org_ids
         .into_iter()
-        .map(|org_id| {
+        .flat_map(|org_id| {
             vec![
                 Permission {
                     id: "".to_string(),
@@ -101,14 +101,13 @@ fn admin_or_viewer_permissions<OrgIter: IntoIterator<Item = String>>(
                 },
             ]
         })
-        .flatten()
         .collect()
 }
 
 fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
     org_ids
         .iter()
-        .map(|org_id| {
+        .flat_map(|org_id| {
             vec![
                 Permission {
                     id: "".to_string(),
@@ -132,7 +131,6 @@ fn delete_permissions(user_id: &str, org_ids: &[String]) -> Vec<Permission> {
                 },
             ]
         })
-        .flatten()
         .collect()
 }
 

@@ -290,9 +290,9 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            permission_role, registration_service_server::RegistrationService, EventRole,
-            Permission, PermissionRole, QueryRegistrationsRequest, Registration, RegistrationItem,
-            UpsertRegistrationsRequest, UpsertRegistrationsResponse,
+            permission_role, registration_service_server::RegistrationService, DeleteRegistrationsRequest,
+            DeleteRegistrationsResponse, EventRole, Permission, PermissionRole, QueryRegistrationsRequest, 
+            Registration, RegistrationItem, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
         },
         store::{
             permission::MockStore as MockPermissionStore,
@@ -531,5 +531,123 @@ mod tests {
         let response = service.query_registrations(request).await.unwrap();
 
         assert_eq!(response.into_inner().registrations, tc.result);
+    }
+
+    enum DeleteTest {
+        Success,
+        PermissionDenied,
+        NotFound,
+    }
+
+    #[test_case(DeleteTest::Success; "success")]
+    #[test_case(DeleteTest::PermissionDenied; "permission_denied")]
+    #[test_case(DeleteTest::NotFound; "not_found")]
+    #[tokio::test]
+    async fn delete(test_name: DeleteTest) {
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Result<DeleteRegistrationsResponse, Status>,
+        }
+
+        let registration_id = "registration_id";
+        let user_id = "user_id";
+        let event_id = "event_id";
+
+        let tc = match test_name {
+            DeleteTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: Ok(DeleteRegistrationsResponse::default()),
+            },
+            DeleteTest::PermissionDenied => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: Err(Status::permission_denied("")),
+            },
+            DeleteTest::NotFound => TestCase {
+                missing_permissions: vec![
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventEditor(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                    Permission {
+                        id: "".to_string(),
+                        user_id: user_id.to_string(),
+                        role: Some(PermissionRole {
+                            role: Some(permission_role::Role::EventViewer(EventRole {
+                                event_id: event_id.to_string(),
+                            })),
+                        }),
+                    },
+                ],
+                result: Err(Status::not_found(event_id.to_string())),
+            },
+        };
+
+        let mut registration_store = MockRegistrationStore::new();
+        let mut permission_store = MockPermissionStore::new();
+
+        registration_store
+            .expect_delete()
+            .with(eq(vec![event_id.to_string()]))
+            .returning(|_| Box::pin(async { Ok(()) }));
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                },
+            ]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(registration_store), Arc::new(permission_store));
+
+        let mut request = Request::new(DeleteRegistrationsRequest {
+            ids: vec![event_id.to_string()],
+        });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.delete_registrations(request).await.map(|r| r.into_inner());
+
+        assert_eq!(
+            response.map_err(StatusCompare::new),
+            tc.result.map_err(StatusCompare::new)
+        );
     }
 }

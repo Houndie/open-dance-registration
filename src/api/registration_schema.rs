@@ -147,7 +147,7 @@ fn try_parse_registration_schema_query(
 fn upsert_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Permission> {
     schemas
         .iter()
-        .map(|schema| {
+        .flat_map(|schema| {
             vec![
                 Permission {
                     id: "".to_string(),
@@ -169,7 +169,6 @@ fn upsert_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Perm
                 },
             ]
         })
-        .flatten()
         .collect::<Vec<_>>()
 }
 
@@ -191,14 +190,27 @@ fn query_permissions(user_id: &str, schemas: &[RegistrationSchema]) -> Vec<Permi
 fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
     schema_ids
         .iter()
-        .map(|schema_id| Permission {
-            id: "".to_string(),
-            user_id: user_id.to_string(),
-            role: Some(PermissionRole {
-                role: Some(permission_role::Role::EventEditor(EventRole {
-                    event_id: schema_id.clone(),
-                })),
-            }),
+        .flat_map(|schema_id| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: schema_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: schema_id.clone(),
+                        })),
+                    }),
+                },
+            ]
         })
         .collect::<Vec<_>>()
 }
@@ -268,9 +280,10 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
             .query(query.as_ref())
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
-            
+
         // Check permissions for all schemas returned by the query
-        let required_permissions = query_permissions(&claims_context.claims.sub, &registration_schemas);
+        let required_permissions =
+            query_permissions(&claims_context.claims.sub, &registration_schemas);
 
         let failed_permissions = self
             .permission_store
@@ -306,8 +319,27 @@ impl<StoreType: Store, PermissionStoreType: PermissionStore>
         &self,
         request: Request<proto::DeleteRegistrationSchemasRequest>,
     ) -> Result<Response<DeleteRegistrationSchemasResponse>, Status> {
+        let (_, extensions, request) = request.into_parts();
+
+        let claims_context = extensions
+            .get::<ClaimsContext>()
+            .ok_or_else(err_missing_claims_context)?;
+
+        let schema_ids = request.ids;
+
+        // Check if user has EventEditor permission for all schemas to be deleted
+        let required_permissions = delete_permissions(&claims_context.claims.sub, &schema_ids);
+
+        let failed_permissions = self
+            .permission_store
+            .permission_check(required_permissions)
+            .await
+            .map_err(store_error_to_status)?;
+
+        authorization_state_to_status(failed_permissions)?;
+
         self.store
-            .delete(&request.into_inner().ids)
+            .delete(&schema_ids)
             .await
             .map_err(|e| -> Status { store_error_to_status(e) })?;
 
@@ -322,9 +354,10 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            permission_role, registration_schema_item_type, registration_schema_service_server::RegistrationSchemaService,
-            text_type, EventRole, Permission, PermissionRole, QueryRegistrationSchemasRequest,
-            RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, TextType,
+            permission_role, registration_schema_item_type,
+            registration_schema_service_server::RegistrationSchemaService, text_type, EventRole,
+            Permission, PermissionRole, QueryRegistrationSchemasRequest, RegistrationSchema,
+            RegistrationSchemaItem, RegistrationSchemaItemType, TextType,
             UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
         },
         store::{

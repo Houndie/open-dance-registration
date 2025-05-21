@@ -307,11 +307,10 @@ mod tests {
         api::middleware::authentication::ClaimsContext,
         authentication::Claims,
         proto::{
-            permission_role, registration_schema_item_type,
-            registration_schema_service_server::RegistrationSchemaService as _, text_type,
-            EventRole, Permission, PermissionRole, RegistrationSchema, RegistrationSchemaItem,
-            RegistrationSchemaItemType, TextType, UpsertRegistrationSchemasRequest,
-            UpsertRegistrationSchemasResponse,
+            permission_role, registration_schema_item_type, registration_schema_service_server::RegistrationSchemaService,
+            text_type, EventRole, Permission, PermissionRole, QueryRegistrationSchemasRequest,
+            RegistrationSchema, RegistrationSchemaItem, RegistrationSchemaItemType, TextType,
+            UpsertRegistrationSchemasRequest, UpsertRegistrationSchemasResponse,
         },
         store::{
             permission::MockStore as MockPermissionStore,
@@ -469,5 +468,100 @@ mod tests {
             response.map_err(StatusCompare::new),
             tc.result.map_err(StatusCompare::new)
         );
+    }
+
+    enum QueryTest {
+        Success,
+        Filtered,
+    }
+
+    #[test_case(QueryTest::Success; "success")]
+    #[test_case(QueryTest::Filtered; "filtered")]
+    #[tokio::test]
+    async fn query(test_name: QueryTest) {
+        let event_id = "event_id";
+        let user_id = "user_id";
+        let item_id = "item_id";
+
+        let text_type = TextType {
+            default: "".to_string(),
+            display: text_type::Display::Small as i32,
+        };
+
+        let schema_item = RegistrationSchemaItem {
+            id: item_id.to_string(),
+            name: "Test field".to_string(),
+            r#type: Some(RegistrationSchemaItemType {
+                r#type: Some(registration_schema_item_type::Type::Text(text_type)),
+            }),
+        };
+
+        let schema = RegistrationSchema {
+            event_id: event_id.to_string(),
+            items: vec![schema_item],
+        };
+
+        struct TestCase {
+            missing_permissions: Vec<Permission>,
+            result: Vec<RegistrationSchema>,
+        }
+
+        let tc = match test_name {
+            QueryTest::Success => TestCase {
+                missing_permissions: vec![],
+                result: vec![schema.clone()],
+            },
+            QueryTest::Filtered => TestCase {
+                missing_permissions: vec![Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: event_id.to_string(),
+                        })),
+                    }),
+                }],
+                result: vec![],
+            },
+        };
+
+        let mut permission_store = MockPermissionStore::new();
+        let mut schema_store = MockRegistrationSchemaStore::new();
+
+        schema_store.expect_query().returning(move |_| {
+            let schema = schema.clone();
+            Box::pin(async move { Ok(vec![schema]) })
+        });
+
+        permission_store
+            .expect_permission_check()
+            .with(eq(vec![Permission {
+                id: "".to_string(),
+                user_id: user_id.to_string(),
+                role: Some(PermissionRole {
+                    role: Some(permission_role::Role::EventViewer(EventRole {
+                        event_id: event_id.to_string(),
+                    })),
+                }),
+            }]))
+            .returning(move |_| {
+                let missing_permissions = tc.missing_permissions.clone();
+                Box::pin(async move { Ok(missing_permissions) })
+            });
+
+        let service = Service::new(Arc::new(schema_store), Arc::new(permission_store));
+
+        let mut request = Request::new(QueryRegistrationSchemasRequest { query: None });
+
+        request.extensions_mut().insert(ClaimsContext {
+            claims: Claims {
+                sub: user_id.to_string(),
+                ..Default::default()
+            },
+        });
+
+        let response = service.query_registration_schemas(request).await.unwrap();
+
+        assert_eq!(response.into_inner().registration_schemas, tc.result);
     }
 }

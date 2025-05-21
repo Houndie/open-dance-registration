@@ -1,9 +1,10 @@
 use crate::{
     api::{common::try_logical_string_query, store_error_to_status, ValidationError},
     proto::{
-        self, compound_registration_query, registration_query, DeleteRegistrationsRequest,
-        DeleteRegistrationsResponse, QueryRegistrationsRequest, QueryRegistrationsResponse,
-        Registration, RegistrationQuery, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
+        self, compound_registration_query, permission_role, registration_query,
+        DeleteRegistrationsRequest, DeleteRegistrationsResponse, EventRole, Permission,
+        PermissionRole, QueryRegistrationsRequest, QueryRegistrationsResponse, Registration,
+        RegistrationQuery, UpsertRegistrationsRequest, UpsertRegistrationsResponse,
     },
     store::{
         registration::{Query, Store},
@@ -67,6 +68,77 @@ fn try_parse_registration_query(query: RegistrationQuery) -> Result<Query, Valid
         }
         None => Err(ValidationError::new_empty("query")),
     }
+}
+
+fn upsert_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission> {
+    schemas
+        .iter()
+        .flat_map(|schema| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: schema.event_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: schema.event_id.clone(),
+                        })),
+                    }),
+                },
+            ]
+        })
+        .collect::<Vec<_>>()
+}
+
+fn query_permissions(user_id: &str, schemas: &[Registration]) -> Vec<Permission> {
+    schemas
+        .iter()
+        .map(|schema| Permission {
+            id: "".to_string(),
+            user_id: user_id.to_string(),
+            role: Some(PermissionRole {
+                role: Some(permission_role::Role::EventViewer(EventRole {
+                    event_id: schema.event_id.clone(),
+                })),
+            }),
+        })
+        .collect::<Vec<_>>()
+}
+
+fn delete_permissions(user_id: &str, schema_ids: &[String]) -> Vec<Permission> {
+    schema_ids
+        .iter()
+        .flat_map(|schema_id| {
+            vec![
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventEditor(EventRole {
+                            event_id: schema_id.clone(),
+                        })),
+                    }),
+                },
+                Permission {
+                    id: "".to_string(),
+                    user_id: user_id.to_string(),
+                    role: Some(PermissionRole {
+                        role: Some(permission_role::Role::EventViewer(EventRole {
+                            event_id: schema_id.clone(),
+                        })),
+                    }),
+                },
+            ]
+        })
+        .collect::<Vec<_>>()
 }
 
 #[tonic::async_trait]
